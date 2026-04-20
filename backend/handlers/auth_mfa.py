@@ -303,6 +303,9 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     sub = user.get("Attrs", {}).get("sub", "")
     phone = user.get("Attrs", {}).get("phone_number") or None
 
+    # Create the session but DON'T send a code yet — the user will pick
+    # email or SMS, and /send-code will deliver it. This avoids sending
+    # the customer a useless email when they wanted SMS.
     code = _new_code()
     code_hash = _hash_code(code)
     session_id = _new_session_id()
@@ -312,13 +315,9 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
         sub=sub,
         code_hash=code_hash,
         tokens=tokens,
-        channel="email",
+        channel="pending",
         phone=phone,
     )
-
-    if not _send_email(email, code):
-        # Don't fail the whole flow — let the client try resend or pick SMS.
-        log.warning("Default email send failed for %s; client may resend", _mask_email(email))
 
     channels = [{"key": "email", "label": "Email", "target": _mask_email(email)}]
     if phone:
@@ -327,7 +326,7 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     return _resp(200, {
         "mfaSession": session_id,
         "channels": channels,
-        "deliveredTo": "email",
+        "deliveredTo": None,   # none yet — client must call /send-code
         "expiresInSec": CODE_TTL,
     })
 

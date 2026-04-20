@@ -383,10 +383,8 @@ credForm.addEventListener('submit', async (e) => {
     mfaState = r;
     renderChannels(r.channels || [], r.deliveredTo);
     showStep('channel');
-    // Auto-advance straight to code entry if there's only one channel.
-    if ((r.channels || []).length === 1) {
-      moveToCodeEntry(r.channels[0].key);
-    }
+    // Always show the channel picker — never auto-advance — so customers
+    // always see the explicit choice (and realize email was used as default).
   } catch (err) {
     if (err.code === 'UserNotConfirmedException') {
       sessionStorage.setItem('cif_pending_email', email);
