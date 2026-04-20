@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>My Account · Cash in Flash</title>
+  <link rel="icon" type="image/png" href="/images/favicon-source.png">
+  <link rel="apple-touch-icon" href="/images/favicon-source.png">
+  <link rel="stylesheet" href="/css/portal.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body class="dashboard-page">
+
+  <!-- Portal header (mirrors cif-website site-header) -->
+  <header class="site-header" id="site-header">
+    <div class="header-inner container">
+      <a href="/dashboard.html" class="logo">
+        <img src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="200" height="26">
+      </a>
+
+      <nav class="main-nav" id="main-nav" aria-label="Account">
+        <ul class="nav-list">
+          <li class="nav-item"><a href="/dashboard.html" class="is-active">Dashboard</a></li>
+          <li class="nav-item"><a href="/loans.html">My Loans</a></li>
+          <li class="nav-item"><a href="/documents.html">Documents</a></li>
+          <li class="nav-item"><a href="/payments.html">Payments</a></li>
+        </ul>
+      </nav>
+
+      <div class="header-actions">
+        <span class="user-chip" id="userChip">Welcome</span>
+        <button id="signOutBtn" class="btn-login" type="button">Sign out</button>
+      </div>
+
+      <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+
+    <div class="mobile-menu" id="mobile-menu">
+      <div class="mobile-menu-inner">
+        <div class="mobile-menu-header">
+          <a href="/dashboard.html" class="mobile-menu-logo">
+            <img src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="180" height="23">
+          </a>
+          <button class="mobile-menu-close" id="mobile-menu-close" aria-label="Close menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <ul class="mobile-nav-list">
+          <li class="mobile-nav-item"><a href="/dashboard.html">Dashboard</a></li>
+          <li class="mobile-nav-item"><a href="/loans.html">My Loans</a></li>
+          <li class="mobile-nav-item"><a href="/documents.html">Documents</a></li>
+          <li class="mobile-nav-item"><a href="/payments.html">Payments</a></li>
+        </ul>
+        <div class="mobile-menu-extra">
+          <div class="mobile-btn-row">
+            <button id="signOutBtnMobile" class="btn-login" type="button">Sign out</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mobile-menu-overlay" id="mobile-overlay"></div>
+  </header>
+
+  <!-- Welcome hero with floating blobs -->
+  <section class="dash-hero">
+    <div class="dash-hero-blob dash-hero-blob-1" aria-hidden="true"></div>
+    <div class="dash-hero-blob dash-hero-blob-2" aria-hidden="true"></div>
+    <div class="container dash-hero-inner">
+      <p class="dash-eyebrow">My account</p>
+      <h1 class="dash-title" id="welcomeHeading">Welcome back.</h1>
+      <p class="dash-sub">Here's a quick look at your loan with Cash in Flash.</p>
+    </div>
+  </section>
+
+  <main class="container dash-main">
+
+    <!-- Active loan hero card -->
+    <section class="dash-card dash-loan-card" id="activeLoanCard" aria-busy="true" aria-labelledby="loanCardHeading">
+      <div class="dash-card-skeleton">
+        <div class="skeleton-line w-40"></div>
+        <div class="skeleton-line w-70 tall"></div>
+        <div class="skeleton-row">
+          <div class="skeleton-line w-30"></div>
+          <div class="skeleton-line w-30"></div>
+          <div class="skeleton-line w-30"></div>
+        </div>
+      </div>
+      <div class="dash-loan-body" hidden>
+        <div class="dash-loan-eyebrow">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+          <span id="loanCardHeading">Active loan</span>
+          <span class="dash-pill dash-pill--ok" data-loan-status>Current</span>
+        </div>
+        <p class="dash-loan-amount"><small>$</small><span data-loan-balance>0</span></p>
+        <p class="dash-loan-caption" data-loan-caption>Current balance remaining on your loan.</p>
+        <div class="dash-loan-stats">
+          <div>
+            <div class="dash-loan-stat-label">Original amount</div>
+            <div class="dash-loan-stat-value" data-loan-principal>&mdash;</div>
+          </div>
+          <div>
+            <div class="dash-loan-stat-label">Next payment</div>
+            <div class="dash-loan-stat-value" data-loan-next-due>&mdash;</div>
+          </div>
+          <div>
+            <div class="dash-loan-stat-label">Amount due</div>
+            <div class="dash-loan-stat-value" data-loan-next-amount>&mdash;</div>
+          </div>
+        </div>
+        <div class="dash-loan-cta-row">
+          <a href="/payments.html#new" class="btn-apply">Make a payment</a>
+          <a href="/loans.html" class="btn-login">View loan details</a>
+        </div>
+      </div>
+      <div class="dash-loan-empty" hidden>
+        <div class="dash-loan-empty-icon" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </div>
+        <h3>No active loan right now</h3>
+        <p>Ready when you are. Returning customers get a fast-tracked decision.</p>
+        <a href="/request-loan.html" class="btn-apply">Request a new loan</a>
+      </div>
+    </section>
+
+    <!-- Quick actions -->
+    <section class="dash-actions" aria-label="Quick actions">
+      <a href="/payments.html#new" class="dash-action">
+        <span class="dash-action-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        </span>
+        <span class="dash-action-label">
+          <strong>Make a payment</strong>
+          <small>Pay on your loan securely</small>
+        </span>
+      </a>
+      <a href="/documents.html" class="dash-action">
+        <span class="dash-action-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+        </span>
+        <span class="dash-action-label">
+          <strong>View documents</strong>
+          <small>Agreements and receipts</small>
+        </span>
+      </a>
+      <a href="/request-loan.html" class="dash-action">
+        <span class="dash-action-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        </span>
+        <span class="dash-action-label">
+          <strong>Request a new loan</strong>
+          <small>Fast-track for returning customers</small>
+        </span>
+      </a>
+    </section>
+
+    <!-- Recent activity -->
+    <section class="dash-card dash-activity" aria-labelledby="activityHeading">
+      <div class="dash-card-head">
+        <h2 id="activityHeading">Recent activity</h2>
+        <a href="/payments.html" class="dash-card-link">See all</a>
+      </div>
+      <div class="dash-activity-body" id="activityBody">
+        <div class="dash-card-skeleton">
+          <div class="skeleton-row">
+            <div class="skeleton-line w-60"></div>
+            <div class="skeleton-line w-20"></div>
+          </div>
+          <div class="skeleton-row">
+            <div class="skeleton-line w-60"></div>
+            <div class="skeleton-line w-20"></div>
+          </div>
+          <div class="skeleton-row">
+            <div class="skeleton-line w-60"></div>
+            <div class="skeleton-line w-20"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Help strip -->
+    <section class="dash-help">
+      <div class="dash-help-inner">
+        <div>
+          <h3>Need help with your account?</h3>
+          <p>Our California-based team is happy to assist during business hours.</p>
+        </div>
+        <div class="dash-help-actions">
+          <a href="tel:+18188005227" class="btn-apply">Call (818) 800-5227</a>
+          <a href="https://cashinflash.com/contact/" class="btn-login">Contact us</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="dash-footer">
+    <div class="container dash-footer-inner">
+      <p>&copy; <span id="footerYear"></span> Cash in Flash. Licensed by the California Department of Financial Protection and Innovation.</p>
+      <ul class="dash-footer-links">
+        <li><a href="https://cashinflash.com/privacy/">Privacy</a></li>
+        <li><a href="https://cashinflash.com/terms/">Terms</a></li>
+        <li><a href="https://cashinflash.com/accessibility/">Accessibility</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>

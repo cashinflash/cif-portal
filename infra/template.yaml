@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Cash in Flash — customer portal API (Round 19B).
+  Adds the `loans` Lambda + two HttpApi routes backing the dashboard.
+  This template is a PARTIAL — the full production stack (`cif-portal-dev`)
+  was authored in prior rounds and its source was lost. The next session
+  should either (a) recover the full template via
+  `aws cloudformation get-template --stack-name cif-portal-dev` and merge
+  this section in, or (b) treat this as a nested / additive stack.
+
+Parameters:
+  StackEnv:
+    Type: String
+    Default: dev
+  VergentBaseUrl:
+    Type: String
+    Default: https://prod.apim.vergentlms.com/external/shared
+  VergentSecretArn:
+    Type: String
+    Description: Secrets Manager ARN holding { xApiKey, logonName, password }
+  # Reference existing HttpApi + JWT authorizer created by the base stack.
+  HttpApiId:
+    Type: String
+    Description: Id of the existing cif-portal HttpApi.
+  JwtAuthorizerId:
+    Type: String
+    Description: Id of the Cognito JWT authorizer attached to HttpApiId.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 256
+    Timeout: 15
+    Tracing: Active
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+
+  LoansFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub cif-portal-loans-${StackEnv}
+      CodeUri: ../backend/
+      Handler: handlers.loans.lambda_handler
+      Environment:
+        Variables:
+          VERGENT_BASE_URL: !Ref VergentBaseUrl
+          VERGENT_SECRET_ARN: !Ref VergentSecretArn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref VergentSecretArn
+      Events:
+        ActiveLoan:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/my-loans/active
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        Activity:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/my-loans/activity
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+
+Outputs:
+  LoansFnArn:
+    Value: !GetAtt LoansFn.Arn
+    Export:
+      Name: !Sub cif-portal-${StackEnv}-LoansFnArn

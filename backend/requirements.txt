@@ -1,0 +1,2 @@
+# Runtime dependencies for loans.py are all in the Lambda Python 3.12 stdlib
+# (urllib) or provided by the AWS runtime (boto3). Intentionally empty.
