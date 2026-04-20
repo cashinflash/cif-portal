@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Request a new loan · Cash in Flash</title>
+  <link rel="icon" type="image/png" href="/images/favicon.png">
+  <link rel="stylesheet" href="/css/portal.css">
+  <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body class="dashboard-page">
+
+  <header class="site-header" id="site-header">
+    <div class="header-inner container">
+      <a href="/dashboard.html" class="logo">
+        <img src="/images/logo.png" alt="Cash in Flash" width="200" height="26">
+      </a>
+      <nav class="main-nav" aria-label="Account">
+        <ul class="nav-list">
+          <li class="nav-item"><a href="/dashboard.html">Dashboard</a></li>
+          <li class="nav-item"><a href="/loans.html">My Loans</a></li>
+          <li class="nav-item"><a href="/documents.html">Documents</a></li>
+          <li class="nav-item"><a href="/payments.html">Payments</a></li>
+        </ul>
+      </nav>
+      <div class="header-actions">
+        <span class="user-chip" id="userChip">Welcome</span>
+        <button id="signOutBtn" class="btn-login" type="button">Sign out</button>
+      </div>
+      <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <section class="dash-hero">
+    <div class="dash-hero-blob dash-hero-blob-1" aria-hidden="true"></div>
+    <div class="dash-hero-blob dash-hero-blob-2" aria-hidden="true"></div>
+    <div class="container dash-hero-inner">
+      <p class="dash-eyebrow">Returning customer</p>
+      <h1 class="dash-title" id="requestHeading">Ready for another loan? We've got you.</h1>
+      <p class="dash-sub">Since you're already a customer, we'll pre-fill your info and fast-track your decision. Starts a new application in our secure portal.</p>
+    </div>
+  </section>
+
+  <main class="container dash-main">
+    <section class="dash-card">
+      <div class="dash-card-head">
+        <h2>Start a new loan application</h2>
+      </div>
+      <div style="padding: 20px 0;">
+        <p style="color:#333; font-size:1rem; margin-bottom:20px;">Click the button below and we'll hand you off to our secure application portal with your identity already loaded. No re-entering details.</p>
+        <button type="button" class="btn-apply btn-lg" data-action="new-loan" id="startBtn" style="min-width: 220px;">Start application</button>
+        <p style="color:#6b7280; font-size:.85rem; margin-top:16px;">You'll be redirected to <strong>cashinflash.apply.vergentlms.com</strong> — our California-licensed loan servicing portal.</p>
+      </div>
+    </section>
+
+    <section class="dash-help">
+      <div class="dash-help-inner">
+        <div>
+          <h3>Prefer to apply in person?</h3>
+          <p>Walk into any Cash in Flash store. Returning customers usually get approved in under 15 minutes.</p>
+        </div>
+        <div class="dash-help-actions">
+          <a href="https://cashinflash.com/locations/" class="btn-apply">Find a store</a>
+          <a href="tel:+18188005227" class="btn-login">Call us</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="dash-footer">
+    <div class="container dash-footer-inner">
+      <p>&copy; <span id="footerYear"></span> Cash in Flash. Licensed by the California Department of Financial Protection and Innovation.</p>
+    </div>
+  </footer>
+
+  <script src="/js/portal-page.js"></script>
+</body>
+</html>

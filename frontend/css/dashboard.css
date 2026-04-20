@@ -582,6 +582,10 @@
   border-radius: 999px;
   font-weight: 600;
 }
+.dash-profile-source--bad {
+  color: #c0392b;
+  background: rgba(192,57,43,.10);
+}
 .dash-profile-body {
   display: grid;
   grid-template-columns: 88px 1fr;

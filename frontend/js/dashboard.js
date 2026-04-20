@@ -109,12 +109,14 @@
 
     wireSignOut();
     wireMobileMenu();
-    renderProfileFromClaims();
+    wireNewLoanButton();
+    renderProfileFromClaims();   // instant render from JWT claims
+    loadProfileFromApi();         // hydrate with Vergent data (account status, phone hint, text-messaging flag)
     loadActiveLoan();
     loadActivity();
   });
 
-  // ---------- Profile card (Cognito-only for now; Vergent layer added once /Customer/Profile unblocks) ----------
+  // ---------- Profile card ----------
   function renderProfileFromClaims() {
     const root = document.querySelector('.dash-profile');
     if (!root) return;
@@ -142,11 +144,72 @@
       const row = qs('#profilePhoneRow');
       if (row) row.hidden = false;
     }
+  }
 
-    if (claims.auth_time) {
-      // auth_time is the current sign-in time, not signup. Leave hidden until /Customer/Profile gives us createdDate.
-      // Kept here so the row appears the moment Vergent data arrives.
-    }
+  function loadProfileFromApi() {
+    api('/api/my-profile', token)
+      .then(function (data) {
+        if (!data) return;
+
+        // Phone hint from Vergent (e.g. "•••-•••-8388"). Only show if Cognito has no phone.
+        if (!claims.phone_number && data.vergentPhoneHint) {
+          setText(qs('#profilePhone'), data.vergentPhoneHint);
+          const row = qs('#profilePhoneRow');
+          if (row) row.hidden = false;
+        }
+
+        // Account status pill
+        const src = qs('#profileSource');
+        if (src && data.statusName) {
+          src.textContent = 'Account: ' + data.statusName;
+          src.hidden = false;
+          src.classList.remove('dash-profile-source--bad');
+          if ((data.statusName || '').toLowerCase() !== 'good') {
+            src.classList.add('dash-profile-source--bad');
+          }
+        }
+
+        // "Set up security questions" nudge — replaces the edit-profile hint
+        // when the customer hasn't set them yet.
+        const hint = qs('#profileHint');
+        if (hint && data.isSecurityQuestionsSetup === false) {
+          hint.innerHTML = 'Security questions not set. <a href="/forgot.html">Set them up</a> for easier password recovery.';
+        } else if (hint) {
+          hint.textContent = 'Profile editing unlocks once Vergent enables our portal sync.';
+        }
+      })
+      .catch(function () { /* non-critical — profile already has Cognito data */ });
+  }
+
+  // ---------- Request a new loan: hand off to Vergent apply portal ----------
+  function wireNewLoanButton() {
+    // Convert any <a href="/request-loan.html"> into handoff triggers.
+    qsa('a[href="/request-loan.html"], a[href="/request-loan.html#new"], [data-action="new-loan"]').forEach(function (a) {
+      a.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        const orig = a.textContent;
+        a.style.pointerEvents = 'none';
+        a.textContent = 'Starting…';
+        fetch('/api/my-loan/new', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+        }).then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data && data.url) {
+              window.location.href = data.url;
+              return;
+            }
+            a.textContent = orig;
+            a.style.pointerEvents = '';
+            alert('Could not start a new loan request. Please try again or call (818) 800-5227.');
+          })
+          .catch(function () {
+            a.textContent = orig;
+            a.style.pointerEvents = '';
+            alert('Network error. Please try again.');
+          });
+      });
+    });
   }
 
   function formatPhone(raw) {

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Reset your password — Cash in Flash</title>
+<link rel="stylesheet" href="/css/cif-brand.css">
+<link rel="stylesheet" href="/css/portal.css">
+<style>
+  .forgot-steps { margin-top: 8px; }
+  .forgot-note { color: #6b7280; font-size: .88rem; margin-top: 10px; }
+  .forgot-success { color: #0a6e35; background: rgba(14,135,65,.08); padding: 12px 14px; border-radius: 10px; font-weight: 600; margin: 12px 0; }
+  .pw-requirements { color: #6b7280; font-size: .82rem; margin-top: -8px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="https://cashinflash.com" class="logo">
+      <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="160" height="21">
+    </a>
+    <nav class="main-nav"><ul class="nav-list"></ul></nav>
+    <div class="header-actions">
+      <a href="/login.html" class="btn-login">Back to sign in</a>
+    </div>
+  </div>
+</header>
+
+<main class="gate">
+  <span class="gate-blob gate-blob-1"></span>
+  <span class="gate-blob gate-blob-2"></span>
+  <div class="gate-inner">
+    <div class="gate-card">
+      <h1 class="page-title">Reset your password</h1>
+      <p class="page-sub" id="gateSub">Enter the email on your account. We'll send you a 6-digit code.</p>
+
+      <!-- Step 1: request code -->
+      <form id="requestForm" class="forgot-steps">
+        <div class="form-field">
+          <label>Email</label>
+          <input type="email" name="email" id="emailInput" required autocomplete="email">
+        </div>
+        <div id="requestErr" class="form-error" style="display:none;"></div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="requestBtn">Send reset code</button>
+      </form>
+
+      <!-- Step 2: enter code + new password -->
+      <form id="confirmForm" class="forgot-steps" style="display:none;">
+        <div id="confirmSuccess" class="forgot-success" style="display:none;">Code sent! Check your email.</div>
+        <div class="form-field">
+          <label>6-digit code</label>
+          <input type="text" name="code" id="codeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required style="font-size:1.2rem; letter-spacing:.4em; text-align:center;">
+        </div>
+        <div class="form-field">
+          <label>New password</label>
+          <input type="password" name="newPassword" id="newPwInput" minlength="8" required autocomplete="new-password">
+        </div>
+        <p class="pw-requirements">At least 8 characters with upper, lower, number, and symbol.</p>
+        <div id="confirmErr" class="form-error" style="display:none;"></div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="confirmBtn">Set new password</button>
+        <p class="forgot-note"><button type="button" class="link-button" id="resendBtn">Resend code</button></p>
+      </form>
+
+      <!-- Step 3: done -->
+      <div id="doneStep" style="display:none;">
+        <div class="forgot-success">Your password has been updated.</div>
+        <a href="/login.html" class="btn btn-primary btn-block btn-lg">Sign in with new password</a>
+      </div>
+    </div>
+
+    <div class="secure-strip">
+      <span class="secure">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        Secure area
+      </span>
+    </div>
+  </div>
+</main>
+
+<script src="/js/portal.js"></script>
+<script>
+(function () {
+  'use strict';
+  var requestForm = document.getElementById('requestForm');
+  var confirmForm = document.getElementById('confirmForm');
+  var doneStep    = document.getElementById('doneStep');
+  var requestBtn  = document.getElementById('requestBtn');
+  var confirmBtn  = document.getElementById('confirmBtn');
+  var resendBtn   = document.getElementById('resendBtn');
+  var emailInput  = document.getElementById('emailInput');
+  var codeInput   = document.getElementById('codeInput');
+  var newPwInput  = document.getElementById('newPwInput');
+  var requestErr  = document.getElementById('requestErr');
+  var confirmErr  = document.getElementById('confirmErr');
+  var success     = document.getElementById('confirmSuccess');
+  var gateSub     = document.getElementById('gateSub');
+
+  // Thin wrappers around Cognito's unsigned API.
+  function cognito(target, body) {
+    return fetch('https://cognito-idp.us-east-1.amazonaws.com/', {
+      method: 'POST',
+      headers: {
+        'X-Amz-Target': 'AWSCognitoIdentityProviderService.' + target,
+        'Content-Type': 'application/x-amz-json-1.1'
+      },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) {
+          var err = new Error(data.message || data.Message || r.statusText);
+          err.code = (data.__type || '').split('#').pop() || r.statusText;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  function humanizeErr(err) {
+    var map = {
+      UserNotFoundException:   "We can't find an account with that email.",
+      LimitExceededException:  'Too many attempts. Wait a few minutes and try again.',
+      CodeMismatchException:   'That code is incorrect. Double-check your email.',
+      ExpiredCodeException:    'This code expired. Tap "Resend code" to get a new one.',
+      InvalidPasswordException:'Password must have upper, lower, number, and symbol (8+ chars).',
+      InvalidParameterException:'Please check your input and try again.',
+    };
+    return map[err.code] || err.message || 'Something went wrong. Please try again.';
+  }
+
+  var pendingEmail = '';
+
+  requestForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    requestErr.style.display = 'none';
+    var email = emailInput.value.trim().toLowerCase();
+    if (!email) return;
+    requestBtn.disabled = true;
+    requestBtn.textContent = 'Sending…';
+    cognito('ForgotPassword', { ClientId: '1mddi61n19hftaldt9t3r622b', Username: email })
+      .then(function (data) {
+        pendingEmail = email;
+        var dest = (data.CodeDeliveryDetails && data.CodeDeliveryDetails.Destination) || 'your email';
+        gateSub.textContent = 'We sent a 6-digit code to ' + dest + '. Enter it below with your new password.';
+        success.style.display = 'block';
+        requestForm.style.display = 'none';
+        confirmForm.style.display = 'block';
+        setTimeout(function () { codeInput.focus(); }, 50);
+      })
+      .catch(function (err) {
+        requestErr.textContent = humanizeErr(err);
+        requestErr.style.display = 'block';
+      })
+      .finally(function () {
+        requestBtn.disabled = false;
+        requestBtn.textContent = 'Send reset code';
+      });
+  });
+
+  confirmForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    confirmErr.style.display = 'none';
+    var code = codeInput.value.trim();
+    var pw = newPwInput.value;
+    if (!/^\d{6}$/.test(code)) {
+      confirmErr.textContent = 'Please enter the 6-digit code.';
+      confirmErr.style.display = 'block';
+      return;
+    }
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Updating…';
+    cognito('ConfirmForgotPassword', {
+      ClientId: '1mddi61n19hftaldt9t3r622b',
+      Username: pendingEmail,
+      ConfirmationCode: code,
+      Password: pw,
+    })
+      .then(function () {
+        confirmForm.style.display = 'none';
+        doneStep.style.display = 'block';
+        gateSub.textContent = 'All set.';
+      })
+      .catch(function (err) {
+        confirmErr.textContent = humanizeErr(err);
+        confirmErr.style.display = 'block';
+      })
+      .finally(function () {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Set new password';
+      });
+  });
+
+  resendBtn.addEventListener('click', function () {
+    if (!pendingEmail) return;
+    resendBtn.disabled = true;
+    var orig = resendBtn.textContent;
+    resendBtn.textContent = 'Sending…';
+    cognito('ForgotPassword', { ClientId: '1mddi61n19hftaldt9t3r622b', Username: pendingEmail })
+      .then(function () {
+        resendBtn.textContent = 'Code resent';
+        setTimeout(function () { resendBtn.textContent = orig; resendBtn.disabled = false; }, 3000);
+      })
+      .catch(function (err) {
+        resendBtn.textContent = orig;
+        resendBtn.disabled = false;
+        confirmErr.textContent = humanizeErr(err);
+        confirmErr.style.display = 'block';
+      });
+  });
+})();
+</script>
+
+</body>
+</html>
