@@ -438,8 +438,8 @@ def _send_email(to: str, code: str) -> bool:
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:24px 12px;">
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
-        <tr><td align="center" style="background:#1e3a2f;padding:44px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/white_logo_350.png" alt="Cash in Flash" width="210" style="display:block;max-width:210px;width:210px;height:auto;border:0;">
+        <tr><td align="center" style="background:#1e3a2f;padding:40px 24px;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark.png" alt="Cash in Flash" width="76" height="80" style="display:block;width:76px;height:80px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 40px 20px;">
           <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your sign-in code is: {code}</h1>
