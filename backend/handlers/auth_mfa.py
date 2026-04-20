@@ -53,6 +53,8 @@ from typing import Any, Dict, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
+from handlers import twilio_sms  # SMS delivery (bundled next to this handler)
+
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
@@ -246,39 +248,9 @@ def _get_vergent_phone(customer_id: str) -> Optional[str]:
     return digits if len(digits) >= 10 else None
 
 
-def _vergent_sms_request_pin(phone_digits: str) -> Tuple[bool, str]:
-    """Ask Vergent to generate + send a PIN via SMS. Returns (ok, message)."""
-    tok = _get_apim_token()
-    if not tok:
-        return False, "apim_auth_failed"
-    creds = _get_vergent_creds() or {}
-    status, body, raw = _http(
-        f"{APIM_BASE}/api/Communication/RequestPinByText", "POST",
-        body={"phoneNumber": phone_digits, "type": 0, "groupType": 0},
-        headers={"x-api-key": creds.get("xApiKey", ""), "Authorization": f"Bearer {tok}"},
-    )
-    if status != 200 or not isinstance(body, dict):
-        log.warning("RequestPinByText status=%s body=%s", status, (raw or "")[:200])
-        return False, f"vergent_error_{status}"
-    if body.get("result") is True:
-        return True, "ok"
-    return False, body.get("message") or "vergent_declined"
-
-
-def _vergent_sms_verify_pin(phone_digits: str, pin: str) -> bool:
-    tok = _get_apim_token()
-    if not tok:
-        return False
-    creds = _get_vergent_creds() or {}
-    status, body, raw = _http(
-        f"{APIM_BASE}/api/Communication/VerifyPin", "POST",
-        body={"phoneNumber": phone_digits, "pin": pin, "type": 0, "groupType": 0},
-        headers={"x-api-key": creds.get("xApiKey", ""), "Authorization": f"Bearer {tok}"},
-    )
-    if status != 200 or not isinstance(body, dict):
-        log.warning("VerifyPin status=%s body=%s", status, (raw or "")[:200])
-        return False
-    return bool(body.get("result") is True)
+# (Vergent SMS helpers removed — Communication/RequestPinByText returned
+# SKIP for every combination we tried. SMS now goes through Twilio, see
+# handlers/twilio_sms.py.)
 
 
 # ─────────────────────────────────────────
@@ -377,21 +349,6 @@ def _arm_our_code(session_id: str, code_hash: str, channel: str) -> None:
             ":c": {"S": code_hash},
             ":m": {"S": "our_code"},
             ":ch": {"S": channel},
-            ":z": {"N": "0"},
-            ":e": {"N": str(now + CODE_TTL)},
-        },
-    )
-
-
-def _arm_vergent_pin(session_id: str) -> None:
-    now = int(time.time())
-    ddb.update_item(
-        TableName=TABLE, Key={"sessionId": {"S": session_id}},
-        UpdateExpression="SET #m = :m, #ch = :ch, attempts = :z, expiresAt = :e REMOVE codeHash",
-        ExpressionAttributeNames={"#m": "mode", "#ch": "channel"},
-        ExpressionAttributeValues={
-            ":m": {"S": "vergent_pin"},
-            ":ch": {"S": "sms"},
             ":z": {"N": "0"},
             ":e": {"N": str(now + CODE_TTL)},
         },
@@ -514,10 +471,11 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     channels = [{"key": "email", "label": "Email", "target": _mask_email(email)}]
-    # SMS is temporarily disabled — Vergent's Communication/RequestPinByText endpoint
-    # returns SKIP for generic OTP (it's only wired for marketing opt-in flows).
-    # Will re-enable once we stand up Twilio or get SNS production access.
-    if phone_digits and os.environ.get("MFA_SMS_ENABLED") == "1":
+    # SMS delivery goes through Twilio using the Vergent-on-file phone.
+    # We surface the SMS option whenever we have a phone — if Twilio creds
+    # aren't yet configured, /send-code returns a clean delivery_failed_sms
+    # rather than hiding the option entirely.
+    if phone_digits:
         channels.append({"key": "sms", "label": "Text message", "target": _mask_phone(phone_digits)})
 
     return _resp(200, {
@@ -546,15 +504,20 @@ def _send_code(event: Dict[str, Any]) -> Dict[str, Any]:
             return _resp(502, {"error": "delivery_failed_email"})
         return _resp(200, {"ok": True, "channel": "email", "expiresInSec": CODE_TTL})
 
-    # channel == sms
+    # channel == sms — Twilio delivery, our own 6-digit code (sha256-stored).
     phone = s.get("phone")
     if not phone:
         return _resp(400, {"error": "no_phone_on_file"})
-    ok, msg = _vergent_sms_request_pin(phone)
+    code = _new_code()
+    _arm_our_code(session_id, _hash_code(code), channel="sms")
+    body_text = (
+        f"Your Cash in Flash sign-in code is {code}. "
+        f"Expires in 5 minutes. Never share this code."
+    )
+    ok, detail = twilio_sms.send(to=phone, body=body_text)
     if not ok:
-        log.warning("vergent sms request failed: %s", msg)
-        return _resp(502, {"error": "delivery_failed_sms", "detail": msg})
-    _arm_vergent_pin(session_id)
+        log.warning("twilio send failed: %s", detail)
+        return _resp(502, {"error": "delivery_failed_sms", "detail": detail})
     return _resp(200, {"ok": True, "channel": "sms", "expiresInSec": CODE_TTL})
 
 
@@ -570,15 +533,10 @@ def _verify_code(event: Dict[str, Any]) -> Dict[str, Any]:
         return _resp(401, {"error": "session_expired"})
 
     mode = s.get("mode")
-    ok = False
-    if mode == "our_code":
-        ok = hmac.compare_digest(_hash_code(code), s.get("codeHash") or "")
-    elif mode == "vergent_pin":
-        phone = s.get("phone") or ""
-        ok = _vergent_sms_verify_pin(phone, code)
-    else:
-        # Code never sent — session armed but nothing to verify.
+    if mode not in ("our_code",):
+        # Session exists but /send-code wasn't called yet.
         return _resp(400, {"error": "no_code_sent"})
+    ok = hmac.compare_digest(_hash_code(code), s.get("codeHash") or "")
 
     if not ok:
         attempts = s["attempts"] + 1
