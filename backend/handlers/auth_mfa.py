@@ -486,7 +486,10 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     channels = [{"key": "email", "label": "Email", "target": _mask_email(email)}]
-    if phone_digits:
+    # SMS is temporarily disabled — Vergent's Communication/RequestPinByText endpoint
+    # returns SKIP for generic OTP (it's only wired for marketing opt-in flows).
+    # Will re-enable once we stand up Twilio or get SNS production access.
+    if phone_digits and os.environ.get("MFA_SMS_ENABLED") == "1":
         channels.append({"key": "sms", "label": "Text message", "target": _mask_phone(phone_digits)})
 
     return _resp(200, {

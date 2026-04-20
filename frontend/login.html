@@ -310,6 +310,13 @@ channelBack.addEventListener('click', () => {
 });
 
 changeChBtn.addEventListener('click', () => {
+  // Re-enable the channel buttons so the user can actually pick again.
+  channelOpts.querySelectorAll('button').forEach((b) => (b.disabled = false));
+  // Also re-render so any "Code sent" pill moves to the new deliveredTo.
+  if (mfaState) {
+    renderChannels(mfaState.channels || [], mfaState.deliveredTo);
+  }
+  channelErr.style.display = 'none';
   showStep('channel');
 });
 
