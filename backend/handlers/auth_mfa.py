@@ -1,47 +1,41 @@
 """
-Server-side MFA login flow.
+Server-side MFA login flow (email via SES, SMS via Vergent).
 
-Three routes (no JWT auth — these ARE the auth endpoints):
+Routes (no JWT auth — these ARE the auth endpoints):
   POST /api/auth/login        {email, password}
-  POST /api/auth/send-code    {mfaSession, channel}
+  POST /api/auth/send-code    {mfaSession, channel}   channel = "email" | "sms"
   POST /api/auth/verify-code  {mfaSession, code}
 
-Flow:
-  1. Client POSTs /login with email+password.
-  2. Lambda calls AdminInitiateAuth(ADMIN_USER_PASSWORD_AUTH).
-     - On success it gets Cognito tokens but DOES NOT return them to the client.
-     - It generates a 6-digit code, stores {tokens, code_hash, attempts, channel}
-       in DynamoDB (cif-portal-mfa-sessions-dev) keyed by a random sessionId,
-       with a 5-minute TTL.
-     - It sends the code via the user's verified email by default.
-     - Returns {mfaSession, channels:[{key,label,target}], expiresInSec}.
-  3. Client renders the channel-pick UI. If user picks SMS, client calls
-     /send-code with the new channel — Lambda regenerates the code and
-     sends it via SNS Publish to the user's phone_number attribute.
-  4. Client renders code-entry UI. User submits → /verify-code.
-     Lambda compares (constant-time), and on match returns the Cognito
-     tokens that were stashed at step 2. The frontend stores them in
-     sessionStorage exactly the same way the old USER_PASSWORD_AUTH flow did.
+Delivery channels:
+  email  -> SES SendEmail with a 6-digit code we generate ourselves
+  sms    -> Vergent POST /api/Communication/RequestPinByText
+            (Vergent generates + delivers; we verify via /VerifyPin)
+  This sidesteps SNS sandbox and reuses the SMS pipeline Vergent already
+  uses to text customers about payment reminders etc.
 
-Security model:
-  - Cognito tokens never leave the Lambda environment until MFA passes.
-  - Code stored only as sha256(code).
-  - 3 wrong attempts → session deleted, client must re-login.
-  - 5-minute TTL enforced both in DynamoDB and in the handler.
-  - The MFA session id is a 256-bit secret; effectively unguessable.
+Session state (DynamoDB, 5-min TTL):
+  - For our own code (email): we store sha256(code) in `codeHash` and
+    compare on verify.
+  - For Vergent PIN (sms): we don't store the code; verification calls
+    Vergent /api/Communication/VerifyPin with the submitted pin.
+
+Cognito tokens live in DDB until the user enters the right code, so
+MFA cannot be bypassed by hitting Cognito directly.
 
 Environment:
   COGNITO_USER_POOL_ID       us-east-1_U508xOs95
   COGNITO_APP_CLIENT_ID      1mddi61n19hftaldt9t3r622b
   MFA_SESSION_TABLE          cif-portal-mfa-sessions-dev
-  MFA_EMAIL_SENDER           verified SES sender (e.g. lhdcapital@gmail.com today)
-  MFA_CODE_TTL_SECS          default 300
+  MFA_EMAIL_SENDER           verified SES sender
+  MFA_CODE_TTL_SECS          300
+  VERGENT_V1_BASE_URL        https://shared.vergentlms.com/api/api
+  VERGENT_APIM_BASE_URL      https://prod.apim.vergentlms.com/external/shared
+  VERGENT_SECRET_ARN         arn:...cif-portal/vergent/credentials
 
-IAM:
-  cognito-idp:AdminInitiateAuth, AdminGetUser on the pool
-  dynamodb:PutItem, GetItem, DeleteItem on the MFA sessions table
-  ses:SendEmail (any verified sender)
-  sns:Publish (any phone — sandbox lifted prereq for prod)
+IAM: cognito AdminInitiateAuth/AdminGetUser on the pool,
+     dynamodb read/write on the session table,
+     ses SendEmail,
+     secretsmanager GetSecretValue on the Vergent secret.
 """
 from __future__ import annotations
 
@@ -52,6 +46,8 @@ import logging
 import os
 import secrets
 import time
+import urllib.error
+import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
 import boto3
@@ -67,10 +63,22 @@ EMAIL_SENDER = os.environ.get("MFA_EMAIL_SENDER", "lhdcapital@gmail.com")
 CODE_TTL = int(os.environ.get("MFA_CODE_TTL_SECS", "300"))
 MAX_ATTEMPTS = 3
 
+V1_BASE = os.environ.get("VERGENT_V1_BASE_URL", "https://shared.vergentlms.com/api/api").rstrip("/")
+APIM_BASE = os.environ.get("VERGENT_APIM_BASE_URL", "https://prod.apim.vergentlms.com/external/shared").rstrip("/")
+VERGENT_SECRET_ARN = os.environ.get("VERGENT_SECRET_ARN", "")
+
 cognito = boto3.client("cognito-idp")
 ddb = boto3.client("dynamodb")
 ses = boto3.client("ses")
-sns = boto3.client("sns")
+_secrets = boto3.client("secretsmanager")
+
+# Service-token caches across warm invocations.
+_creds_cache: Optional[Dict[str, str]] = None
+_v1_token: Optional[str] = None
+_v1_token_exp: float = 0.0
+_apim_token: Optional[str] = None
+_apim_token_exp: float = 0.0
+TOKEN_TTL = 60 * 60
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
@@ -104,7 +112,6 @@ def _hash_code(code: str) -> str:
 
 
 def _new_code() -> str:
-    # Six digits, leading zeros allowed.
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
@@ -121,25 +128,172 @@ def _mask_email(email: str) -> str:
     return f"{name[:2]}***{name[-1]}@{domain}"
 
 
-def _mask_phone(phone: str) -> str:
-    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+def _mask_phone(digits: str) -> str:
+    digits = "".join(c for c in (digits or "") if c.isdigit())
     if len(digits) >= 4:
-        return f"***-***-{digits[-4:]}"
+        return f"•••-•••-{digits[-4:]}"
     return ""
 
 
+def _get_vergent_creds() -> Optional[Dict[str, str]]:
+    global _creds_cache
+    if _creds_cache:
+        return _creds_cache
+    if not VERGENT_SECRET_ARN:
+        return None
+    try:
+        resp = _secrets.get_secret_value(SecretId=VERGENT_SECRET_ARN)
+    except ClientError as e:
+        log.warning("vergent secret read failed: %s", e.response.get("Error", {}).get("Code"))
+        return None
+    p = json.loads(resp["SecretString"])
+    _creds_cache = {"logonName": p["logonName"], "password": p["password"], "xApiKey": p["xApiKey"]}
+    return _creds_cache
+
+
+def _http(url: str, method: str = "GET", body: Optional[Dict[str, Any]] = None,
+          headers: Optional[Dict[str, str]] = None, timeout: int = 10) -> Tuple[int, Optional[Any], str]:
+    h = {"Accept": "application/json", "User-Agent": "cif-portal/1.0"}
+    if headers:
+        h.update(headers)
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        h["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, method=method, headers=h, data=data)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", "replace") or ""
+            parsed = None
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, str) and parsed.strip()[:1] in ("{", "["):
+                        parsed = json.loads(parsed)
+                except json.JSONDecodeError:
+                    parsed = None
+            return r.status, parsed, raw
+    except urllib.error.HTTPError as e:
+        try:
+            raw = e.read().decode("utf-8", "replace")
+        except Exception:
+            raw = ""
+        log.warning("vergent %s %s -> %s: %s", method, url, e.code, raw[:200])
+        return e.code, None, raw
+    except Exception as exc:
+        log.error("vergent %s %s network: %s", method, url, exc)
+        return 0, None, ""
+
+
+def _get_v1_token() -> Optional[str]:
+    global _v1_token, _v1_token_exp
+    if _v1_token and _v1_token_exp > time.time():
+        return _v1_token
+    creds = _get_vergent_creds()
+    if not creds:
+        return None
+    status, body, _ = _http(
+        f"{V1_BASE}/authenticate", "POST",
+        body={"LogonName": creds["logonName"], "Password": creds["password"]},
+    )
+    if status != 200 or not isinstance(body, dict):
+        return None
+    tok = body.get("Token")
+    if tok:
+        _v1_token = tok
+        _v1_token_exp = time.time() + TOKEN_TTL
+    return tok
+
+
+def _get_apim_token() -> Optional[str]:
+    global _apim_token, _apim_token_exp
+    if _apim_token and _apim_token_exp > time.time():
+        return _apim_token
+    creds = _get_vergent_creds()
+    if not creds:
+        return None
+    status, body, _ = _http(
+        f"{APIM_BASE}/api/authenticate", "POST",
+        body={"userName": creds["logonName"], "password": creds["password"]},
+        headers={"x-api-key": creds["xApiKey"]},
+    )
+    if status != 200 or not isinstance(body, dict):
+        return None
+    tok = body.get("auth_token")
+    if tok:
+        _apim_token = tok
+        _apim_token_exp = time.time() + TOKEN_TTL
+    return tok
+
+
+def _get_vergent_phone(customer_id: str) -> Optional[str]:
+    """Pull primary phone digits from Vergent v1 GetCustomerData."""
+    tok = _get_v1_token()
+    if not tok:
+        return None
+    status, body, _ = _http(
+        f"{V1_BASE}/V1/GetCustomerData/{customer_id}", "GET",
+        headers={"Token": tok},
+    )
+    if status != 200 or not isinstance(body, dict):
+        return None
+    phones = body.get("custPhones") or []
+    if not isinstance(phones, list) or not phones:
+        return None
+    primary = next((p for p in phones if isinstance(p, dict) and p.get("is_primary")), phones[0])
+    raw = (primary or {}).get("number") or ""
+    digits = "".join(c for c in raw if c.isdigit())
+    return digits if len(digits) >= 10 else None
+
+
+def _vergent_sms_request_pin(phone_digits: str) -> Tuple[bool, str]:
+    """Ask Vergent to generate + send a PIN via SMS. Returns (ok, message)."""
+    tok = _get_apim_token()
+    if not tok:
+        return False, "apim_auth_failed"
+    creds = _get_vergent_creds() or {}
+    status, body, raw = _http(
+        f"{APIM_BASE}/api/Communication/RequestPinByText", "POST",
+        body={"phoneNumber": phone_digits, "type": 0, "groupType": 0},
+        headers={"x-api-key": creds.get("xApiKey", ""), "Authorization": f"Bearer {tok}"},
+    )
+    if status != 200 or not isinstance(body, dict):
+        log.warning("RequestPinByText status=%s body=%s", status, (raw or "")[:200])
+        return False, f"vergent_error_{status}"
+    if body.get("result") is True:
+        return True, "ok"
+    return False, body.get("message") or "vergent_declined"
+
+
+def _vergent_sms_verify_pin(phone_digits: str, pin: str) -> bool:
+    tok = _get_apim_token()
+    if not tok:
+        return False
+    creds = _get_vergent_creds() or {}
+    status, body, raw = _http(
+        f"{APIM_BASE}/api/Communication/VerifyPin", "POST",
+        body={"phoneNumber": phone_digits, "pin": pin, "type": 0, "groupType": 0},
+        headers={"x-api-key": creds.get("xApiKey", ""), "Authorization": f"Bearer {tok}"},
+    )
+    if status != 200 or not isinstance(body, dict):
+        log.warning("VerifyPin status=%s body=%s", status, (raw or "")[:200])
+        return False
+    return bool(body.get("result") is True)
+
+
+# ─────────────────────────────────────────
+# Cognito
+# ─────────────────────────────────────────
 def _admin_get_user(username: str) -> Dict[str, Any]:
     try:
         u = cognito.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
-    except ClientError as e:
-        log.warning("admin_get_user failed: %s", e.response.get("Error", {}).get("Code"))
+    except ClientError:
         return {}
     attrs = {a["Name"]: a["Value"] for a in u.get("UserAttributes", [])}
     return {"Username": u.get("Username"), "Attrs": attrs, "Status": u.get("UserStatus")}
 
 
 def _admin_initiate_password_auth(email: str, password: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-    """Returns (auth_result, error_code). auth_result has IdToken/AccessToken/RefreshToken."""
     try:
         r = cognito.admin_initiate_auth(
             UserPoolId=USER_POOL_ID,
@@ -151,7 +305,6 @@ def _admin_initiate_password_auth(email: str, password: str) -> Tuple[Optional[D
         return None, e.response.get("Error", {}).get("Code", "Unknown")
     ar = r.get("AuthenticationResult")
     if not ar:
-        # The pool might require challenge response we don't handle here (e.g. NEW_PASSWORD_REQUIRED).
         return None, r.get("ChallengeName") or "ChallengeRequired"
     return {
         "IdToken": ar.get("IdToken"),
@@ -161,22 +314,29 @@ def _admin_initiate_password_auth(email: str, password: str) -> Tuple[Optional[D
     }, None
 
 
-def _store_session(session_id: str, *, email: str, sub: str, code_hash: str,
-                   tokens: Dict[str, str], channel: str, phone: Optional[str]) -> None:
+# ─────────────────────────────────────────
+# Session store
+# ─────────────────────────────────────────
+def _store_session(session_id: str, *, email: str, sub: str,
+                   tokens: Dict[str, str],
+                   phone_digits: Optional[str],
+                   vergent_customer_id: Optional[str]) -> None:
     now = int(time.time())
     item = {
         "sessionId": {"S": session_id},
         "createdAt": {"N": str(now)},
         "expiresAt": {"N": str(now + CODE_TTL)},
         "email": {"S": email},
-        "sub": {"S": sub},
-        "codeHash": {"S": code_hash},
-        "channel": {"S": channel},
+        "sub": {"S": sub or ""},
+        "mode": {"S": "pending"},
+        "channel": {"S": "pending"},
         "attempts": {"N": "0"},
         "tokens": {"S": json.dumps(tokens)},
     }
-    if phone:
-        item["phone"] = {"S": phone}
+    if phone_digits:
+        item["phone"] = {"S": phone_digits}
+    if vergent_customer_id:
+        item["vergentCustomerId"] = {"S": vergent_customer_id}
     ddb.put_item(TableName=TABLE, Item=item)
 
 
@@ -195,20 +355,52 @@ def _load_session(session_id: str) -> Optional[Dict[str, Any]]:
     return {
         "sessionId": session_id,
         "email": item["email"]["S"],
-        "sub": item["sub"]["S"],
-        "codeHash": item["codeHash"]["S"],
-        "channel": item["channel"]["S"],
+        "sub": item.get("sub", {}).get("S", ""),
+        "mode": item.get("mode", {}).get("S", "pending"),
+        "channel": item.get("channel", {}).get("S", "pending"),
+        "codeHash": item.get("codeHash", {}).get("S"),
         "attempts": int(item["attempts"]["N"]),
         "tokens": json.loads(item["tokens"]["S"]),
         "phone": item.get("phone", {}).get("S"),
+        "vergentCustomerId": item.get("vergentCustomerId", {}).get("S"),
         "expiresAt": int(item["expiresAt"]["N"]),
     }
 
 
+def _arm_our_code(session_id: str, code_hash: str, channel: str) -> None:
+    now = int(time.time())
+    ddb.update_item(
+        TableName=TABLE, Key={"sessionId": {"S": session_id}},
+        UpdateExpression="SET codeHash = :c, #m = :m, #ch = :ch, attempts = :z, expiresAt = :e",
+        ExpressionAttributeNames={"#m": "mode", "#ch": "channel"},
+        ExpressionAttributeValues={
+            ":c": {"S": code_hash},
+            ":m": {"S": "our_code"},
+            ":ch": {"S": channel},
+            ":z": {"N": "0"},
+            ":e": {"N": str(now + CODE_TTL)},
+        },
+    )
+
+
+def _arm_vergent_pin(session_id: str) -> None:
+    now = int(time.time())
+    ddb.update_item(
+        TableName=TABLE, Key={"sessionId": {"S": session_id}},
+        UpdateExpression="SET #m = :m, #ch = :ch, attempts = :z, expiresAt = :e REMOVE codeHash",
+        ExpressionAttributeNames={"#m": "mode", "#ch": "channel"},
+        ExpressionAttributeValues={
+            ":m": {"S": "vergent_pin"},
+            ":ch": {"S": "sms"},
+            ":z": {"N": "0"},
+            ":e": {"N": str(now + CODE_TTL)},
+        },
+    )
+
+
 def _bump_attempts(session_id: str, attempts: int) -> None:
     ddb.update_item(
-        TableName=TABLE,
-        Key={"sessionId": {"S": session_id}},
+        TableName=TABLE, Key={"sessionId": {"S": session_id}},
         UpdateExpression="SET attempts = :a",
         ExpressionAttributeValues={":a": {"N": str(attempts)}},
     )
@@ -221,21 +413,9 @@ def _delete_session(session_id: str) -> None:
         pass
 
 
-def _rotate_code(session_id: str, code_hash: str, channel: str) -> None:
-    now = int(time.time())
-    ddb.update_item(
-        TableName=TABLE,
-        Key={"sessionId": {"S": session_id}},
-        UpdateExpression="SET codeHash = :c, channel = :ch, attempts = :z, expiresAt = :e",
-        ExpressionAttributeValues={
-            ":c": {"S": code_hash},
-            ":ch": {"S": channel},
-            ":z": {"N": "0"},
-            ":e": {"N": str(now + CODE_TTL)},
-        },
-    )
-
-
+# ─────────────────────────────────────────
+# Senders
+# ─────────────────────────────────────────
 def _send_email(to: str, code: str) -> bool:
     body_text = (
         f"Hi,\n\nYour Cash in Flash sign-in code is: {code}\n\n"
@@ -244,8 +424,10 @@ def _send_email(to: str, code: str) -> bool:
     )
     body_html = (
         f"<p>Hi,</p>"
-        f"<p>Your Cash in Flash sign-in code is: <strong style='font-size:20px;letter-spacing:2px'>{code}</strong></p>"
-        f"<p style='color:#666;font-size:14px'>This code expires in 5 minutes. If you didn't try to sign in, ignore this email.</p>"
+        f"<p>Your Cash in Flash sign-in code is: "
+        f"<strong style='font-size:22px;letter-spacing:2px;color:#0E8741'>{code}</strong></p>"
+        f"<p style='color:#666;font-size:14px'>This code expires in 5 minutes. "
+        f"If you didn't try to sign in, ignore this email.</p>"
         f"<p style='color:#0E8741;font-weight:600'>— Cash in Flash</p>"
     )
     try:
@@ -262,24 +444,8 @@ def _send_email(to: str, code: str) -> bool:
         )
         return True
     except ClientError as e:
-        log.error("SES send_email failed: %s", e.response.get("Error", {}).get("Code"))
-        return False
-
-
-def _send_sms(phone: str, code: str) -> bool:
-    msg = f"Cash in Flash sign-in code: {code}. Expires in 5 minutes."
-    try:
-        sns.publish(
-            PhoneNumber=phone,
-            Message=msg,
-            MessageAttributes={
-                "AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"},
-                "AWS.SNS.SMS.SenderID": {"DataType": "String", "StringValue": "CashFlash"},
-            },
-        )
-        return True
-    except ClientError as e:
-        log.error("SNS publish failed: %s", e.response.get("Error", {}).get("Code"))
+        err_code = e.response.get("Error", {}).get("Code")
+        log.error("SES send_email failed: %s", err_code)
         return False
 
 
@@ -295,38 +461,38 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
 
     tokens, err = _admin_initiate_password_auth(email, password)
     if not tokens:
-        # Generic message to avoid user enumeration
         log.info("login failed for %s: %s", _mask_email(email), err)
         return _resp(401, {"error": "invalid_credentials"})
 
     user = _admin_get_user(email)
     sub = user.get("Attrs", {}).get("sub", "")
-    phone = user.get("Attrs", {}).get("phone_number") or None
+    vergent_cid = user.get("Attrs", {}).get("custom:vergentCustomerId")
 
-    # Create the session but DON'T send a code yet — the user will pick
-    # email or SMS, and /send-code will deliver it. This avoids sending
-    # the customer a useless email when they wanted SMS.
-    code = _new_code()
-    code_hash = _hash_code(code)
+    # Prefer the Vergent phone (what the customer actually uses) over Cognito.
+    phone_digits = None
+    if vergent_cid:
+        phone_digits = _get_vergent_phone(vergent_cid)
+    if not phone_digits:
+        fallback = user.get("Attrs", {}).get("phone_number") or ""
+        f = "".join(c for c in fallback if c.isdigit())
+        if len(f) >= 10:
+            phone_digits = f
+
     session_id = _new_session_id()
     _store_session(
         session_id,
-        email=email,
-        sub=sub,
-        code_hash=code_hash,
-        tokens=tokens,
-        channel="pending",
-        phone=phone,
+        email=email, sub=sub, tokens=tokens,
+        phone_digits=phone_digits, vergent_customer_id=vergent_cid,
     )
 
     channels = [{"key": "email", "label": "Email", "target": _mask_email(email)}]
-    if phone:
-        channels.append({"key": "sms", "label": "Text message", "target": _mask_phone(phone)})
+    if phone_digits:
+        channels.append({"key": "sms", "label": "Text message", "target": _mask_phone(phone_digits)})
 
     return _resp(200, {
         "mfaSession": session_id,
         "channels": channels,
-        "deliveredTo": None,   # none yet — client must call /send-code
+        "deliveredTo": None,
         "expiresInSec": CODE_TTL,
     })
 
@@ -341,23 +507,24 @@ def _send_code(event: Dict[str, Any]) -> Dict[str, Any]:
     s = _load_session(session_id)
     if not s:
         return _resp(401, {"error": "session_expired"})
-    if channel == "sms" and not s.get("phone"):
+
+    if channel == "email":
+        code = _new_code()
+        _arm_our_code(session_id, _hash_code(code), channel="email")
+        if not _send_email(s["email"], code):
+            return _resp(502, {"error": "delivery_failed_email"})
+        return _resp(200, {"ok": True, "channel": "email", "expiresInSec": CODE_TTL})
+
+    # channel == sms
+    phone = s.get("phone")
+    if not phone:
         return _resp(400, {"error": "no_phone_on_file"})
-
-    code = _new_code()
-    code_hash = _hash_code(code)
-    _rotate_code(session_id, code_hash, channel)
-
-    sent = (_send_email(s["email"], code) if channel == "email"
-            else _send_sms(s["phone"], code))
-    if not sent:
-        return _resp(502, {"error": "delivery_failed"})
-
-    return _resp(200, {
-        "ok": True,
-        "channel": channel,
-        "expiresInSec": CODE_TTL,
-    })
+    ok, msg = _vergent_sms_request_pin(phone)
+    if not ok:
+        log.warning("vergent sms request failed: %s", msg)
+        return _resp(502, {"error": "delivery_failed_sms", "detail": msg})
+    _arm_vergent_pin(session_id)
+    return _resp(200, {"ok": True, "channel": "sms", "expiresInSec": CODE_TTL})
 
 
 def _verify_code(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -371,8 +538,18 @@ def _verify_code(event: Dict[str, Any]) -> Dict[str, Any]:
     if not s:
         return _resp(401, {"error": "session_expired"})
 
-    submitted_hash = _hash_code(code)
-    if not hmac.compare_digest(submitted_hash, s["codeHash"]):
+    mode = s.get("mode")
+    ok = False
+    if mode == "our_code":
+        ok = hmac.compare_digest(_hash_code(code), s.get("codeHash") or "")
+    elif mode == "vergent_pin":
+        phone = s.get("phone") or ""
+        ok = _vergent_sms_verify_pin(phone, code)
+    else:
+        # Code never sent — session armed but nothing to verify.
+        return _resp(400, {"error": "no_code_sent"})
+
+    if not ok:
         attempts = s["attempts"] + 1
         if attempts >= MAX_ATTEMPTS:
             _delete_session(session_id)

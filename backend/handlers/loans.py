@@ -336,10 +336,11 @@ def get_my_profile(event: Dict[str, Any]) -> Dict[str, Any]:
     status2, data = _v1_get(f"/V1/GetCustomerData/{cid}")
     if status2 == 200 and isinstance(data, dict):
         phones = data.get("custPhones") or []
-        if isinstance(phones, list):
+        if isinstance(phones, list) and phones:
+            # v1 returns snake_case keys: is_primary, number, type_name.
             primary_phone = next(
-                (p for p in phones if isinstance(p, dict) and p.get("IsPrimary")),
-                phones[0] if phones and isinstance(phones[0], dict) else None,
+                (p for p in phones if isinstance(p, dict) and p.get("is_primary")),
+                phones[0] if isinstance(phones[0], dict) else None,
             )
             if primary_phone:
                 profile["vergentPhoneHint"] = _mask_phone(primary_phone.get("number"))
