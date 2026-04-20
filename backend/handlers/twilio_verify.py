@@ -112,6 +112,11 @@ def start_sms(to: str) -> Tuple[bool, str]:
 
     Returns (ok, detail). detail is the verification SID on success, a short
     error string on failure.
+
+    Twilio's carrier-reachability lookup is flaky on first contact with a
+    given To number — ~10% of first sends return 21608 ("phone unreachable"),
+    and the immediate retry succeeds. We handle that silently with one
+    retry so the UI never shows a false "click twice" error.
     """
     creds = _load_creds()
     if not creds:
@@ -119,14 +124,32 @@ def start_sms(to: str) -> Tuple[bool, str]:
     to_e164 = _normalize_e164(to)
     if not to_e164:
         return False, "bad_to_number"
-    status, body, raw = _post(
-        creds, f"/Services/{creds['serviceSid']}/Verifications",
-        {"To": to_e164, "Channel": "sms"},
-    )
+
+    def _attempt():
+        return _post(
+            creds, f"/Services/{creds['serviceSid']}/Verifications",
+            {"To": to_e164, "Channel": "sms"},
+        )
+
+    status, body, _raw = _attempt()
     if status in (200, 201) and body.get("status") == "pending":
         log.info("verify start ok to=%s sid=%s", _mask(to_e164), body.get("sid", ""))
         return True, body.get("sid", "")
+
     code = body.get("code") or status
+    # Retry once on 21608 — Twilio's transient "unreachable" on first contact.
+    # Also retry on 500/502/503/504 from Twilio (rare but possible).
+    if code == 21608 or status in (500, 502, 503, 504):
+        import time as _t
+        _t.sleep(1.2)
+        status2, body2, _raw2 = _attempt()
+        if status2 in (200, 201) and body2.get("status") == "pending":
+            log.info("verify retry ok to=%s sid=%s (first attempt http=%s code=%s)",
+                     _mask(to_e164), body2.get("sid", ""), status, code)
+            return True, body2.get("sid", "")
+        code = body2.get("code") or status2
+        body = body2
+
     msg = body.get("message") or "verify_start_failed"
     log.warning("verify start failed http=%s code=%s msg=%s", status, code, msg)
     return False, f"twilio_{code}"
