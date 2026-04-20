@@ -109,9 +109,56 @@
 
     wireSignOut();
     wireMobileMenu();
+    renderProfileFromClaims();
     loadActiveLoan();
     loadActivity();
   });
+
+  // ---------- Profile card (Cognito-only for now; Vergent layer added once /Customer/Profile unblocks) ----------
+  function renderProfileFromClaims() {
+    const root = document.querySelector('.dash-profile');
+    if (!root) return;
+
+    const first = (claims.given_name || '').trim();
+    const last = (claims.family_name || '').trim();
+    const full = (first + ' ' + last).trim() || claims.email || 'Cash in Flash customer';
+    setText(qs('#profileName'), full);
+
+    const initials = (
+      (first.charAt(0) || '') +
+      (last.charAt(0) || (claims.email || 'C').charAt(0))
+    ).toUpperCase().slice(0, 2);
+    setText(qs('#profileInitials'), initials || 'CF');
+
+    setText(qs('#profileEmail'), claims.email || '—');
+    if (claims.email_verified === true || claims.email_verified === 'true') {
+      const badge = qs('#profileEmailVerified');
+      if (badge) badge.hidden = false;
+    }
+
+    const phone = claims.phone_number || '';
+    if (phone) {
+      setText(qs('#profilePhone'), formatPhone(phone));
+      const row = qs('#profilePhoneRow');
+      if (row) row.hidden = false;
+    }
+
+    if (claims.auth_time) {
+      // auth_time is the current sign-in time, not signup. Leave hidden until /Customer/Profile gives us createdDate.
+      // Kept here so the row appears the moment Vergent data arrives.
+    }
+  }
+
+  function formatPhone(raw) {
+    const digits = String(raw).replace(/\D/g, '');
+    if (digits.length === 11 && digits[0] === '1') {
+      return '(' + digits.slice(1, 4) + ') ' + digits.slice(4, 7) + '-' + digits.slice(7);
+    }
+    if (digits.length === 10) {
+      return '(' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6);
+    }
+    return raw;
+  }
 
   // ---------- Active loan ----------
   function loadActiveLoan() {

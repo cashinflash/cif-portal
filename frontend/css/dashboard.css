@@ -573,6 +573,119 @@
   .dash-loan-amount { font-size: 2rem; }
 }
 
+/* ---------- Profile card ---------- */
+.dash-profile-source {
+  font-size: .8rem;
+  color: #0E8741;
+  background: rgba(14,135,65,.08);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.dash-profile-body {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.dash-profile-avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0E8741, #0a8f3f);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  box-shadow: 0 8px 18px rgba(14,135,65,.18);
+  user-select: none;
+}
+.dash-profile-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 12px;
+}
+.dash-profile-rows {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dash-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f7faf8;
+  border-radius: 10px;
+  border: 1px solid rgba(14,135,65,.08);
+}
+.dash-profile-icon {
+  color: #0E8741;
+  flex-shrink: 0;
+}
+.dash-profile-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dash-profile-row-main small {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #6b7280;
+  font-weight: 600;
+}
+.dash-profile-row-main strong {
+  font-size: .95rem;
+  color: #1a1a2e;
+  font-weight: 600;
+  word-break: break-word;
+}
+.dash-profile-badge {
+  font-size: .72rem;
+  background: rgba(14,135,65,.12);
+  color: #0a6e35;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+}
+.dash-profile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dash-profile-actions .btn-login[disabled] {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.dash-profile-hint {
+  color: #6b7280;
+  font-size: .8rem;
+}
+
+@media (max-width: 640px) {
+  .dash-profile-body {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .dash-profile-avatar {
+    width: 64px;
+    height: 64px;
+    font-size: 1.4rem;
+  }
+}
+
 /* ---------- A11Y ---------- */
 @media (prefers-reduced-motion: reduce) {
   .dash-hero-blob, .skeleton-line { animation: none; }
