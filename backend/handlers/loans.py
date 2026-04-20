@@ -1,29 +1,40 @@
 """
-Customer Portal - Account + Loans handler.
+Customer Portal - Account + Loans handler (Vergent v1 LMS API).
 
 Routes (bound to HttpApi with Cognito JWT authorizer):
   GET  /api/my-profile       -> profile card data
-  GET  /api/my-loans/active  -> active loan (returns null until Vergent routes v1)
-  GET  /api/my-loans/activity -> recent activity (empty until v1 wired)
+  GET  /api/my-loans/active  -> active loan with balance / due date / status
+  GET  /api/my-loans/activity -> recent activity (empty until loan/transactions wired)
   POST /api/my-loan/new      -> returns handoff URL into Vergent loan-application UI
 
-Auth model (the one that works today):
-  - API Gateway Cognito JWT authorizer validates the ID token; claims land in
-    event.requestContext.authorizer.jwt.claims.
-  - We pull custom:vergentCustomerId from those claims (populated at signup
-    by Round 19A's PreSignUp trigger).
-  - Lambda authenticates as the SERVICE account against Vergent APIM once per
-    container (camelCase body, x-api-key header) and caches the auth_token
-    for ~1 hour.
-  - Calls non-CustomerPortal v2 endpoints that accept the service token
-    directly (status, handoff, RecoveryOptions). Customer-scoped v2 endpoints
-    (/Customer/Profile, /Customer/Loans/Full) are blocked until Vergent
-    enables AuthenticateCognito for our tenant.
+Auth model:
+  - API Gateway's Cognito JWT authorizer validates the ID token; claims
+    land in event.requestContext.authorizer.jwt.claims.
+  - We pull custom:vergentCustomerId from those claims (populated at
+    signup by Round 19A's PreSignUp trigger).
+  - Lambda authenticates as the SERVICE account once per container:
+        POST https://shared.vergentlms.com/api/api/authenticate
+        body:  {"LogonName": "...", "Password": "..."}  (PascalCase)
+        resp:  {"Token": "<guid>", "Timeout": 86400, "User": {...}}
+    Token cached ~1h per warm container.
+  - Every customer-data call uses the `Token: <guid>` header against
+    `https://shared.vergentlms.com/api/api/V1/...` (note the doubled
+    /api/api — basePath is /api and paths already include /api/ prefix).
 
-Security: service credentials can read any customer at company 386. We
-rely on the JWT authorizer to identify which customer this request is
-about, then scope every Vergent call to that customer's id/email from
-the JWT claims. Never trust customerId from request body/query.
+Security: the service credentials can read any customer at company 386.
+We rely on the JWT authorizer to identify which customer this request
+is about, then scope every Vergent call to that customer's id from the
+JWT claim. Never trust customerId from request body/query.
+
+Environment:
+  VERGENT_V1_BASE_URL  default https://shared.vergentlms.com/api/api
+                       (note the doubled /api/api — swagger basePath
+                       is /api and paths begin with /api/)
+  VERGENT_APIM_BASE_URL optional, for handoff (POST /api/authenticate/handoff/create
+                        still lives on the APIM gateway)
+  VERGENT_SECRET_ARN   Secrets Manager ARN, expects keys
+                        logonName, password, xApiKey
+  VERGENT_HANDOFF_AUTHORITY  default cashinflash.apply.vergentlms.com
 """
 from __future__ import annotations
 
@@ -34,24 +45,36 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
-VERGENT_BASE_URL = os.environ.get(
-    "VERGENT_BASE_URL", "https://prod.apim.vergentlms.com/external/shared"
+# v1 LMS is at shared.vergentlms.com with doubled /api/api prefix
+V1_BASE = os.environ.get(
+    "VERGENT_V1_BASE_URL", "https://shared.vergentlms.com/api/api"
+).rstrip("/")
+# APIM is still the home for the handoff endpoint
+APIM_BASE = os.environ.get(
+    "VERGENT_APIM_BASE_URL", "https://prod.apim.vergentlms.com/external/shared"
 ).rstrip("/")
 VERGENT_SECRET_ARN = os.environ["VERGENT_SECRET_ARN"]
 HANDOFF_AUTHORITY = os.environ.get("VERGENT_HANDOFF_AUTHORITY", "cashinflash.apply.vergentlms.com")
 
 _secrets = boto3.client("secretsmanager")
 _creds_cache: Optional[Dict[str, str]] = None
-_token_cache: Optional[str] = None
-_token_exp: float = 0.0
-TOKEN_TTL_SECS = 60 * 60  # refresh once an hour even though Vergent's Timeout is 24h
+
+# v1 service Token (GUID) — used on every v1 LMS call.
+_v1_token: Optional[str] = None
+_v1_token_exp: float = 0.0
+
+# APIM service token (JWT) — used on handoff + v2 non-CustomerPortal endpoints.
+_apim_token: Optional[str] = None
+_apim_token_exp: float = 0.0
+
+TOKEN_TTL_SECS = 60 * 60  # refresh once an hour even though Timeout is 24h
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -102,14 +125,8 @@ def _customer_id(claims: Dict[str, Any]) -> Optional[str]:
     return str(cid) if cid else None
 
 
-def _http(method: str, path: str, *, body: Optional[Dict[str, Any]] = None,
-          headers: Optional[Dict[str, str]] = None, timeout: int = 10,
-          query: Optional[Dict[str, Any]] = None) -> Tuple[int, Optional[Any], str]:
-    url = f"{VERGENT_BASE_URL}{path}"
-    if query:
-        qs = urllib.parse.urlencode({k: v for k, v in query.items() if v is not None})
-        if qs:
-            url = f"{url}?{qs}"
+def _http(url: str, method: str = "GET", *, body: Optional[Dict[str, Any]] = None,
+          headers: Optional[Dict[str, str]] = None, timeout: int = 12) -> Tuple[int, Optional[Any], str]:
     h = {"Accept": "application/json", "User-Agent": "cif-portal/1.0"}
     if headers:
         h.update(headers)
@@ -125,10 +142,7 @@ def _http(method: str, path: str, *, body: Optional[Dict[str, Any]] = None,
             if raw:
                 try:
                     parsed = json.loads(raw)
-                    # Vergent /api/authenticate returns a JSON-encoded-string
-                    # body. Only double-decode when the inner string looks
-                    # like more JSON (starts with { or [), otherwise keep the
-                    # string as-is (e.g. PasswordReset/Search returns a GUID).
+                    # Some Vergent endpoints double-encode as JSON strings.
                     if isinstance(parsed, str) and parsed.strip()[:1] in ("{", "["):
                         parsed = json.loads(parsed)
                 except json.JSONDecodeError:
@@ -140,45 +154,97 @@ def _http(method: str, path: str, *, body: Optional[Dict[str, Any]] = None,
             raw = e.read().decode("utf-8", "replace")
         except Exception:
             pass
-        log.warning("Vergent %s %s -> %s: %s", method, path, e.code, raw[:300])
+        log.warning("Vergent %s %s -> %s: %s", method, url, e.code, raw[:300])
         return e.code, None, raw
     except (urllib.error.URLError, TimeoutError) as exc:
-        log.error("Vergent %s %s network error: %s", method, path, exc)
+        log.error("Vergent %s %s network error: %s", method, url, exc)
         return 0, None, ""
 
 
-def _get_service_token() -> Optional[str]:
-    """Service-account auth. Authenticates once per container hour."""
-    global _token_cache, _token_exp
-    if _token_cache and _token_exp > time.time():
-        return _token_cache
+# ─────────────────────────────────────────
+# Service token caches
+# ─────────────────────────────────────────
+def _get_v1_token() -> Optional[str]:
+    """v1 LMS service token (GUID) — used on every v1 customer call."""
+    global _v1_token, _v1_token_exp
+    if _v1_token and _v1_token_exp > time.time():
+        return _v1_token
     creds = _get_creds()
     status, body, _raw = _http(
+        f"{V1_BASE}/authenticate",
         "POST",
-        "/api/authenticate",
+        body={"LogonName": creds["logonName"], "Password": creds["password"]},
+    )
+    if status != 200 or not isinstance(body, dict):
+        log.warning("v1 authenticate failed status=%s", status)
+        return None
+    token = body.get("Token") or body.get("token")
+    if not token:
+        log.warning("v1 authenticate returned no Token")
+        return None
+    _v1_token = token
+    _v1_token_exp = time.time() + TOKEN_TTL_SECS
+    log.info("v1 service Token cached (%ds)", TOKEN_TTL_SECS)
+    return token
+
+
+def _get_apim_token() -> Optional[str]:
+    """APIM service token (JWT) — used for handoff and other v2 paths."""
+    global _apim_token, _apim_token_exp
+    if _apim_token and _apim_token_exp > time.time():
+        return _apim_token
+    creds = _get_creds()
+    status, body, _raw = _http(
+        f"{APIM_BASE}/api/authenticate",
+        "POST",
         body={"userName": creds["logonName"], "password": creds["password"]},
         headers={"x-api-key": creds["xApiKey"]},
     )
     if status != 200 or not isinstance(body, dict):
-        log.warning("service authenticate failed status=%s", status)
+        log.warning("APIM authenticate failed status=%s", status)
         return None
     token = body.get("auth_token") or body.get("token") or body.get("Token")
     if not token:
-        log.warning("service authenticate returned no token")
         return None
-    _token_cache = token
-    _token_exp = time.time() + TOKEN_TTL_SECS
-    log.info("service auth cached for %ds", TOKEN_TTL_SECS)
+    _apim_token = token
+    _apim_token_exp = time.time() + TOKEN_TTL_SECS
     return token
 
 
-def _authed_headers() -> Optional[Dict[str, str]]:
-    """x-api-key + Bearer — the combination that works on v2 non-CustomerPortal endpoints."""
-    tok = _get_service_token()
-    if not tok:
+def _v1_get(path: str) -> Tuple[int, Optional[Any]]:
+    token = _get_v1_token()
+    if not token:
+        return 0, None
+    status, body, _raw = _http(f"{V1_BASE}{path}", "GET", headers={"Token": token})
+    if status in (401, 403):
+        # Force refresh once.
+        global _v1_token_exp
+        _v1_token_exp = 0
+        tok2 = _get_v1_token()
+        if tok2:
+            status, body, _raw = _http(f"{V1_BASE}{path}", "GET", headers={"Token": tok2})
+    return status, body
+
+
+# ─────────────────────────────────────────
+# Shape helpers
+# ─────────────────────────────────────────
+def _pick(d: Optional[Dict[str, Any]], *keys: str) -> Any:
+    if not isinstance(d, dict):
         return None
-    creds = _get_creds()
-    return {"x-api-key": creds["xApiKey"], "Authorization": f"Bearer {tok}"}
+    for k in keys:
+        if d.get(k) is not None:
+            return d[k]
+    return None
+
+
+def _to_number(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _mask_phone(raw: Optional[str]) -> Optional[str]:
@@ -190,59 +256,121 @@ def _mask_phone(raw: Optional[str]) -> Optional[str]:
     return raw
 
 
+def _format_iso(dt: Optional[str]) -> Optional[str]:
+    if not dt:
+        return None
+    # Vergent returns "2026-04-19T00:00:00" — pass through; frontend will format.
+    return dt
+
+
+def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize one v1 loan record → the shape the dashboard renders."""
+    hdr = record.get("LoanHeader") if isinstance(record.get("LoanHeader"), dict) else record
+    detail = record.get("LoanDetail") if isinstance(record.get("LoanDetail"), dict) else {}
+    is_outstanding = bool(hdr.get("IsStatusOutstanding"))
+    status_id = hdr.get("StatusId")
+    loan_amount = _to_number(hdr.get("LoanAmount"))
+    payoff = _to_number(hdr.get("PayoffAmount"))
+    amount_due = _to_number(hdr.get("AmountDue"))
+    min_due = _to_number(hdr.get("MinAmountDue"))
+    return {
+        "id": hdr.get("hdr_id"),
+        "publicId": detail.get("PublicLoanId") or hdr.get("PublicLoanId"),
+        "loanClass": hdr.get("LoanModelName") or hdr.get("LoanTypeName", "").split(".")[-1] or None,
+        "status": "Current" if is_outstanding else (hdr.get("SubStatus") or "Closed"),
+        "statusId": status_id,
+        "isOutstanding": is_outstanding,
+        "principal": loan_amount,
+        "balance": payoff if payoff is not None else amount_due,
+        "payoffAmount": payoff,
+        "amountDue": amount_due,
+        "minAmountDue": min_due,
+        "nextDueDate": _format_iso(hdr.get("DueDate") or hdr.get("NextPaymentDate")),
+        "nextDueAmount": min_due if min_due is not None else amount_due,
+        "originationDate": _format_iso(hdr.get("OriginationDate")),
+        "storeId": hdr.get("StoreId"),
+        "storeName": detail.get("StoreName") or hdr.get("StoreName"),
+        "daysLate": detail.get("DaysLate"),
+        "isEligibleForRefi": bool(hdr.get("IsEligibleForRefi") or False),
+        "isInRescindPeriod": bool(hdr.get("IsInRescindPeriod") or False),
+    }
+
+
 # ─────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────
 def get_my_profile(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
-    email = (claims.get("email") or "").strip()
 
-    # Profile base from Cognito claims (always available)
+    # Base from Cognito claims — always available
     profile = {
         "firstName": claims.get("given_name"),
         "lastName": claims.get("family_name"),
-        "email": email,
+        "email": (claims.get("email") or "").strip(),
         "emailVerified": claims.get("email_verified") in (True, "true"),
         "phone": claims.get("phone_number"),
         "phoneVerified": claims.get("phone_number_verified") in (True, "true"),
         "vergentCustomerId": cid,
-        "status": None,
         "statusName": None,
+        "storeName": None,
         "vergentPhoneHint": None,
-        "isTextMessagingEnabled": None,
+        "vergentEmail": None,
         "isSecurityQuestionsSetup": None,
         "source": "cognito",
     }
 
-    h = _authed_headers()
-    if not h or not cid:
+    if not cid:
         return _json_response(200, profile)
 
-    # Account status — always-accessible endpoint
-    status_code, status_body, _ = _http("GET", f"/api/customer/{cid}/status", headers=h)
-    if status_code == 200 and isinstance(status_body, dict):
-        profile["status"] = status_body.get("status")
-        profile["statusName"] = status_body.get("statusName")
+    # v1 customer profile — gives us status + store + SSN status + SecurityQuestion flag
+    status, body = _v1_get(f"/V1/GetCustomer/{cid}")
+    if status == 200 and isinstance(body, dict):
+        profile["statusName"] = body.get("Status")
+        profile["storeName"] = body.get("StoreName")
+        profile["vergentEmail"] = body.get("EmailAddr")
+        profile["isSecurityQuestionsSetup"] = bool(body.get("SecurityQuestionId"))
         profile["source"] = "vergent"
 
-    # RecoveryOptions — takes two calls (search → options) but gives us phone hint + text flag
-    if email:
-        s2, search_body, _ = _http("GET", f"/api/Customer/PasswordReset/Search/{urllib.parse.quote(email)}", headers=h)
-        reset_token = None
-        if s2 == 200:
-            if isinstance(search_body, str):
-                reset_token = search_body
-            elif isinstance(search_body, dict):
-                reset_token = search_body.get("token")
-        if reset_token:
-            s3, ro, _ = _http("GET", f"/api/Customer/PasswordReset/RecoveryOptions/{reset_token}", headers=h)
-            if s3 == 200 and isinstance(ro, dict):
-                profile["vergentPhoneHint"] = ro.get("phone")  # already masked by Vergent
-                profile["isTextMessagingEnabled"] = ro.get("isTextMessagingEnabled")
-                profile["isSecurityQuestionsSetup"] = ro.get("isSecurityQuestionsSetup")
+    # v1 customer data — includes addresses + phones with masked numbers
+    status2, data = _v1_get(f"/V1/GetCustomerData/{cid}")
+    if status2 == 200 and isinstance(data, dict):
+        phones = data.get("custPhones") or []
+        if isinstance(phones, list):
+            primary_phone = next(
+                (p for p in phones if isinstance(p, dict) and p.get("IsPrimary")),
+                phones[0] if phones and isinstance(phones[0], dict) else None,
+            )
+            if primary_phone:
+                profile["vergentPhoneHint"] = _mask_phone(primary_phone.get("number"))
 
     return _json_response(200, profile)
+
+
+def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(200, {"loan": None, "reason": "no-customer-id"})
+
+    status, body = _v1_get(f"/V1/{cid}/loans")
+    if status != 200 or not isinstance(body, list):
+        log.warning("v1 loans call failed status=%s", status)
+        return _json_response(200, {"loan": None, "reason": "upstream-error"})
+
+    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
+    # Pick the first outstanding loan; fall back to most recent by origination date.
+    outstanding = [l for l in shaped if l.get("isOutstanding")]
+    active = outstanding[0] if outstanding else (shaped[0] if shaped else None)
+    return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
+
+
+def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
+    # v1 transaction history at /api/api/V1/GetCustomerLoanHistory requires
+    # (custId, HdrId, companyId, storeId, userId) — wireable once we pull the
+    # active loan. Holding off on this until we confirm the endpoint's real
+    # response shape against the live call.
+    return _json_response(200, {"items": []})
 
 
 def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -251,22 +379,22 @@ def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
     if not cid:
         return _json_response(400, {"error": "no_customer_id"})
 
-    h = _authed_headers()
-    if not h:
-        return _json_response(502, {"error": "vergent_unavailable"})
-
+    tok = _get_apim_token()
+    if not tok:
+        return _json_response(502, {"error": "apim_unavailable"})
+    creds = _get_creds()
     status, body, _raw = _http(
+        f"{APIM_BASE}/api/authenticate/handoff/create",
         "POST",
-        "/api/authenticate/handoff/create",
         body={
             "customerId": int(cid),
             "TargetRelativePage": "/",
             "ExpectedReferrerAuthority": HANDOFF_AUTHORITY,
         },
-        headers=h,
+        headers={"x-api-key": creds["xApiKey"], "Authorization": f"Bearer {tok}"},
     )
     if status != 200 or not isinstance(body, dict):
-        log.warning("handoff/create failed status=%s body=%s", status, str(body)[:200])
+        log.warning("handoff/create failed status=%s", status)
         return _json_response(502, {"error": "handoff_failed"})
 
     url = body.get("handoffUrl") or body.get("handoff_url")
@@ -274,17 +402,6 @@ def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
     if not url:
         return _json_response(502, {"error": "handoff_no_url"})
     return _json_response(200, {"url": url, "token": token})
-
-
-def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
-    # Until Vergent enables the v1 routes (or AuthenticateCognito), we can't
-    # enumerate a customer's loans. Return a clean empty state so the UI
-    # renders "No active loan right now" with the Apply CTA.
-    return _json_response(200, {"loan": None, "reason": "pending_vergent_route"})
-
-
-def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
-    return _json_response(200, {"items": []})
 
 
 # ─────────────────────────────────────────

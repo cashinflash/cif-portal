@@ -158,10 +158,20 @@
           if (row) row.hidden = false;
         }
 
-        // Account status pill
+        // If the Vergent on-file email differs from the Cognito sign-in email, surface it.
+        if (data.vergentEmail && data.vergentEmail.toLowerCase() !== (claims.email || '').toLowerCase()) {
+          const emailEl = qs('#profileEmail');
+          if (emailEl) {
+            emailEl.innerHTML = claims.email + ' <small style="color:#6b7280;font-weight:500;">(loan on file: ' + data.vergentEmail + ')</small>';
+          }
+        }
+
+        // Account status pill — e.g. "Good"
         const src = qs('#profileSource');
         if (src && data.statusName) {
-          src.textContent = 'Account: ' + data.statusName;
+          const parts = ['Account: ' + data.statusName];
+          if (data.storeName) parts.push(data.storeName);
+          src.textContent = parts.join(' · ');
           src.hidden = false;
           src.classList.remove('dash-profile-source--bad');
           if ((data.statusName || '').toLowerCase() !== 'good') {
@@ -169,13 +179,12 @@
           }
         }
 
-        // "Set up security questions" nudge — replaces the edit-profile hint
-        // when the customer hasn't set them yet.
+        // "Set up security questions" nudge
         const hint = qs('#profileHint');
         if (hint && data.isSecurityQuestionsSetup === false) {
           hint.innerHTML = 'Security questions not set. <a href="/forgot.html">Set them up</a> for easier password recovery.';
         } else if (hint) {
-          hint.textContent = 'Profile editing unlocks once Vergent enables our portal sync.';
+          hint.textContent = 'Need to change your name, phone, or address? Call us at (818) 800-5227.';
         }
       })
       .catch(function () { /* non-critical — profile already has Cognito data */ });
@@ -258,26 +267,38 @@
     setText(qs('[data-loan-next-due]', card), formatDate(loan.nextDueDate));
     setText(qs('[data-loan-next-amount]', card), formatCurrencyPrecise(loan.nextDueAmount));
 
+    // Update the card heading with the loan class (e.g. "CA Payday")
+    const heading = qs('#loanCardHeading', card);
+    if (heading && loan.loanClass) {
+      heading.textContent = loan.loanClass;
+    }
+
     const captionEl = qs('[data-loan-caption]', card);
     if (captionEl) {
+      const parts = [];
       if (loan.nextDueDate && loan.nextDueAmount) {
-        captionEl.textContent = 'Balance remaining. Next payment of ' +
-          formatCurrencyPrecise(loan.nextDueAmount) + ' is due ' + formatDate(loan.nextDueDate) + '.';
+        parts.push('Next payment of ' + formatCurrencyPrecise(loan.nextDueAmount) +
+                   ' is due ' + formatDate(loan.nextDueDate) + '.');
       } else {
-        captionEl.textContent = 'Current balance remaining on your loan.';
+        parts.push('Current balance remaining on your loan.');
       }
+      if (loan.storeName) {
+        parts.push('Originated at ' + loan.storeName + '.');
+      }
+      captionEl.textContent = parts.join(' ');
     }
 
     const pill = qs('[data-loan-status]', card);
     if (pill) {
       const status = (loan.status || '').toLowerCase();
+      const daysLate = (loan.daysLate || '').toLowerCase();
       pill.classList.remove('dash-pill--ok', 'dash-pill--warn', 'dash-pill--past-due');
-      if (status.indexOf('past') !== -1 || status.indexOf('delinquent') !== -1) {
+      if (status.indexOf('past') !== -1 || status.indexOf('delinquent') !== -1 || (daysLate && daysLate !== 'not late')) {
         pill.classList.add('dash-pill--past-due');
         pill.textContent = 'Past due';
-      } else if (status.indexOf('grace') !== -1 || status.indexOf('pending') !== -1) {
+      } else if (status.indexOf('grace') !== -1 || status.indexOf('pending') !== -1 || loan.isInRescindPeriod) {
         pill.classList.add('dash-pill--warn');
-        pill.textContent = loan.status;
+        pill.textContent = loan.isInRescindPeriod ? 'Rescind period' : loan.status;
       } else {
         pill.classList.add('dash-pill--ok');
         pill.textContent = loan.status || 'Current';
