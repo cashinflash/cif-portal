@@ -1,39 +1,35 @@
 """
-Customer Portal — Loans / Activity handler.
+Customer Portal - Loans / Activity handler.
 
-Routes (bound via SAM to the existing HttpApi with JWT authorizer):
-  GET /api/my-loans/active    -> get_active_loan
-  GET /api/my-loans/activity  -> get_activity  (?limit=5)
+Routes (bound to the existing HttpApi with Cognito JWT authorizer):
+  GET /api/my-loans/active     -> get_active_loan
+  GET /api/my-loans/activity   -> get_activity  (?limit=5)
 
-Auth model:
-  The Cognito JWT authorizer runs first. We pull the signed-in user's
-  Vergent customer id straight from the custom claim that Round 19A's
-  PreSignUp trigger writes onto the Cognito ID token:
+Vergent v2 auth model:
+  1. Cognito JWT authorizer validates the ID token at the gateway; claims
+     land in event.requestContext.authorizer.jwt.claims. The RAW id token
+     is in event.headers.authorization (lower-cased by HTTP API v2).
+  2. We exchange that id token at
+        POST /api/CustomerPortal/AuthenticateCognito  body={"jwt": "..."}
+     to receive a Customer Portal bearer token.
+  3. Subsequent customer-scoped calls use both headers:
+        Authorization: Bearer <cp_token>
+        x-api-key: <shared-machine-key from Secrets Manager>
 
-      event.requestContext.authorizer.jwt.claims["custom:vergentCustomerId"]
-
-  With that id we call Vergent V2 directly using the shared API key from
-  Secrets Manager. No AuthenticateCognito exchange needed — the key +
-  customerId is sufficient for the CustomerPortal endpoints.
-
-  If a specific Vergent endpoint returns 401/403 we still return a usable
-  response (HTTP 200 with an empty/placeholder shape) so the dashboard
-  renders the friendly empty state instead of crashing. The failure is
-  logged for the next session to debug.
+  The CP token is cached in-process keyed by the Cognito `sub` for the
+  lifetime of a warm Lambda container (~5 minutes, bounded by our own
+  TTL since the token's own exp is not surfaced in the response).
 
 Environment:
-  VERGENT_BASE_URL   e.g. https://prod.apim.vergentlms.com/external/shared
-  VERGENT_SECRET_ARN Secrets Manager ARN holding {"xApiKey":"...", ...}
-
-IAM (see infra/template.yaml):
-  secretsmanager:GetSecretValue on VERGENT_SECRET_ARN only.
+  VERGENT_BASE_URL    https://prod.apim.vergentlms.com/external/shared
+  VERGENT_SECRET_ARN  Secrets Manager ARN holding {"xApiKey":"..."}
 """
-
 from __future__ import annotations
 
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -41,9 +37,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 
-# ─────────────────────────────────────────
-# Setup
-# ─────────────────────────────────────────
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
@@ -52,6 +45,8 @@ VERGENT_SECRET_ARN = os.environ["VERGENT_SECRET_ARN"]
 
 _secrets = boto3.client("secretsmanager")
 _api_key_cache: Optional[str] = None
+_cp_token_cache: Dict[str, Tuple[str, float]] = {}  # sub -> (token, expiresAt)
+CP_TOKEN_TTL_SECS = 5 * 60
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -92,45 +87,88 @@ def _claims(event: Dict[str, Any]) -> Dict[str, Any]:
     return jwt.get("claims") or {}
 
 
-def _customer_id(event: Dict[str, Any]) -> Optional[str]:
-    c = _claims(event)
-    # Some API Gateway versions flatten custom claims.
-    cid = (
-        c.get("custom:vergentCustomerId")
-        or c.get("custom_vergentCustomerId")
-        or c.get("vergentCustomerId")
-    )
-    if cid:
-        return str(cid)
+def _raw_id_token(event: Dict[str, Any]) -> Optional[str]:
+    headers = event.get("headers") or {}
+    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth.split(None, 1)[1].strip()
     return None
 
 
-def _vergent_get(path: str, params: Dict[str, Any]) -> Tuple[int, Optional[Any]]:
+def _vergent_request(
+    method: str,
+    path: str,
+    *,
+    cp_token: Optional[str] = None,
+    body: Optional[Dict[str, Any]] = None,
+    query: Optional[Dict[str, Any]] = None,
+    timeout: int = 10,
+) -> Tuple[int, Optional[Any], str]:
+    """Returns (status, parsed_body_or_None, raw_text_body_for_logging)."""
     url = f"{VERGENT_BASE_URL}{path}"
-    if params:
-        qs = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
-        url = f"{url}?{qs}"
-    req = urllib.request.Request(
-        url,
-        method="GET",
-        headers={
-            "x-api-key": _get_api_key(),
-            "Accept": "application/json",
-            "User-Agent": "cif-portal/1.0",
-        },
-    )
+    if query:
+        qs = urllib.parse.urlencode({k: v for k, v in query.items() if v is not None})
+        if qs:
+            url = f"{url}?{qs}"
+
+    headers = {
+        "x-api-key": _get_api_key(),
+        "Accept": "application/json",
+        "User-Agent": "cif-portal/1.0",
+    }
+    if cp_token:
+        headers["Authorization"] = f"Bearer {cp_token}"
+
+    data: Optional[bytes] = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urllib.request.Request(url, method=method, headers=headers, data=data)
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            status = resp.status
-            raw = resp.read().decode("utf-8") or "null"
-            return status, json.loads(raw)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8") or ""
+            parsed = json.loads(raw) if raw else None
+            return resp.status, parsed, raw
     except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        log.warning("Vergent %s -> %s: %s", path, e.code, body[:400])
-        return e.code, None
+        raw = ""
+        try:
+            raw = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        log.warning("Vergent %s %s -> %s: %s", method, path, e.code, raw[:400])
+        return e.code, None, raw
     except (urllib.error.URLError, TimeoutError) as e:
-        log.error("Vergent %s network error: %s", path, e)
-        return 0, None
+        log.error("Vergent %s %s network error: %s", method, path, e)
+        return 0, None, ""
+
+
+def _authenticate_cognito(id_token: str, sub: str) -> Optional[str]:
+    """Exchange a Cognito id token for a Customer Portal bearer token."""
+    cached = _cp_token_cache.get(sub)
+    if cached and cached[1] > time.time():
+        return cached[0]
+
+    status, body, _raw = _vergent_request(
+        "POST",
+        "/api/CustomerPortal/AuthenticateCognito",
+        body={"jwt": id_token},
+        timeout=10,
+    )
+    if status != 200 or not isinstance(body, dict):
+        log.warning("AuthenticateCognito failed (status=%s)", status)
+        return None
+
+    if body.get("isAccountLocked"):
+        log.warning("Customer account is locked per AuthenticateCognito response")
+    token = body.get("token")
+    if not token:
+        log.warning("AuthenticateCognito returned no token: keys=%s", list(body.keys()))
+        return None
+
+    _cp_token_cache[sub] = (token, time.time() + CP_TOKEN_TTL_SECS)
+    log.info("AuthenticateCognito ok for sub=%s", sub[:8])
+    return token
 
 
 def _pick(d: Dict[str, Any], *keys: str) -> Any:
@@ -138,20 +176,6 @@ def _pick(d: Dict[str, Any], *keys: str) -> Any:
         if d.get(k) is not None:
             return d[k]
     return None
-
-
-def _shape_loan(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize Vergent's loan payload into the shape the dashboard expects."""
-    return {
-        "id": _pick(raw, "loanId", "LoanId", "id", "Id"),
-        "status": _pick(raw, "status", "Status", "loanStatus", "LoanStatus") or "Current",
-        "principal": _to_number(_pick(raw, "principal", "Principal", "originalAmount", "OriginalAmount", "amountFinanced", "AmountFinanced")),
-        "balance": _to_number(_pick(raw, "currentBalance", "CurrentBalance", "balance", "Balance", "payoffAmount", "PayoffAmount")),
-        "nextDueDate": _pick(raw, "nextPaymentDate", "NextPaymentDate", "nextDueDate", "NextDueDate"),
-        "nextDueAmount": _to_number(_pick(raw, "nextPaymentAmount", "NextPaymentAmount", "nextDueAmount", "NextDueAmount")),
-        "apr": _to_number(_pick(raw, "apr", "APR", "annualPercentageRate")),
-        "termRemaining": _pick(raw, "termRemaining", "RemainingTerm", "paymentsRemaining"),
-    }
 
 
 def _to_number(v: Any) -> Optional[float]:
@@ -163,52 +187,103 @@ def _to_number(v: Any) -> Optional[float]:
         return None
 
 
-def _active_filter(loan: Dict[str, Any]) -> bool:
-    status = (loan.get("status") or "").lower()
-    return any(token in status for token in ("active", "current", "past due", "grace", "open"))
+def _shape_loan_card(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize Vergent LoanCardModel → dashboard shape."""
+    principal = _to_number(_pick(raw, "originalPrincipal", "principalBalance"))
+    balance = _to_number(_pick(raw, "payoffAmount", "currentBalance", "originalBalance"))
+    return {
+        "id": _pick(raw, "loanHeaderId", "publicLoanId"),
+        "loanHeaderId": _pick(raw, "loanHeaderId"),
+        "publicLoanId": _pick(raw, "publicLoanId"),
+        "status": _pick(raw, "loanStatus") or "Current",
+        "loanClass": _pick(raw, "loanClassTypeAbbrev"),
+        "principal": principal,
+        "balance": balance,
+        "payoffAmount": _to_number(_pick(raw, "payoffAmount")),
+        "amountDue": _to_number(_pick(raw, "amountDue")),
+        "nextDueDate": _pick(raw, "nextPaymentDate", "nextPaymentScheduleDate"),
+        "nextDueAmount": _to_number(_pick(raw, "nextPaymentScheduleAmount", "amountDue")),
+        "apr": _to_number(_pick(raw, "originalFeeApr")),
+        "originationDate": _pick(raw, "loanDate", "originationDate"),
+        "availableCash": _to_number(_pick(raw, "availableCash")),
+        "availableCredit": _to_number(_pick(raw, "availableCredit")),
+        "isACHOrCardPaymentScheduled": bool(_pick(raw, "isACHOrCardPaymentScheduled") or False),
+        "paymentScheduleSource": _pick(raw, "paymentScheduleSource"),
+    }
+
+
+def _shape_transaction(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize LoanTransactionHistoryModel → dashboard activity row."""
+    total = _to_number(_pick(raw, "total", "change", "principal"))
+    type_name = (_pick(raw, "typeName") or "").strip()
+    # Payments / adjustments reduce balance (credit to customer); fees / disbursements are debits.
+    lowered = type_name.lower()
+    if any(k in lowered for k in ("payment", "refund", "credit")):
+        direction = "credit"
+    elif any(k in lowered for k in ("fee", "disbursement", "draw", "charge")):
+        direction = "debit"
+    else:
+        # Fallback on sign of the change field.
+        change = _to_number(_pick(raw, "change"))
+        direction = "credit" if (change is not None and change < 0) else "debit"
+    return {
+        "id": _pick(raw, "transactionItemId"),
+        "date": _pick(raw, "businessDate"),
+        "description": type_name or "Transaction",
+        "amount": abs(total) if total is not None else 0,
+        "direction": direction,
+        "balance": _to_number(_pick(raw, "balance")),
+        "cardLast4": _pick(raw, "creditCardLast4"),
+    }
 
 
 # ─────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
-    cid = _customer_id(event)
-    if not cid:
-        log.warning("Missing custom:vergentCustomerId in JWT claims")
-        return _json_response(200, {"loan": None, "reason": "no-customer-id"})
+    claims = _claims(event)
+    sub = claims.get("sub") or ""
+    id_token = _raw_id_token(event)
+    if not id_token or not sub:
+        log.warning("Missing id token or sub")
+        return _json_response(200, {"loan": None, "reason": "no-id-token"})
 
-    # Primary: Customer Portal "Loans / Full" — returns all loans with detail.
-    status, payload = _vergent_get("/api/CustomerPortal/Customer/Loans/Full", {"customerId": cid})
+    cp_token = _authenticate_cognito(id_token, sub)
+    if not cp_token:
+        return _json_response(200, {"loan": None, "reason": "auth-exchange-failed"})
 
-    loans: List[Dict[str, Any]] = []
-    if isinstance(payload, list):
-        loans = payload
-    elif isinstance(payload, dict):
-        loans = payload.get("loans") or payload.get("Loans") or payload.get("items") or []
-        if not loans and (payload.get("loanId") or payload.get("LoanId")):
-            loans = [payload]
+    # /api/CustomerPortal/Loans returns LoanInfoModel: {loanCards: [LoanCardModel]}
+    # Description: "Gets the open loans for the current user" — already filtered.
+    status, payload, _raw = _vergent_request(
+        "GET",
+        "/api/CustomerPortal/Loans",
+        cp_token=cp_token,
+    )
+    if status != 200 or not isinstance(payload, dict):
+        log.warning("Loans call failed status=%s", status)
+        return _json_response(200, {"loan": None, "reason": "loans-upstream-error"})
 
-    if status >= 400 or not loans:
-        # Fallback: a minimal "Loans" list endpoint some tenants expose.
-        status2, payload2 = _vergent_get("/api/CustomerPortal/Customer/Loans", {"customerId": cid})
-        if isinstance(payload2, list):
-            loans = payload2
-        elif isinstance(payload2, dict):
-            loans = payload2.get("loans") or payload2.get("Loans") or payload2.get("items") or []
-
-    shaped = [_shape_loan(l) for l in loans if isinstance(l, dict)]
-    active = next((l for l in shaped if _active_filter(l)), None)
-
-    if not active:
+    cards = payload.get("loanCards") or []
+    if not isinstance(cards, list) or not cards:
         return _json_response(200, {"loan": None})
 
-    return _json_response(200, {"loan": active})
+    # Pick the most recent / first open loan. Vergent returns open loans here.
+    shaped = [_shape_loan_card(c) for c in cards if isinstance(c, dict)]
+    active = shaped[0] if shaped else None
+
+    return _json_response(200, {"loan": active, "loanCount": len(shaped)})
 
 
 def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
-    cid = _customer_id(event)
-    if not cid:
+    claims = _claims(event)
+    sub = claims.get("sub") or ""
+    id_token = _raw_id_token(event)
+    if not id_token or not sub:
         return _json_response(200, {"items": []})
+
+    cp_token = _authenticate_cognito(id_token, sub)
+    if not cp_token:
+        return _json_response(200, {"items": [], "reason": "auth-exchange-failed"})
 
     qs = (event.get("queryStringParameters") or {}) or {}
     try:
@@ -216,33 +291,32 @@ def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         limit = 5
 
-    status, payload = _vergent_get(
-        "/api/CustomerPortal/Customer/Transactions",
-        {"customerId": cid, "take": limit},
+    # Find the active loan first (transactions are loan-scoped in v2).
+    status, payload, _raw = _vergent_request(
+        "GET", "/api/CustomerPortal/Loans", cp_token=cp_token
     )
+    if status != 200 or not isinstance(payload, dict):
+        return _json_response(200, {"items": []})
+    cards = payload.get("loanCards") or []
+    if not cards:
+        return _json_response(200, {"items": []})
+    loan_id = _pick(cards[0], "loanHeaderId")
+    if loan_id is None:
+        return _json_response(200, {"items": []})
 
-    raw_items: List[Dict[str, Any]] = []
-    if isinstance(payload, list):
-        raw_items = payload
-    elif isinstance(payload, dict):
-        raw_items = payload.get("transactions") or payload.get("Transactions") or payload.get("items") or []
+    status2, txn_payload, _raw2 = _vergent_request(
+        "GET",
+        f"/api/CustomerPortal/Loans/{loan_id}/Transactions",
+        cp_token=cp_token,
+    )
+    if status2 != 200 or not isinstance(txn_payload, dict):
+        return _json_response(200, {"items": []})
 
-    items = []
-    for t in raw_items[:limit]:
-        if not isinstance(t, dict):
-            continue
-        amount = _to_number(_pick(t, "amount", "Amount"))
-        kind = (_pick(t, "type", "Type", "transactionType", "TransactionType") or "").lower()
-        direction = "credit" if kind in ("payment", "credit", "refund") else "debit"
-        items.append({
-            "date": _pick(t, "date", "Date", "postedDate", "PostedDate", "transactionDate", "TransactionDate"),
-            "description": _pick(t, "description", "Description", "memo", "Memo") or _pick(t, "type", "Type") or "Transaction",
-            "amount": amount if amount is not None else 0,
-            "direction": direction,
-            "kind": kind or None,
-        })
+    history = txn_payload.get("loanTransactionHistoryList") or []
+    rows = [_shape_transaction(t) for t in history if isinstance(t, dict)]
+    rows.sort(key=lambda r: (r.get("date") or ""), reverse=True)
 
-    return _json_response(200, {"items": items})
+    return _json_response(200, {"items": rows[:limit], "loanHeaderId": loan_id})
 
 
 # ─────────────────────────────────────────
@@ -263,6 +337,6 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_activity(event)
 
         return _json_response(404, {"error": "not_found", "path": path})
-    except Exception as exc:  # last-ditch safety net — never 5xx the dashboard
+    except Exception as exc:  # never 5xx the dashboard
         log.exception("loans handler unexpected error: %s", exc)
         return _json_response(200, {"loan": None, "items": [], "error": "upstream_unavailable"})
