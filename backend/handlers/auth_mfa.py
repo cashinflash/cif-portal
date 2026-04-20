@@ -439,7 +439,7 @@ def _send_email(to: str, code: str) -> bool:
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:42px 24px;">
-          <img src="https://cashinflash.com/images/favicon.png" alt="Cash in Flash" width="72" height="72" style="display:block;width:72px;height:72px;border-radius:14px;border:0;background:#ffffff;padding:10px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/favicon.png" alt="Cash in Flash" width="72" height="72" style="display:block;width:72px;height:72px;border-radius:14px;border:0;background:#ffffff;padding:10px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
         </td></tr>
         <tr><td style="padding:40px 40px 24px;">
           <h1 style="margin:0 0 18px;font-size:26px;font-weight:700;color:#0E8741;line-height:1.2;">Your sign-in code is: {code}</h1>
@@ -452,7 +452,7 @@ def _send_email(to: str, code: str) -> bool:
           <p style="margin:0 0 12px;">If you received this email in error, please notify us immediately by telephone at <a href="tel:+17472707121" style="color:#6b7280;text-decoration:underline;">(747) 270-7121</a> or email at <a href="mailto:support@cashinflash.com" style="color:#6b7280;text-decoration:underline;">support@cashinflash.com</a>.</p>
           <p style="margin:0 0 12px;">&copy; 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.</p>
           <p style="margin:0 0 4px;">This email was sent by Cash in Flash<br>13937B Van Nuys Blvd, Arleta, CA 91331</p>
-          <p style="margin:12px 0 0;"><a href="https://cashinflash.com/privacy/" style="color:#0E8741;text-decoration:underline;">California Privacy Notice</a> &nbsp;|&nbsp; <a href="https://cashinflash.com/privacy/#federal" style="color:#0E8741;text-decoration:underline;">Federal Privacy Notice</a></p>
+          <p style="margin:12px 0 0;"><a href="https://cashinflash.com/privacy/" style="color:#0E8741;text-decoration:underline;">Privacy Policy</a></p>
         </td></tr>
       </table>
     </td></tr>
