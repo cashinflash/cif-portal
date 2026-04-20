@@ -419,33 +419,40 @@ def _delete_session(session_id: str) -> None:
 def _send_email(to: str, code: str) -> bool:
     body_text = (
         f"Cash in Flash — Sign-in code\n\n"
-        f"Your sign-in code: {code}\n\n"
-        f"This code expires in 5 minutes. "
-        f"If you didn't try to sign in, you can ignore this email.\n\n"
-        f"Need help? Call (818) 800-5227.\n\n"
-        f"— Cash in Flash"
+        f"Your sign-in code is: {code}\n\n"
+        f"Didn't try to sign in? You can ignore this email. If you think "
+        f"someone is trying to access your account, reset your password at "
+        f"https://portal.cashinflash.com/forgot.html.\n\n"
+        f"Please do not share this code with anyone. A Cash in Flash Representative "
+        f"will NEVER ask you to provide them with your sign-in code.\n\n"
+        f"Questions? Call our Customer Service Team at (747) 270-7121.\n\n"
+        f"---\n"
+        f"This email message contains information from Cash in Flash and is confidential. "
+        f"If you received this email in error, please notify us at (747) 270-7121 or "
+        f"support@cashinflash.com.\n\n"
+        f"© 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.\n"
+        f"Cash in Flash, 13937B Van Nuys Blvd, Arleta, CA 91331"
     )
     body_html = f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7f6;padding:32px 16px;">
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:24px 12px;">
     <tr><td align="center">
-      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:14px;box-shadow:0 4px 18px rgba(14,135,65,0.08);overflow:hidden;">
-        <tr><td style="background:linear-gradient(135deg,#0E8741,#0a8f3f);padding:28px 32px;">
-          <div style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:0.02em;">Cash in Flash</div>
-          <div style="color:#d6f2e0;font-size:13px;margin-top:2px;">Customer portal</div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
+        <tr><td align="center" style="background:#0E8741;padding:42px 24px;">
+          <img src="https://cashinflash.com/images/favicon.png" alt="Cash in Flash" width="72" height="72" style="display:block;width:72px;height:72px;border-radius:14px;border:0;background:#ffffff;padding:10px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
         </td></tr>
-        <tr><td style="padding:36px 32px 12px;color:#1a1a2e;font-size:16px;line-height:1.5;">
-          <p style="margin:0 0 16px;">Hi,</p>
-          <p style="margin:0 0 22px;">Here's your sign-in code. Enter it in the portal to finish signing in.</p>
-          <div style="background:#f0faf4;border:1px solid rgba(14,135,65,0.18);border-radius:12px;padding:18px 22px;text-align:center;margin:0 0 22px;">
-            <div style="color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:6px;">Sign-in code</div>
-            <div style="font-size:32px;font-weight:700;color:#0E8741;letter-spacing:0.28em;">{code}</div>
-          </div>
-          <p style="margin:0 0 16px;color:#555;font-size:14px;">This code expires in 5 minutes. If you didn't try to sign in, ignore this email — no action needed.</p>
+        <tr><td style="padding:40px 40px 24px;">
+          <h1 style="margin:0 0 18px;font-size:26px;font-weight:700;color:#0E8741;line-height:1.2;">Your sign-in code is: {code}</h1>
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#1a1a2e;">Didn't try to sign in? Please <a href="https://portal.cashinflash.com/forgot.html" style="color:#0E8741;text-decoration:underline;">reset your password</a>.</p>
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#1a1a2e;">Please do not provide this code to anyone. A Cash in Flash Representative will <strong>never</strong> ask you to provide them with your sign-in code.</p>
+          <p style="margin:0 0 4px;font-size:15px;line-height:1.55;color:#1a1a2e;">If you still have questions, contact our Customer Service Team at <a href="tel:+17472707121" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(747) 270-7121</a>.</p>
         </td></tr>
-        <tr><td style="background:#f7faf8;padding:18px 32px;color:#6b7280;font-size:12px;border-top:1px solid #eceff0;">
-          <p style="margin:0 0 4px;">Cash in Flash — licensed by the California DFPI.</p>
-          <p style="margin:0;">Need help? Call <a style="color:#0E8741;text-decoration:none;" href="tel:+18188005227">(818) 800-5227</a>.</p>
+        <tr><td style="padding:24px 40px 36px;color:#6b7280;font-size:12px;line-height:1.6;">
+          <p style="margin:0 0 12px;">This email message contains information from Cash in Flash and is confidential. The included information is intended only for the use of the individual or entity named above. If you are not the intended recipient, be aware that any disclosure, copying, distribution, or use of the contents of this message is prohibited.</p>
+          <p style="margin:0 0 12px;">If you received this email in error, please notify us immediately by telephone at <a href="tel:+17472707121" style="color:#6b7280;text-decoration:underline;">(747) 270-7121</a> or email at <a href="mailto:support@cashinflash.com" style="color:#6b7280;text-decoration:underline;">support@cashinflash.com</a>.</p>
+          <p style="margin:0 0 12px;">&copy; 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.</p>
+          <p style="margin:0 0 4px;">This email was sent by Cash in Flash<br>13937B Van Nuys Blvd, Arleta, CA 91331</p>
+          <p style="margin:12px 0 0;"><a href="https://cashinflash.com/privacy/" style="color:#0E8741;text-decoration:underline;">California Privacy Notice</a> &nbsp;|&nbsp; <a href="https://cashinflash.com/privacy/#federal" style="color:#0E8741;text-decoration:underline;">Federal Privacy Notice</a></p>
         </td></tr>
       </table>
     </td></tr>
