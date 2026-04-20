@@ -184,14 +184,90 @@ The handler never returns 5xx for `/my-loans/*`; a top-level catch in
 
 ## Open questions for Vergent
 
-Send these in one email — any single answer unblocks us.
+Send these in one email — any single answer unblocks us. Attach
+`docs/vergent-instructions.pdf` (the Customer Onboarding API Reference
+Vergent sent us on 4/16/26) as supporting context for #2.
 
 1. Please enable `POST /api/CustomerPortal/AuthenticateCognito` for company
    386. Issuer + audience + claim above. Current 500 on every call.
-2. Production base URL for the LMS v1 API (host that serves
-   `/api/V1/{customerId}/loans/all`). Training is at
-   `https://training.vergentlms.com/api/` but our prod credentials don't
-   work there.
+2. **Production base URL for the v1 LMS API** — the host that serves the
+   endpoints your Customer Onboarding guide documents
+   (`/api/V1/PostCustomerData`, `/api/V1/GetCustomerData/{id}`,
+   `/api/v1/GetCustomers`, `/api/v1/customer/{customerId}/upload`, etc.).
+   Our service user `FlashAppAPI818` authenticates fine at
+   `prod.apim.vergentlms.com/external/shared/api/authenticate` but those
+   v1 paths 404 there, and `training.vergentlms.com/api/api/...` returns
+   401 on our prod credentials (implying training is a separate user
+   store). If our existing creds aren't valid on the v1 prod host,
+   please provision new creds tied to company 386.
 3. (Optional / cleanest) Expose v1 routes under our existing APIM prefix
    `prod.apim.vergentlms.com/external/shared` so we use one host + one
    credential set for everything.
+
+## What the Customer Onboarding doc gave us (schemas we'll need later)
+
+Stored at `docs/vergent-instructions.pdf`. Useful once unblocked:
+
+### `POST /api/V1/PostCustomerData` body shape
+```json
+{
+  "cust": {
+    "CustomerType": 1,        // 1=Individual, 2=Business
+    "FirstName": "...", "LastName": "...", "MiddleName": "...", "Suffix": "",
+    "NinType": 1,             // 1=SSN, 2=SIN, 3=EIN, 4=ALT
+    "Ssn": "...", "BirthDate": "MM/DD/YYYY",
+    "EmailAddr": "...", "StoreId": 0, "DBA": ""
+  },
+  "custEmps":      [{"PayAmount": 0, "PrevPayDate": "...", "PayFreqId": 0,
+                     "NextPayDate": "...", "Name": "...", "IsDirectDeposit": true,
+                     "DateEmployed": "...", "EmpType": 0, "IsPrimary": true}],
+  "custAddresses": [{"type_id": 0, "addr1": "...", "city": "...",
+                     "state_id": 0, "zip": "...", "abbrev": "TX",
+                     "status": 1, "IsPrimary": true}],
+  "custPhones":    [{"type_id": 0, "number": "...", "is_primary": true,
+                     "IsPrimary": true}],
+  "custBanks":     [{"Name": "...", "RoutingNum": "...", "AccountNum": "...",
+                     "IsDirectDep": true, "TypeId": 0, "IsPrimary": true}],
+  "custIds":       [{"type_id": "613", "id_issued_on_date": "...",
+                     "id_num": "...", "id_zip": "...", "id_state_id": "99",
+                     "id_expiration_date": "...", "status": 1}]
+}
+```
+
+### Option-class lookups (cache these; they rarely change)
+- `GET /api/V1/GetOptionClassesAsync` → classes for address types, phone
+  types, bank types, id types, etc.
+- `GET /api/V1/GetOptionsByClassAsync?classId={id}` → items inside a
+  class
+- `GET /api/V1/GetStates` → state ids for `state_id` + `abbrev`
+- `GET /api/V1/GetCompanyPayFreq` → pay frequency ids for `PayFreqId`
+- `GET /api/CompanyInfo/GetStores` → store ids for `StoreId`
+- `GET /api/V1/GetLoanModels` → loan product ids for originations
+
+### Customer lookup
+- `GET /api/v1/GetCustomers?name=&phone=&idnum=&email=&birthDate=` →
+  fuzzy search, returns array
+- `GET /api/V1/GetCustomerData/{customerId}` → single record, same shape
+  as `PostCustomerData` body
+
+### Documents
+- `POST /api/v1/customer/{customerId}/upload` — multipart:
+  - `file`: the bytes
+  - application/json part: `{"Title": "Document.pdf"}`
+- `POST /api/v1/customer/{customerId}/store` — Vergent fetches the doc
+  from a URL we provide:
+  ```json
+  {
+    "Filename": "test.pdf",
+    "Url": "https://our-bucket/…",
+    "UrlHeaders": [{"Key": "...", "Value": "..."}],
+    "Title": "Test Document"
+  }
+  ```
+- Response `{Id, DownloadUrl, …}`. DownloadUrl points back to
+  `host/api/api/V1/docs/{id}/download`.
+
+### Vehicle / personal property
+`POST` with `prop_type: "2"` (vehicle), `vehicle_type: P|C|M|R`, and a
+bunch of VIN/blackbook fields.
+
