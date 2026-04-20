@@ -53,7 +53,8 @@ from typing import Any, Dict, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
-from handlers import twilio_sms  # SMS delivery (bundled next to this handler)
+from handlers import twilio_sms     # raw Messages API (kept for future non-OTP sends)
+from handlers import twilio_verify  # Verify (turnkey OTP) — current SMS channel
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -355,6 +356,23 @@ def _arm_our_code(session_id: str, code_hash: str, channel: str) -> None:
     )
 
 
+def _arm_verify_sms(session_id: str) -> None:
+    """Mark the session as 'Twilio Verify is now tracking this phone'. No
+    code hash on our side — Twilio stores + validates the code."""
+    now = int(time.time())
+    ddb.update_item(
+        TableName=TABLE, Key={"sessionId": {"S": session_id}},
+        UpdateExpression="SET #m = :m, #ch = :ch, attempts = :z, expiresAt = :e REMOVE codeHash",
+        ExpressionAttributeNames={"#m": "mode", "#ch": "channel"},
+        ExpressionAttributeValues={
+            ":m": {"S": "verify_sms"},
+            ":ch": {"S": "sms"},
+            ":z": {"N": "0"},
+            ":e": {"N": str(now + CODE_TTL)},
+        },
+    )
+
+
 def _bump_attempts(session_id: str, attempts: int) -> None:
     ddb.update_item(
         TableName=TABLE, Key={"sessionId": {"S": session_id}},
@@ -504,20 +522,17 @@ def _send_code(event: Dict[str, Any]) -> Dict[str, Any]:
             return _resp(502, {"error": "delivery_failed_email"})
         return _resp(200, {"ok": True, "channel": "email", "expiresInSec": CODE_TTL})
 
-    # channel == sms — Twilio delivery, our own 6-digit code (sha256-stored).
+    # channel == sms — Twilio Verify generates, delivers, and validates the
+    # code. We don't store the code; we just mark the session so /verify-code
+    # knows to route the submitted code to Verify's /VerificationCheck.
     phone = s.get("phone")
     if not phone:
         return _resp(400, {"error": "no_phone_on_file"})
-    code = _new_code()
-    _arm_our_code(session_id, _hash_code(code), channel="sms")
-    body_text = (
-        f"Your Cash in Flash sign-in code is {code}. "
-        f"Expires in 5 minutes. Never share this code."
-    )
-    ok, detail = twilio_sms.send(to=phone, body=body_text)
+    ok, detail = twilio_verify.start_sms(to=phone)
     if not ok:
-        log.warning("twilio send failed: %s", detail)
+        log.warning("twilio verify start failed: %s", detail)
         return _resp(502, {"error": "delivery_failed_sms", "detail": detail})
+    _arm_verify_sms(session_id)
     return _resp(200, {"ok": True, "channel": "sms", "expiresInSec": CODE_TTL})
 
 
@@ -533,10 +548,18 @@ def _verify_code(event: Dict[str, Any]) -> Dict[str, Any]:
         return _resp(401, {"error": "session_expired"})
 
     mode = s.get("mode")
-    if mode not in ("our_code",):
+    if mode == "our_code":
+        ok = hmac.compare_digest(_hash_code(code), s.get("codeHash") or "")
+    elif mode == "verify_sms":
+        phone = s.get("phone") or ""
+        approved, status_str = twilio_verify.check(phone, code)
+        if status_str == "expired":
+            _delete_session(session_id)
+            return _resp(401, {"error": "code_expired"})
+        ok = approved
+    else:
         # Session exists but /send-code wasn't called yet.
         return _resp(400, {"error": "no_code_sent"})
-    ok = hmac.compare_digest(_hash_code(code), s.get("codeHash") or "")
 
     if not ok:
         attempts = s["attempts"] + 1
