@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Welcome — Cash in Flash</title>
+<link rel="stylesheet" href="/css/cif-brand.css">
+<link rel="stylesheet" href="/css/portal.css">
+<link rel="icon" href="/images/favicon.png">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a href="https://cashinflash.com" class="logo">
+      <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="160" height="21">
+    </a>
+
+    <nav class="main-nav">
+      <ul class="nav-list"></ul>
+    </nav>
+
+    <div class="header-actions">
+      <a href="https://cashinflash.com/locations/" class="btn-store">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Find a Store
+      </a>
+      <a href="https://cashinflash.com" class="btn-login">Home</a>
+    </div>
+
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <div class="mobile-menu-hd">
+      <a href="https://cashinflash.com" class="logo">
+        <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="140" height="19">
+      </a>
+      <button class="mobile-close-btn" id="mobile-close-btn" aria-label="Close menu">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="mobile-menu-inner">
+      <ul class="mobile-nav-list">
+        <li class="mobile-nav-item has-sub">
+          <a href="#">Loans</a>
+          <ul class="mobile-sub">
+            <li><a href="https://cashinflash.com/loans/payday-loans/">Payday Loans</a></li>
+            <li><a href="https://cashinflash.com/loans/cash-advance/">Cash Advances</a></li>
+          </ul>
+        </li>
+        <li class="mobile-nav-item"><a href="https://cashinflash.com/services/western-union/">Western Union</a></li>
+        <li class="mobile-nav-item"><a href="https://cashinflash.com/money-tips/">Money Tips</a></li>
+      </ul>
+      <div class="mobile-menu-extra">
+        <a href="https://cashinflash.com/locations/" class="mobile-store-link">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          Find a Store
+        </a>
+      </div>
+    </div>
+  </div>
+  <div class="mobile-menu-overlay" id="mobile-overlay"></div>
+</header>
+
+<main class="gate">
+  <span class="gate-blob gate-blob-1"></span>
+  <span class="gate-blob gate-blob-2"></span>
+  <div class="gate-inner">
+    <div class="gate-card">
+      <h1 class="page-title">Let's get started.</h1>
+      <p class="page-sub">Manage your loan, make a payment, or apply for a new one — all in one place.</p>
+
+      <div class="choice-stack">
+        <a href="https://apply.cashinflash.com" class="choice-card is-primary">
+          <div class="choice-body">
+            <p class="choice-title">New to Cash in Flash?</p>
+            <p class="choice-sub">Start your application</p>
+          </div>
+          <svg class="choice-arrow" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </a>
+
+        <a href="/search.html" class="choice-card is-outlined">
+          <div class="choice-body">
+            <p class="choice-title">Already have a loan with us?</p>
+            <p class="choice-sub">Find your account and connect online</p>
+          </div>
+          <svg class="choice-arrow" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </a>
+      </div>
+
+      <p class="aux-link-row" style="margin-bottom:0;">Already have an online account? <a href="/login.html">Sign in</a></p>
+    </div>
+
+    <div class="secure-strip">
+      <span class="secure">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        Secure area
+      </span>
+      <span class="legal-links">
+        <a href="https://cashinflash.com/terms">Terms &amp; Privacy</a>
+        <a href="https://cashinflash.com/contact">Contact</a>
+      </span>
+    </div>
+  </div>
+</main>
+
+<script>
+(function() {
+  const btn = document.getElementById('menu-toggle');
+  const menu = document.getElementById('mobile-menu');
+  const overlay = document.getElementById('mobile-overlay');
+  const close = document.getElementById('mobile-close-btn');
+  function open() { btn.classList.add('active'); menu.classList.add('open'); overlay.classList.add('open'); }
+  function shut() { btn.classList.remove('active'); menu.classList.remove('open'); overlay.classList.remove('open'); }
+  btn.addEventListener('click', open);
+  close.addEventListener('click', shut);
+  overlay.addEventListener('click', shut);
+  document.querySelectorAll('.mobile-nav-item.has-sub > a').forEach(a => {
+    a.addEventListener('click', (e) => { e.preventDefault(); a.parentElement.classList.toggle('open'); });
+  });
+})();
+</script>
+
+</body>
+</html>
