@@ -36,18 +36,16 @@
     return claims.exp * 1000 < Date.now() + 15 * 1000; // 15s skew
   }
 
-  function formatCurrency(n) {
-    if (n === null || n === undefined || isNaN(Number(n))) return '—';
-    return Number(n).toLocaleString('en-US', {
-      style: 'currency', currency: 'USD', maximumFractionDigits: 0
-    });
-  }
-
   function formatCurrencyPrecise(n) {
     if (n === null || n === undefined || isNaN(Number(n))) return '—';
     return Number(n).toLocaleString('en-US', {
       style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2
     });
+  }
+
+  function formatApr(n) {
+    if (n === null || n === undefined || isNaN(Number(n))) return '—';
+    return Number(n).toFixed(2) + '% APR';
   }
 
   function formatDate(iso) {
@@ -262,30 +260,26 @@
     if (empty) empty.hidden = true;
     if (body) body.hidden = false;
 
-    setText(qs('[data-loan-balance]', card), formatCurrency(loan.balance).replace(/^\$/, ''));
+    setText(qs('[data-loan-balance]', card), formatCurrencyPrecise(loan.balance).replace(/^\$/, ''));
     setText(qs('[data-loan-principal]', card), formatCurrencyPrecise(loan.principal));
     setText(qs('[data-loan-next-due]', card), formatDate(loan.nextDueDate));
     setText(qs('[data-loan-next-amount]', card), formatCurrencyPrecise(loan.nextDueAmount));
+    setText(qs('[data-loan-apr]', card), formatApr(loan.apr));
 
-    // Update the card heading with the loan class (e.g. "CA Payday")
-    const heading = qs('#loanCardHeading', card);
-    if (heading && loan.loanClass) {
-      heading.textContent = loan.loanClass;
-    }
+    const autopayPill = qs('[data-loan-autopay]', card);
+    if (autopayPill) autopayPill.hidden = !loan.autopay;
+
+    renderProgress(card, loan);
+    renderCountdown(card, loan);
 
     const captionEl = qs('[data-loan-caption]', card);
     if (captionEl) {
-      const parts = [];
       if (loan.nextDueDate && loan.nextDueAmount) {
-        parts.push('Next payment of ' + formatCurrencyPrecise(loan.nextDueAmount) +
-                   ' is due ' + formatDate(loan.nextDueDate) + '.');
+        captionEl.textContent = 'Next payment of ' + formatCurrencyPrecise(loan.nextDueAmount) +
+                                ' is due ' + formatDate(loan.nextDueDate) + '.';
       } else {
-        parts.push('Current balance remaining on your loan.');
+        captionEl.textContent = 'Current balance remaining on your loan.';
       }
-      if (loan.storeName) {
-        parts.push('Originated at ' + loan.storeName + '.');
-      }
-      captionEl.textContent = parts.join(' ');
     }
 
     const pill = qs('[data-loan-status]', card);
@@ -304,6 +298,57 @@
         pill.textContent = loan.status || 'Current';
       }
     }
+  }
+
+  function renderProgress(card, loan) {
+    const wrap = qs('[data-loan-progress]', card);
+    if (!wrap) return;
+    const principal = Number(loan.principal);
+    const fees = Number(loan.fees || 0);
+    const balance = Number(loan.balance);
+    const total = principal + fees;
+    if (!isFinite(principal) || !isFinite(balance) || total <= 0) {
+      wrap.hidden = true;
+      return;
+    }
+    const paid = Math.max(0, total - balance);
+    const remaining = Math.max(0, balance);
+    const pct = Math.max(0, Math.min(100, (paid / total) * 100));
+    const fill = qs('[data-loan-progress-fill]', wrap);
+    if (fill) fill.style.width = pct.toFixed(1) + '%';
+    setText(qs('[data-loan-paid]', wrap), formatCurrencyPrecise(paid));
+    setText(qs('[data-loan-remaining]', wrap), formatCurrencyPrecise(remaining));
+    wrap.hidden = false;
+  }
+
+  function renderCountdown(card, loan) {
+    const el = qs('[data-loan-countdown]', card);
+    if (!el) return;
+    el.classList.remove('is-soon', 'is-late');
+    if (!loan.nextDueDate) { el.hidden = true; return; }
+    const due = new Date(loan.nextDueDate);
+    if (isNaN(due.getTime())) { el.hidden = true; return; }
+    // Compare dates at day-granularity — ignore clock time so "today" stays "today" all day.
+    const today = new Date();
+    const a = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+    const b = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+    const days = Math.round((a - b) / 86400000);
+    let text;
+    if (days < 0) {
+      text = Math.abs(days) + (Math.abs(days) === 1 ? ' day' : ' days') + ' past due';
+      el.classList.add('is-late');
+    } else if (days === 0) {
+      text = 'Due today';
+      el.classList.add('is-soon');
+    } else if (days === 1) {
+      text = 'Due tomorrow';
+      el.classList.add('is-soon');
+    } else {
+      text = 'Due in ' + days + ' days';
+      if (days <= 3) el.classList.add('is-soon');
+    }
+    el.textContent = text;
+    el.hidden = false;
   }
 
   // ---------- Activity ----------

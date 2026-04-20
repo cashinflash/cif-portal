@@ -328,7 +328,7 @@
 }
 .dash-loan-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 20px;
   padding: 20px 0;
   border-top: 1px dashed var(--cif-hairline);
@@ -376,6 +376,39 @@
 .dash-pill--ok { background: rgba(14,135,65,.1); color: var(--cif-green-dark); }
 .dash-pill--warn { background: rgba(255,221,0,.18); color: #8a6d00; }
 .dash-pill--past-due { background: rgba(200,48,48,.1); color: var(--cif-danger); }
+.dash-pill--autopay { background: rgba(14,135,65,.1); color: var(--cif-green-dark); }
+
+/* Payment progress + due-date countdown */
+.dash-loan-progress { margin: 18px 0 18px; }
+.dash-loan-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(14,135,65,.1);
+  overflow: hidden;
+}
+.dash-loan-progress-bar > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--cif-green);
+  border-radius: 999px;
+  transition: width .4s ease;
+}
+.dash-loan-progress-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: .8rem;
+  color: var(--cif-muted);
+}
+.dash-loan-progress-labels strong { color: var(--cif-navy); font-weight: 700; }
+.dash-loan-countdown {
+  font-size: .85rem;
+  color: var(--cif-muted);
+  margin: 0 0 18px;
+}
+.dash-loan-countdown.is-soon { color: #8a6d00; font-weight: 600; }
+.dash-loan-countdown.is-late { color: var(--cif-danger); font-weight: 600; }
 
 /* Empty state (no active loan) */
 .dash-loan-empty { text-align: center; padding: 16px 0 8px; }
@@ -545,7 +578,7 @@
 /* ---------- RESPONSIVE ---------- */
 @media (max-width: 960px) {
   .dash-actions { grid-template-columns: 1fr 1fr; }
-  .dash-loan-stats { grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .dash-loan-stats { grid-template-columns: repeat(2, 1fr); gap: 14px; }
   .dash-loan-stat-value { font-size: 1rem; }
 }
 
@@ -559,7 +592,7 @@
   .dash-main { margin-top: -40px; padding-bottom: 40px; gap: 16px; }
   .dash-card { padding: 22px; }
   .dash-loan-card { padding: 24px; }
-  .dash-loan-stats { grid-template-columns: 1fr; gap: 14px; padding: 16px 0; }
+  .dash-loan-stats { grid-template-columns: repeat(2, 1fr); gap: 14px; padding: 16px 0; }
   .dash-actions { grid-template-columns: 1fr; gap: 12px; }
   .dash-help { padding: 24px; }
   .dash-help-inner { flex-direction: column; align-items: flex-start; }

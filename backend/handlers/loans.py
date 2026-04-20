@@ -69,6 +69,8 @@ _creds_cache: Optional[Dict[str, str]] = None
 # v1 service Token (GUID) — used on every v1 LMS call.
 _v1_token: Optional[str] = None
 _v1_token_exp: float = 0.0
+_v1_user_id: Optional[int] = None  # returned alongside the Token; needed for history calls
+VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
 
 # APIM service token (JWT) — used on handoff + v2 non-CustomerPortal endpoints.
 _apim_token: Optional[str] = None
@@ -166,7 +168,7 @@ def _http(url: str, method: str = "GET", *, body: Optional[Dict[str, Any]] = Non
 # ─────────────────────────────────────────
 def _get_v1_token() -> Optional[str]:
     """v1 LMS service token (GUID) — used on every v1 customer call."""
-    global _v1_token, _v1_token_exp
+    global _v1_token, _v1_token_exp, _v1_user_id
     if _v1_token and _v1_token_exp > time.time():
         return _v1_token
     creds = _get_creds()
@@ -184,7 +186,14 @@ def _get_v1_token() -> Optional[str]:
         return None
     _v1_token = token
     _v1_token_exp = time.time() + TOKEN_TTL_SECS
-    log.info("v1 service Token cached (%ds)", TOKEN_TTL_SECS)
+    user = body.get("User") or body.get("user") or {}
+    if isinstance(user, dict):
+        uid = user.get("UserId") or user.get("userId") or user.get("Id")
+        try:
+            _v1_user_id = int(uid) if uid is not None else _v1_user_id
+        except (TypeError, ValueError):
+            pass
+    log.info("v1 service Token cached (%ds) userId=%s", TOKEN_TTL_SECS, _v1_user_id)
     return token
 
 
@@ -288,11 +297,17 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "nextDueDate": _format_iso(hdr.get("DueDate") or hdr.get("NextPaymentDate")),
         "nextDueAmount": min_due if min_due is not None else amount_due,
         "originationDate": _format_iso(hdr.get("OriginationDate")),
+        "loanDate": _format_iso(hdr.get("LoanDate")),
         "storeId": hdr.get("StoreId"),
         "storeName": detail.get("StoreName") or hdr.get("StoreName"),
         "daysLate": detail.get("DaysLate"),
         "isEligibleForRefi": bool(hdr.get("IsEligibleForRefi") or False),
         "isInRescindPeriod": bool(hdr.get("IsInRescindPeriod") or False),
+        "apr": _to_number(hdr.get("OriginalFeeApr")),
+        "fees": _to_number(hdr.get("OriginalFees")),
+        "feeBalance": _to_number(hdr.get("FeeBalance")),
+        "numberOfPayments": hdr.get("NumberOfPayments"),
+        "autopay": bool(hdr.get("IsACHOrCardPaymentScheduled") or False),
     }
 
 
@@ -366,12 +381,119 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
 
 
+def _parse_limit(event: Dict[str, Any], default: int = 5, cap: int = 50) -> int:
+    qs = event.get("queryStringParameters") or {}
+    raw = (qs or {}).get("limit") if isinstance(qs, dict) else None
+    try:
+        n = int(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        n = default
+    return max(1, min(cap, n))
+
+
+def _shape_history_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize one v1 GetCustomerLoanHistory row → Recent Activity shape.
+
+    v1 returns a mix of loan events (origination, payments, charges,
+    refunds). The frontend renderer only cares about date / description /
+    amount / direction / balance.
+    """
+    date = entry.get("TransactionDate") or entry.get("Date") or entry.get("EntryDate")
+    amt = _to_number(
+        entry.get("Amount")
+        if entry.get("Amount") is not None
+        else entry.get("TransactionAmount")
+    )
+    description = (
+        entry.get("TransactionType")
+        or entry.get("Description")
+        or entry.get("Type")
+        or "Activity"
+    )
+    # Direction: prefer explicit IsPayment flag, fall back to amount sign.
+    is_payment = entry.get("IsPayment")
+    if is_payment is None:
+        direction = "credit" if (amt is not None and amt < 0) else "debit"
+    else:
+        direction = "credit" if is_payment else "debit"
+    balance = _to_number(entry.get("RunningBalance") or entry.get("Balance"))
+    if amt is None and not description:
+        return None
+    return {
+        "date": _format_iso(date),
+        "description": description,
+        "amount": abs(amt) if amt is not None else None,
+        "direction": direction,
+        "balance": balance,
+    }
+
+
+def _fetch_loan_history(cid: str, hdr_id: Any, store_id: Any, limit: int) -> List[Dict[str, Any]]:
+    """Call v1 /GetCustomerLoanHistory. Returns newest-first, trimmed to limit."""
+    if not hdr_id:
+        return []
+    if _v1_user_id is None:
+        # Prime the token (which also caches the user id).
+        _get_v1_token()
+    uid = _v1_user_id
+    if uid is None:
+        log.warning("v1 user id unavailable; skipping history")
+        return []
+    params = urllib.parse.urlencode({
+        "custId": cid,
+        "HdrId": hdr_id,
+        "companyId": VERGENT_COMPANY_ID,
+        "storeId": store_id or 0,
+        "userId": uid,
+    })
+    status, body = _v1_get(f"/V1/GetCustomerLoanHistory?{params}")
+    if status != 200:
+        log.warning("GetCustomerLoanHistory status=%s", status)
+        return []
+    # Endpoint may return a list directly, or {Items: [...]}, or a dict with
+    # transaction arrays by type. Normalize defensively.
+    rows: List[Dict[str, Any]] = []
+    if isinstance(body, list):
+        rows = [r for r in body if isinstance(r, dict)]
+    elif isinstance(body, dict):
+        for key in ("Items", "Transactions", "History", "LoanHistory"):
+            v = body.get(key)
+            if isinstance(v, list):
+                rows = [r for r in v if isinstance(r, dict)]
+                break
+        if not rows:
+            # Fall through: flatten any top-level list values.
+            for v in body.values():
+                if isinstance(v, list):
+                    rows.extend([r for r in v if isinstance(r, dict)])
+    shaped = [s for s in (_shape_history_entry(r) for r in rows) if s]
+    # Newest first.
+    def _key(item: Dict[str, Any]) -> str:
+        return str(item.get("date") or "")
+    shaped.sort(key=_key, reverse=True)
+    return shaped[:limit]
+
+
 def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
-    # v1 transaction history at /api/api/V1/GetCustomerLoanHistory requires
-    # (custId, HdrId, companyId, storeId, userId) — wireable once we pull the
-    # active loan. Holding off on this until we confirm the endpoint's real
-    # response shape against the live call.
-    return _json_response(200, {"items": []})
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(200, {"items": []})
+
+    limit = _parse_limit(event, default=5)
+
+    # Find the active (or most recent) loan so we can scope history to it.
+    status, body = _v1_get(f"/V1/{cid}/loans")
+    if status != 200 or not isinstance(body, list):
+        return _json_response(200, {"items": []})
+    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
+    outstanding = [l for l in shaped if l.get("isOutstanding")]
+    loan = outstanding[0] if outstanding else (shaped[0] if shaped else None)
+    if not loan:
+        return _json_response(200, {"items": []})
+
+    items = _fetch_loan_history(cid, loan.get("id"), loan.get("storeId"), limit)
+    return _json_response(200, {"items": items})
 
 
 def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
