@@ -289,11 +289,13 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     # in Vergent's model and is NOT what we want to display.
     next_due = amount_due if amount_due is not None else (payoff if payoff is not None else min_due)
 
-    # Autopay pill — only show when there's an actual scheduled debit.
-    # The IsACHOrCardPaymentScheduled flag is unreliable (returns true
-    # for loans with no pending debit), so we ignore it and require an
-    # explicit scheduled date. Log the relevant keys so we can confirm
-    # which field Vergent actually populates for our tenant.
+    # Autopay pill — disabled until we verify which Vergent v1 field
+    # actually means "a payment is scheduled right now" for our tenant.
+    # The IsACHOrCardPaymentScheduled flag and the various date fields
+    # we've tried all fire false-positives for loans without a pending
+    # debit (confirmed with Harut's loan 2026-04-21).
+    # TODO: once CloudWatch shows which key lights up when Vergent
+    # staff actually schedules a card/ACH payment, re-enable here.
     scheduled_date = (
         hdr.get("NextACHPaymentDate")
         or hdr.get("ScheduledPaymentDate")
@@ -301,7 +303,7 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         or hdr.get("AchPaymentDate")
         or hdr.get("NextPaymentScheduledDate")
     )
-    autopay = bool(scheduled_date)
+    autopay = False  # conservative default; see TODO above
     if log.isEnabledFor(logging.INFO):
         debug_keys = {k: hdr.get(k) for k in hdr.keys()
                       if any(s in k.lower() for s in ("sched", "ach", "autopay", "nextpay"))}

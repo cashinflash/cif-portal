@@ -1,0 +1,87 @@
+name: Tail Lambda logs
+
+# Manual workflow for quick CloudWatch debugging without a terminal.
+# Prints the most recent log events for one of our Lambdas, filtered
+# by a regex if you pass one. Defaults to the loans Lambda and the
+# last 15 minutes.
+#
+# How to use:
+#   Actions tab → "Tail Lambda logs" → Run workflow
+#   (Optionally change the function name, minutes, or filter pattern.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      function:
+        description: Lambda function name
+        required: true
+        default: cif-portal-loans-dev
+        type: choice
+        options:
+          - cif-portal-loans-dev
+          - cif-portal-auth-mfa-dev
+          - cif-portal-search-dev
+          - cif-portal-pre-signup-dev
+      minutes:
+        description: How many minutes of logs to fetch
+        required: true
+        default: "15"
+      filter:
+        description: CloudWatch filter pattern (optional, e.g. "autopay" or "ERROR")
+        required: false
+        default: ""
+
+jobs:
+  tail:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Fetch log events
+        env:
+          FN: ${{ inputs.function }}
+          MINS: ${{ inputs.minutes }}
+          FILTER: ${{ inputs.filter }}
+        run: |
+          START=$(( $(date +%s) * 1000 - MINS * 60 * 1000 ))
+          GROUP="/aws/lambda/$FN"
+          echo "Group:  $GROUP"
+          echo "Since:  $MINS minute(s) ago"
+          echo "Filter: ${FILTER:-(none)}"
+          echo "---"
+
+          if [ -n "$FILTER" ]; then
+            aws logs filter-log-events \
+              --log-group-name "$GROUP" \
+              --start-time "$START" \
+              --filter-pattern "$FILTER" \
+              --limit 200 \
+              --output json > /tmp/events.json
+          else
+            aws logs filter-log-events \
+              --log-group-name "$GROUP" \
+              --start-time "$START" \
+              --limit 200 \
+              --output json > /tmp/events.json
+          fi
+
+          COUNT=$(jq '.events | length' /tmp/events.json)
+          if [ "$COUNT" = "0" ]; then
+            echo "(no events in window)"
+            exit 0
+          fi
+
+          jq -r '.events[] | "\(.timestamp|tostring)  \(.message|rtrimstr("\n"))"' /tmp/events.json \
+            | while IFS= read -r line; do
+                TS="${line%%  *}"
+                MSG="${line#*  }"
+                # Convert epoch ms to HH:MM:SS UTC
+                SECS=$(( TS / 1000 ))
+                HHMMSS=$(date -u -d "@$SECS" +"%H:%M:%S")
+                echo "$HHMMSS  $MSG"
+              done

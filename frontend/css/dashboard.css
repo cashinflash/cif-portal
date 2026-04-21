@@ -379,6 +379,18 @@
 .dash-pill--autopay { background: rgba(14,135,65,.1); color: var(--cif-green-dark); }
 .dash-pill--closed { background: rgba(107,114,128,.12); color: #4b5563; }
 
+.dash-loan-eyebrow-id {
+  font-size: .72rem;
+  letter-spacing: .04em;
+  color: var(--cif-muted);
+  font-weight: 600;
+  padding: 2px 8px;
+  background: rgba(14,135,65,.08);
+  border-radius: 999px;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Payment progress + due-date countdown */
 .dash-loan-progress { margin: 18px 0 18px; }
 .dash-loan-progress-bar {
@@ -421,8 +433,8 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: #0E8741;
-  color: #fff;
+  background: #0E8741 !important;
+  color: #fff !important;
   border: 2px solid transparent;
   padding: 12px 26px;
   border-radius: 50px;
@@ -435,7 +447,8 @@
   transition: background .15s ease, transform .15s ease, box-shadow .15s ease;
 }
 :where(.btn-apply:hover, a.btn-apply:hover, button.btn-apply:hover) {
-  background: #0a6b33;
+  background: #0a6b33 !important;
+  color: #fff !important;
   transform: translateY(-1px);
   box-shadow: 0 6px 14px rgba(14,135,65,.25);
 }
@@ -682,15 +695,15 @@
   position: fixed;
   top: 0; left: 0; bottom: 0;
   width: 240px;
-  background: #1a1a2e;
+  background: #0E8741;
   color: #fff;
   display: flex;
   flex-direction: column;
   padding: 24px 18px 18px;
   z-index: 40;
-  box-shadow: 2px 0 16px rgba(0,0,0,.06);
+  box-shadow: 2px 0 16px rgba(0,0,0,.08);
 }
-.dash-sidebar-top { padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 18px; }
+.dash-sidebar-top { padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,.18); margin-bottom: 18px; }
 .dash-sidebar-logo { display: block; filter: brightness(0) invert(1); opacity: .95; }
 .dash-sidebar-logo img { width: 100%; height: auto; max-width: 180px; }
 .dash-sidebar-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
@@ -700,20 +713,20 @@
   gap: 12px;
   padding: 11px 14px;
   border-radius: 10px;
-  color: rgba(255,255,255,.8);
+  color: rgba(255,255,255,.9);
   text-decoration: none;
   font-weight: 600;
   font-size: .92rem;
   transition: background .15s ease, color .15s ease;
 }
-.dash-sidebar-link:hover { background: rgba(255,255,255,.06); color: #fff; }
+.dash-sidebar-link:hover { background: rgba(255,255,255,.14); color: #fff; }
 .dash-sidebar-link.is-active {
-  background: rgba(14,135,65,.18);
+  background: rgba(0,0,0,.18);
   color: #fff;
-  box-shadow: inset 3px 0 0 #0E8741;
+  box-shadow: inset 3px 0 0 #fff;
 }
 .dash-sidebar-bottom {
-  border-top: 1px solid rgba(255,255,255,.08);
+  border-top: 1px solid rgba(255,255,255,.18);
   padding-top: 16px;
   margin-top: 12px;
 }
@@ -727,11 +740,11 @@
   width: 100%;
   background: transparent;
   color: #fff;
-  border-color: rgba(255,255,255,.25);
+  border-color: rgba(255,255,255,.4);
 }
 .dash-sidebar-bottom .btn-login:hover {
-  background: rgba(255,255,255,.08);
-  border-color: rgba(255,255,255,.5);
+  background: rgba(255,255,255,.12);
+  border-color: #fff;
   color: #fff;
 }
 

@@ -168,12 +168,12 @@
           }
         }
 
-        // Account status pill — e.g. "Good"
+        // Account status pill — e.g. "Good". Never surface storeName:
+        // that's Vergent's internal store directory and customers
+        // shouldn't see it.
         const src = qs('#profileSource');
         if (src && data.statusName) {
-          const parts = ['Account: ' + data.statusName];
-          if (data.storeName) parts.push(data.storeName);
-          src.textContent = parts.join(' · ');
+          src.textContent = 'Account: ' + data.statusName;
           src.hidden = false;
           src.classList.remove('dash-profile-source--bad');
           if ((data.statusName || '').toLowerCase() !== 'good') {
@@ -273,7 +273,19 @@
     setText(qs('[data-loan-principal]', card), formatCurrencyPrecise(loan.principal));
     setText(qs('[data-loan-next-due]', card), formatDate(loan.nextDueDate));
     setText(qs('[data-loan-next-amount]', card), formatCurrencyPrecise(loan.nextDueAmount));
-    setText(qs('[data-loan-apr]', card), formatApr(loan.apr));
+    setText(qs('[data-loan-fee]', card), formatCurrencyPrecise(loan.fees));
+
+    // Public loan id tag next to the "Active loan" heading.
+    const idTag = qs('[data-loan-public-id]', card);
+    if (idTag) {
+      const pid = loan.publicId || loan.id;
+      if (pid) {
+        idTag.textContent = 'Loan #' + pid;
+        idTag.hidden = false;
+      } else {
+        idTag.hidden = true;
+      }
+    }
 
     const autopayPill = qs('[data-loan-autopay]', card);
     if (autopayPill) autopayPill.hidden = !loan.autopay;
