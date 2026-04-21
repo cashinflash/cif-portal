@@ -334,8 +334,8 @@
   function wireButtons() {
     const refresh = qs('#payRefreshCards');
     if (refresh) refresh.addEventListener('click', refreshCards);
-    const addBtn = qs('#payAddCardBtn');
-    if (addBtn) addBtn.addEventListener('click', openRepayPortal);
+    // Add Card button is disabled in the markup — leaving the wiring
+    // here for when we have Repay's iframe SDK or hosted-page docs.
   }
 
   // ---------- Boot ----------
