@@ -289,16 +289,27 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     # in Vergent's model and is NOT what we want to display.
     next_due = amount_due if amount_due is not None else (payoff if payoff is not None else min_due)
 
-    # Autopay pill: only true when BOTH the flag is set AND we have a
-    # scheduled payment date. The flag alone can be true for enrolled
-    # loans with no upcoming scheduled debit.
-    autopay_flag = bool(hdr.get("IsACHOrCardPaymentScheduled"))
+    # Autopay pill — only show when there's an actual scheduled debit.
+    # The IsACHOrCardPaymentScheduled flag is unreliable (returns true
+    # for loans with no pending debit), so we ignore it and require an
+    # explicit scheduled date. Log the relevant keys so we can confirm
+    # which field Vergent actually populates for our tenant.
     scheduled_date = (
         hdr.get("NextACHPaymentDate")
         or hdr.get("ScheduledPaymentDate")
         or hdr.get("NextScheduledPaymentDate")
+        or hdr.get("AchPaymentDate")
+        or hdr.get("NextPaymentScheduledDate")
     )
-    autopay = autopay_flag and bool(scheduled_date)
+    autopay = bool(scheduled_date)
+    if log.isEnabledFor(logging.INFO):
+        debug_keys = {k: hdr.get(k) for k in hdr.keys()
+                      if any(s in k.lower() for s in ("sched", "ach", "autopay", "nextpay"))}
+        log.info("autopay probe hdr_id=%s flag=%s scheduled_date=%s keys=%s",
+                 hdr.get("hdr_id"),
+                 hdr.get("IsACHOrCardPaymentScheduled"),
+                 scheduled_date,
+                 debug_keys)
 
     return {
         "id": hdr.get("hdr_id"),

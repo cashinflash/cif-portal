@@ -101,6 +101,12 @@
     if (chip) {
       chip.textContent = firstName ? ('Hi, ' + firstName) : (claims.email || 'Account');
     }
+    const sidebarName = qs('#sidebarUserName');
+    if (sidebarName) {
+      sidebarName.textContent = firstName
+        ? ('Hi, ' + firstName)
+        : (claims.email || 'Account');
+    }
     const yearEl = qs('#footerYear');
     if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
@@ -441,8 +447,10 @@
     }
     const btn = qs('#signOutBtn');
     const btnMobile = qs('#signOutBtnMobile');
+    const btnSidebar = qs('#signOutBtnSidebar');
     if (btn) btn.addEventListener('click', signOut);
     if (btnMobile) btnMobile.addEventListener('click', signOut);
+    if (btnSidebar) btnSidebar.addEventListener('click', signOut);
   }
 
   // ---------- Mobile menu ----------
