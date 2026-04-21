@@ -1,0 +1,126 @@
+name: Deploy cif-portal
+
+# Triggers:
+#   - Any push to main or a claude/** branch → deploy what changed.
+#   - Manual run from the Actions tab → deploy everything (for first-time
+#     setup or when you want to force a re-deploy).
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: cif-portal-frontend-dev-730667140069
+  CF_DISTRIBUTION: EOV9K12LFKK8T
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Detect what changed
+        id: changes
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual run — deploying everything."
+            CHANGED="backend/handlers/loans.py backend/handlers/auth_mfa.py backend/handlers/search.py backend/handlers/pre_signup.py frontend/"
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD^ HEAD)
+          else
+            CHANGED=$(git ls-files)
+          fi
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo "loans=$(echo "$CHANGED"     | grep -qE '^backend/handlers/loans\.py$'                          && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "auth_mfa=$(echo "$CHANGED"  | grep -qE '^backend/handlers/(auth_mfa|twilio_verify|twilio_sms)\.py$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "search=$(echo "$CHANGED"    | grep -qE '^backend/handlers/search\.py$'                          && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "pre_signup=$(echo "$CHANGED"| grep -qE '^backend/handlers/pre_signup\.py$'                      && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(echo "$CHANGED"  | grep -qE '^frontend/'                                              && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # One zip of all handler modules is shared across every Lambda. Each
+      # Lambda's FunctionConfiguration already has the right Handler path
+      # (e.g. handlers.loans.lambda_handler), so uploading the full package
+      # is safe and simpler than building per-Lambda bundles.
+      - name: Package backend handlers
+        if: steps.changes.outputs.loans == 'true' || steps.changes.outputs.auth_mfa == 'true' || steps.changes.outputs.search == 'true' || steps.changes.outputs.pre_signup == 'true'
+        run: |
+          cd backend
+          zip -qr /tmp/handlers.zip handlers -x "handlers/__pycache__/*" "*.pyc"
+          ls -la /tmp/handlers.zip
+
+      - name: Deploy loans Lambda
+        if: steps.changes.outputs.loans == 'true'
+        run: |
+          aws lambda update-function-code \
+            --function-name cif-portal-loans-dev \
+            --zip-file fileb:///tmp/handlers.zip \
+            --no-cli-pager
+
+      - name: Deploy auth-mfa Lambda
+        if: steps.changes.outputs.auth_mfa == 'true'
+        run: |
+          aws lambda update-function-code \
+            --function-name cif-portal-auth-mfa-dev \
+            --zip-file fileb:///tmp/handlers.zip \
+            --no-cli-pager
+
+      - name: Deploy search Lambda
+        if: steps.changes.outputs.search == 'true'
+        run: |
+          aws lambda update-function-code \
+            --function-name cif-portal-search-dev \
+            --zip-file fileb:///tmp/handlers.zip \
+            --no-cli-pager
+
+      - name: Deploy pre-signup Lambda
+        if: steps.changes.outputs.pre_signup == 'true'
+        run: |
+          aws lambda update-function-code \
+            --function-name cif-portal-pre-signup-dev \
+            --zip-file fileb:///tmp/handlers.zip \
+            --no-cli-pager
+
+      - name: Sync frontend to S3
+        if: steps.changes.outputs.frontend == 'true'
+        run: |
+          aws s3 sync frontend "s3://${{ env.S3_BUCKET }}" --delete
+
+      - name: Invalidate CloudFront
+        if: steps.changes.outputs.frontend == 'true'
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ env.CF_DISTRIBUTION }}" \
+            --paths "/*" \
+            --no-cli-pager
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          {
+            echo "### cif-portal deploy"
+            echo ""
+            echo "| Target | Deployed? |"
+            echo "|---|---|"
+            echo "| Loans Lambda | ${{ steps.changes.outputs.loans }} |"
+            echo "| Auth-MFA Lambda | ${{ steps.changes.outputs.auth_mfa }} |"
+            echo "| Search Lambda | ${{ steps.changes.outputs.search }} |"
+            echo "| Pre-signup Lambda | ${{ steps.changes.outputs.pre_signup }} |"
+            echo "| Frontend (S3 + CloudFront) | ${{ steps.changes.outputs.frontend }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
