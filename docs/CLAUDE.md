@@ -1,46 +1,302 @@
 # CLAUDE.md — cif-portal
 
-Conventions for Claude Code working in this repo.
+**Purpose of this file:** the context a fresh Claude session needs to
+pick up work on this repo without backtracking. Keep it accurate —
+update it every time we change an infrastructure ID, add a deploy
+step, learn a gotcha, or finish a feature.
+
+Last updated: 2026-04-21 (session_019VAj8MjuyDmPbJzHGUDxTA).
+
+---
 
 ## Repo purpose
-Signed-in customer portal that surfaces Vergent loan data to the borrower.
-Deployed to AWS (us-east-1, account `730667140069`) via SAM + S3 +
-CloudFront + Cognito + API Gateway HttpApi.
+
+Signed-in customer portal for Cash in Flash (Dhan Corporation,
+California DFPI License #214840). Lets existing Vergent LMS customers:
+
+- Sign up with an email locked to what Vergent has on file
+- Log in with Cognito + MFA (email OR SMS, customer's choice)
+- View active loan balance, APR, autopay flag, payment progress, and
+  transaction history on a branded dashboard
+- Hand off into Vergent's apply UI for a new-loan request
+
+Not in scope: marketing site (lives at `cashinflash/Cif-website`),
+Vergent-side staff tools, loan origination UI (lives at
+`cashinflash/cif-apply`).
+
+---
+
+## Session-handoff checklist (read first)
+
+If you're a new Claude session picking this up, read these **in order**
+before making any changes:
+
+1. This file (CLAUDE.md).
+2. `docs/VERGENT_INTEGRATION.md` — v1 vs v2 APIs, shapes, failure modes.
+3. `docs/2FA_SETUP.md` — MFA flow details.
+4. The current branch: `git branch --show-current` should print
+   `claude/continue-previous-session-<suffix>`. If not, the new
+   session's prompt will tell you which branch to develop on.
+5. Recent commits: `git log --oneline -10` tells you what the previous
+   session actually shipped.
+
+---
 
 ## Layout
-See top-level `README.md`. The stack name is **`cif-portal-dev`**. Round
-19B's additive template is `infra/template.yaml` — it expects to be merged
-with (or deployed alongside) the base stack that owns the HttpApi +
-Cognito pool.
+
+```
+backend/
+  handlers/            # One Lambda per .py file (plus a couple of
+                       # helpers that get bundled as a single zip).
+    loans.py           # GET /api/my-profile, /api/my-loans/active,
+                       #   /api/my-loans/activity
+                       # POST /api/my-loan/new (handoff to Vergent)
+    auth_mfa.py        # POST /api/login, /send-code, /verify-code
+    twilio_verify.py   # Twilio Verify client (imported by auth_mfa)
+    twilio_sms.py      # Legacy Messages client (kept, not used)
+    search.py          # POST /api/search (pre-login customer lookup)
+    pre_signup.py      # Cognito PreSignUp trigger
+    me.py, health.py, probe.py, loans_v1.py  # Support / deprecated
+  layer/python/        # Shared code attached as Lambda layer
+    aws_secrets.py, responses.py, twilio_sms.py, vergent.py
+
+frontend/              # Static SPA — plain HTML/CSS/JS, no bundler.
+  *.html               # dashboard, start, login, signup, search,
+                       #   forgot, payments, loans, documents,
+                       #   request-loan
+  css/dashboard.css    # Dashboard-only styles (tracked in git)
+  js/dashboard.js      # Dashboard controller (tracked in git)
+
+infra/
+  template.yaml        # SAM additive template (Round 19B — loans Lambda).
+  samconfig.toml
+
+docs/                  # Reference material. See VERGENT_INTEGRATION.md,
+                       #   2FA_SETUP.md, vergent-swagger.json,
+                       #   vergent-v1/v1.pdf (424p reference).
+
+.github/workflows/
+  deploy.yml           # Auto-deploy on push to main or claude/** branches.
+```
+
+---
+
+## Running infrastructure (us-east-1, account 730667140069)
+
+| Thing | ID / Name |
+|---|---|
+| Cognito User Pool | `us-east-1_U508xOs95` |
+| Cognito App Client | `1mddi61n19hftaldt9t3r622b` |
+| API Gateway HTTP API | `anh066l1wf` |
+| JWT Authorizer | `ppc9vg` |
+| S3 frontend bucket | `cif-portal-frontend-dev-730667140069` |
+| CloudFront distribution | `EOV9K12LFKK8T` (→ `d1zucrj1ouu3c.cloudfront.net`) |
+| DynamoDB MFA sessions | `cif-portal-mfa-sessions-dev` |
+| SES verified domain | `cashinflash.com` (DKIM on) |
+| Lambdas (dev) | `cif-portal-loans-dev`, `cif-portal-auth-mfa-dev`, `cif-portal-search-dev`, `cif-portal-pre-signup-dev` |
+
+**SES status:** in sandbox as of 2026-04-20; production-access ticket
+submitted 4/20, follow-up reply sent 4/20, awaiting AWS response.
+Until production is granted, outbound email works only to verified
+recipients.
+
+**Twilio:** Verify service SID `VA85600da2af290bef1dfb336014af8f61`,
+toll-free number `+18555962274` (carrier verification submitted, 3–5
+day turnaround). Branch-new account upgraded off trial 4/20.
+
+---
+
+## Deploy pipeline — GitHub Actions
+
+**Every push to `main` or a `claude/**` branch auto-deploys.** The
+workflow lives at `.github/workflows/deploy.yml` and:
+
+1. Checks out the repo with `fetch-depth: 2` so it can diff
+   `HEAD^..HEAD`.
+2. On `workflow_dispatch` (manual run) sets every output flag to true.
+3. On push, greps the diff for known paths to decide which Lambda(s)
+   to update and whether to sync the frontend.
+4. Zips `backend/handlers/` once and calls
+   `aws lambda update-function-code` per changed Lambda.
+5. Runs `aws s3 sync frontend s3://…` **without `--delete`** (see
+   warning below) and invalidates CloudFront `"/*"`.
+
+**Required GitHub repo secrets** (set under Settings → Secrets and
+variables → Actions):
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+
+Both belong to the `claude-portal-deploy` IAM user. AWS enforces a
+max of 2 keys per user — rotate by creating a new key, updating the
+secrets, confirming a deploy works, then deleting the old key.
+
+**Manual full re-deploy:** Actions tab → "Deploy cif-portal" → Run
+workflow → pick a branch.
+
+---
+
+## ⚠️ Frontend gotcha — files that live only in S3
+
+The repo tracks **`dashboard.html` + `dashboard.css` + `dashboard.js`**
+and the page files used by the main flows. It does **not** track:
+
+- `css/portal.css`   (styles for start/login/signup/search/forgot)
+- `css/cif-brand.css` (brand variables)
+- `js/portal.js`      (shared auth JS)
+- `js/portal-page.js` (page-level init)
+- `images/favicon.png`, `images/logo.png`
+
+These files live only in the S3 bucket. The deploy workflow used to
+use `aws s3 sync --delete`, which deleted them on the first run
+(2026-04-21, breaking start/login/signup). The `--delete` flag has
+since been removed from `deploy.yml` — don't put it back. If you need
+to remove a file from S3, do it manually.
+
+**If these files get nuked again**, restore from S3 versioning in the
+console: open the bucket, toggle "Show versions", filter by the file
+name, delete the "Delete marker" row — the prior version becomes
+current again.
+
+**TODO (future):** commit these files to the repo so git is the source
+of truth. Until that's done, treat S3 as canonical for the above
+paths.
+
+---
+
+## Vergent integration (1-paragraph version)
+
+Two surfaces — v2 (`prod.apim.vergentlms.com/external/shared`,
+`x-api-key` + JWT) and v1 (`shared.vergentlms.com/api/api`, service
+`Token` header). **We use v1 for everything that actually matters**
+(loans, profile, email lookup, history) because v2's
+`AuthenticateCognito` is broken for our tenant. v2 is still used for
+the `/api/authenticate/handoff/create` endpoint (new-loan redirect).
+Full details in `docs/VERGENT_INTEGRATION.md`.
+
+Service token is cached per warm Lambda container for 1 h (see
+`loans.py::_get_v1_token`). User id from the auth response is also
+cached — needed for `GetCustomerLoanHistory`.
+
+---
+
+## MFA flow (1-paragraph version)
+
+`auth_mfa.py` runs the whole dance server-side:
+
+1. `/login` — `ADMIN_USER_PASSWORD_AUTH` to Cognito. If it returns tokens
+   directly, we **hold them in DDB** keyed by a session id and return
+   only the session id + masked email/phone to the SPA.
+2. `/send-code` — SPA tells us which channel (email or SMS). Email uses
+   SES + our branded template. SMS uses Twilio Verify (Twilio stores
+   the code, not us).
+3. `/verify-code` — Email branch hashes + compares against DDB. SMS
+   branch calls Twilio Verify's `VerificationCheck`. On success, we
+   return the real Cognito tokens stored from step 1.
+4. DDB session TTLs at 10 min. After 3 wrong attempts we delete the
+   session.
+
+Full details in `docs/2FA_SETUP.md`.
+
+---
 
 ## Secrets — never commit these
-- Vergent API key / user password — AWS Secrets Manager
-  `cif-portal/vergent/credentials`. Rotate via the Vergent admin UI; update
-  the secret after rotation.
-- AWS access keys — use the IAM user `claude-portal-deploy`. Do not paste
-  keys into commits, issues, or PR descriptions.
+
+All stored in AWS Secrets Manager, `us-east-1`:
+
+| Name | Shape |
+|---|---|
+| `cif-portal/vergent/credentials` | `{logonName, password, xApiKey}` |
+| `cif-portal/twilio/credentials` | `{accountSid, authToken, verifyServiceSid, fromNumber}` |
+
+Rotate via the vendor UI → update the secret → Lambdas pick up the new
+value on the next cold start (module-global cache is per container).
+
+**Never** paste access keys into commits, issues, PR descriptions, or
+CloudWatch logs. The `_mask_phone` helper in `loans.py` is the pattern
+for logging partial identifiers.
+
+---
 
 ## Theme lock
-The dashboard must match cashinflash.com. Single source of truth:
+
+Dashboard must match cashinflash.com. Single source of truth:
 `cashinflash/Cif-website` repo → `css/style.css` (Poppins font, green
-`#0E8741`, navy `#1a1a2e`, 50 px button radius, 12 px card radius, organic
-blobs).
+`#0E8741`, navy `#1a1a2e`, 50 px button radius, 12 px card radius,
+organic blobs).
+
+---
 
 ## Coding conventions
-- Python 3.12, arm64 Lambdas, no extra pip deps unless essential (stdlib
-  `urllib` over `requests`, boto3 is pre-installed).
-- JS: no bundler, no framework. Plain DOM. `sessionStorage` for the ID
-  token, never `localStorage`.
-- CSS: keep `dashboard.css` self-sufficient; portal.css may drift.
-- No PII / card numbers / full SSNs / full API keys in logs. Mask before
-  logging.
+
+- **Python 3.12, arm64 Lambdas, stdlib-only** unless absolutely
+  necessary (`urllib` over `requests`, `boto3` is pre-installed).
+- **JS: no bundler, no framework.** Plain DOM. `sessionStorage` for
+  the ID token, never `localStorage`.
+- **CSS:** keep `dashboard.css` self-sufficient. `portal.css` may drift
+  (and lives only in S3 — see warning above).
+- **No PII in logs.** Mask before logging: SSNs, full API keys, card
+  numbers, full phone numbers, full emails.
+- **Feature flags:** we don't use them — when a feature is ready we
+  just ship it.
+
+---
 
 ## Tests / validation before commit
-- Lint: `python3 -m py_compile backend/handlers/loans.py`
-- Visual: `python3 -m http.server -d frontend 8000` — open
-  `localhost:8000/dashboard.html`, set a fake token in sessionStorage:
-  `sessionStorage.cif_id_token = '<paste ID token from prod sign-in>'`.
+
+- Lint changed Python: `python3 -m py_compile backend/handlers/<file>.py`
+- Lint JS: `node --check frontend/js/<file>.js`
+- Visual (local): `python3 -m http.server -d frontend 8000` then open
+  `http://localhost:8000/dashboard.html` and paste a real ID token into
+  `sessionStorage.cif_id_token`.
+- For frontend changes — after deploy, hard-refresh (Cmd+Shift+R) and
+  check in a **private/incognito window** too so local cache doesn't
+  lie to you.
+
+---
 
 ## Git
-- Develop on `claude/continue-previous-session-<suffix>`. Push to
-  `origin`. PRs only on explicit user request.
+
+- Develop on `claude/continue-previous-session-<suffix>` (the suffix
+  is given in the session prompt).
+- Push to `origin`. PRs only on explicit user request.
+- The deploy workflow fires on every push to `claude/**` — if you push
+  a WIP commit, it WILL deploy. Push only when the commit is ready.
+- Never push to `main` without explicit user request.
+- Never `--no-verify`, never force-push to main/master.
+
+---
+
+## Recent work log
+
+Update this section at the end of each session. Newest first.
+
+### 2026-04-21 — Dashboard polish
+- Removed Vergent-internal labels from dashboard copy ("CA Payday",
+  "1 Arleta, CA"); card heading reverts to "Active loan".
+- Big balance now renders with cents (`$117.65` stays `$117.65`, was
+  rounding to `$118`).
+- `_shape_v1_loan` surfaces `apr`, `fees`, `feeBalance`,
+  `numberOfPayments`, `autopay`, `loanDate`.
+- Dashboard gained a 4th stat tile (Fee APR), autopay pill, payment
+  progress bar, and due-date countdown.
+- `get_activity` now calls v1 `GetCustomerLoanHistory` with the
+  service user id captured at auth time. Defensive parsing on
+  response shape.
+- Added `.github/workflows/deploy.yml` (GitHub Actions). Removed the
+  `--delete` flag from S3 sync after it wiped `portal.css` etc.
+
+### 2026-04-20 — MFA SMS via Twilio Verify; branded email; SES ticket
+- Swapped SMS MFA from raw Twilio Messages to Twilio Verify (no A2P
+  10DLC wait). Silent retry on transient 21608 errors.
+- Branded email template (bright-green header, white F monogram,
+  legal footer) wired into Cognito via SES.
+- AWS SES production-access ticket submitted and followed-up.
+
+### 2026-04-19 — Signup email lock; dashboard initial wire-up
+- `pre_signup.py` enforces Vergent email match before Cognito creates
+  the user (`EMAIL_MISMATCH`, `MISSING_VERGENT_EMAIL`,
+  `VERGENT_UNAVAILABLE`).
+- `search.py` enriches single-match responses with the v1 email.
+- Dashboard first-pass loads real loan data via v1
+  `GET /V1/{cid}/loans`.

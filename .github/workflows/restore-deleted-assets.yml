@@ -1,0 +1,89 @@
+name: Restore deleted frontend assets
+
+# One-off recovery workflow. Reads S3 object versions for each known
+# missing key; if the latest version is a delete marker, deletes the
+# marker (which "restores" the prior version).
+#
+# Manual trigger only — run from the Actions tab. Safe to run multiple
+# times: if a file isn't deleted, the step is a no-op.
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: cif-portal-frontend-dev-730667140069
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check bucket versioning
+        id: versioning
+        run: |
+          STATUS=$(aws s3api get-bucket-versioning \
+            --bucket "${{ env.S3_BUCKET }}" \
+            --query "Status" --output text)
+          echo "Bucket versioning status: $STATUS"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          if [ "$STATUS" != "Enabled" ]; then
+            echo "::warning::Versioning is not Enabled on this bucket — deleted files cannot be restored."
+          fi
+
+      - name: Restore deleted files
+        if: steps.versioning.outputs.status == 'Enabled'
+        run: |
+          set -e
+          KEYS=(
+            "css/portal.css"
+            "css/cif-brand.css"
+            "js/portal.js"
+            "js/portal-page.js"
+            "images/favicon.png"
+            "images/logo.png"
+          )
+          for KEY in "${KEYS[@]}"; do
+            echo "::group::$KEY"
+            # Find the VersionId of the latest delete marker (if any).
+            VID=$(aws s3api list-object-versions \
+              --bucket "${{ env.S3_BUCKET }}" \
+              --prefix "$KEY" \
+              --query "DeleteMarkers[?IsLatest==\`true\` && Key=='$KEY'].VersionId | [0]" \
+              --output text)
+            if [ "$VID" = "None" ] || [ -z "$VID" ]; then
+              echo "No delete marker for $KEY — already present or never existed."
+              echo "::endgroup::"
+              continue
+            fi
+            echo "Deleting delete-marker VersionId=$VID for $KEY"
+            aws s3api delete-object \
+              --bucket "${{ env.S3_BUCKET }}" \
+              --key "$KEY" \
+              --version-id "$VID"
+            echo "Restored $KEY"
+            echo "::endgroup::"
+          done
+
+      - name: Invalidate CloudFront after restore
+        if: steps.versioning.outputs.status == 'Enabled'
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id EOV9K12LFKK8T \
+            --paths "/css/portal.css" "/css/cif-brand.css" \
+                    "/js/portal.js" "/js/portal-page.js" \
+                    "/images/favicon.png" "/images/logo.png" \
+            --no-cli-pager
+
+      - name: Versioning disabled — fail with guidance
+        if: steps.versioning.outputs.status != 'Enabled'
+        run: |
+          echo "::error::S3 bucket versioning is not Enabled, so delete markers don't exist and files cannot be restored this way."
+          echo "Either the files truly need to be reconstructed, or you can enable versioning now for the future and ask Claude to check other recovery options."
+          exit 1
