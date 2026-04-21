@@ -105,8 +105,12 @@ jobs:
 
       - name: Sync frontend to S3
         if: steps.changes.outputs.frontend == 'true'
+        # No --delete: some frontend assets (portal.css, cif-brand.css,
+        # portal.js, portal-page.js, favicon.png, logo.png) live only in
+        # S3, not in git. --delete would wipe them. If we ever want to
+        # actually remove a file, delete it from S3 by hand.
         run: |
-          aws s3 sync frontend "s3://${{ env.S3_BUCKET }}" --delete
+          aws s3 sync frontend "s3://${{ env.S3_BUCKET }}"
 
       - name: Invalidate CloudFront
         if: steps.changes.outputs.frontend == 'true'
