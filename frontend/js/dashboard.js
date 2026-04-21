@@ -113,10 +113,41 @@
     wireSignOut();
     wireMobileMenu();
     wireNewLoanButton();
+    showPaymentSuccessBanner();  // one-shot "payment posted" banner
     renderProfileFromClaims();   // instant render from JWT claims
     loadProfileFromApi();         // hydrate with Vergent data (account status, phone hint, text-messaging flag)
     loadActiveLoan();
   });
+
+  // ---------- One-shot "payment received" banner ----------
+  function showPaymentSuccessBanner() {
+    const raw = sessionStorage.getItem('cif_payment_success');
+    if (!raw) return;
+    sessionStorage.removeItem('cif_payment_success');
+    let info;
+    try { info = JSON.parse(raw); } catch (e) { return; }
+    if (!info) return;
+    const amount = Number(info.amount || 0).toLocaleString('en-US', {
+      style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
+    });
+    const banner = document.createElement('div');
+    banner.className = 'dash-banner dash-banner--ok';
+    banner.innerHTML = (
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>' +
+      '<span>Payment of <strong>' + amount + '</strong> received. Your loan has been updated.</span>' +
+      '<button type="button" class="dash-banner-close" aria-label="Dismiss">&times;</button>'
+    );
+    const main = qs('.dash-main');
+    const hero = qs('.dash-hero');
+    if (main && hero && main.parentNode) {
+      main.parentNode.insertBefore(banner, main);
+    } else if (hero && hero.parentNode) {
+      hero.parentNode.insertBefore(banner, hero.nextSibling);
+    }
+    const close = qs('.dash-banner-close', banner);
+    if (close) close.addEventListener('click', function () { banner.remove(); });
+  }
 
   // ---------- Profile card ----------
   function renderProfileFromClaims() {

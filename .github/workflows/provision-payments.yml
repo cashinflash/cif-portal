@@ -1,0 +1,151 @@
+name: Provision payments Lambda
+
+# One-time manual workflow to create the cif-portal-payments-dev
+# Lambda and wire its three HttpApi routes. After this runs once,
+# the regular deploy.yml takes over for code updates.
+#
+# Idempotent: safe to re-run. If the function already exists, it just
+# updates the code + any missing routes.
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  HTTP_API_ID: anh066l1wf
+  AUTHORIZER_ID: ppc9vg
+  FN: cif-portal-payments-dev
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Package handlers
+        run: |
+          cd backend
+          zip -qr /tmp/handlers.zip handlers -x "handlers/__pycache__/*" "*.pyc"
+
+      - name: Create or update payments Lambda
+        run: |
+          set -e
+          if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
+            echo "$FN already exists — updating code."
+            aws lambda update-function-code \
+              --function-name "$FN" \
+              --zip-file fileb:///tmp/handlers.zip \
+              --no-cli-pager >/dev/null
+          else
+            echo "$FN does not exist — creating from loans Lambda template."
+            LOANS_CFG=$(aws lambda get-function-configuration --function-name cif-portal-loans-dev)
+            ROLE=$(echo "$LOANS_CFG" | jq -r '.Role')
+            ENV=$(echo "$LOANS_CFG" | jq -c '.Environment // {"Variables": {}}')
+            LAYERS_ARGS=()
+            LAYER_LIST=$(echo "$LOANS_CFG" | jq -r '(.Layers // []) | map(.Arn) | .[]')
+            if [ -n "$LAYER_LIST" ]; then
+              while IFS= read -r arn; do
+                LAYERS_ARGS+=("$arn")
+              done <<< "$LAYER_LIST"
+            fi
+            CREATE_ARGS=(
+              --function-name "$FN"
+              --runtime python3.12
+              --architectures arm64
+              --role "$ROLE"
+              --handler handlers.payments.lambda_handler
+              --zip-file fileb:///tmp/handlers.zip
+              --environment "$ENV"
+              --memory-size 256
+              --timeout 15
+            )
+            if [ ${#LAYERS_ARGS[@]} -gt 0 ]; then
+              CREATE_ARGS+=(--layers "${LAYERS_ARGS[@]}")
+            fi
+            aws lambda create-function "${CREATE_ARGS[@]}" --no-cli-pager >/dev/null
+            aws lambda wait function-active --function-name "$FN"
+            echo "$FN created."
+          fi
+
+      - name: Wire HttpApi routes
+        run: |
+          set -e
+          FN_ARN=$(aws lambda get-function --function-name "$FN" --query 'Configuration.FunctionArn' --output text)
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          echo "Lambda ARN: $FN_ARN"
+          echo "API: $HTTP_API_ID  Authorizer: $AUTHORIZER_ID"
+
+          # Reuse existing AWS_PROXY integration for this Lambda if present.
+          INTEG_ID=$(aws apigatewayv2 get-integrations --api-id "$HTTP_API_ID" \
+            --query "Items[?IntegrationUri=='$FN_ARN'].IntegrationId | [0]" \
+            --output text 2>/dev/null || echo "")
+          if [ -z "$INTEG_ID" ] || [ "$INTEG_ID" = "None" ]; then
+            INTEG_ID=$(aws apigatewayv2 create-integration \
+              --api-id "$HTTP_API_ID" \
+              --integration-type AWS_PROXY \
+              --integration-uri "$FN_ARN" \
+              --payload-format-version 2.0 \
+              --query IntegrationId --output text)
+            echo "Created integration $INTEG_ID"
+          else
+            echo "Reusing integration $INTEG_ID"
+          fi
+
+          # Ensure each route exists; skip if already present.
+          ROUTES=(
+            "GET /api/my-cards"
+            "GET /api/my-payment/loan-summary"
+            "POST /api/my-payment"
+          )
+          for RK in "${ROUTES[@]}"; do
+            EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
+              --query "Items[?RouteKey=='$RK'].RouteId | [0]" \
+              --output text 2>/dev/null || echo "")
+            if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
+              echo "Route '$RK' already exists ($EXISTING)"
+              continue
+            fi
+            aws apigatewayv2 create-route \
+              --api-id "$HTTP_API_ID" \
+              --route-key "$RK" \
+              --target "integrations/$INTEG_ID" \
+              --authorization-type JWT \
+              --authorizer-id "$AUTHORIZER_ID" \
+              --no-cli-pager >/dev/null
+            echo "Created route '$RK'"
+          done
+
+          # Grant HttpApi permission to invoke the Lambda (one broad statement).
+          STMT_ID=apigateway-invoke-payments
+          if aws lambda get-policy --function-name "$FN" 2>/dev/null | grep -q "\"Sid\":\"$STMT_ID\""; then
+            echo "Lambda permission $STMT_ID already set."
+          else
+            aws lambda add-permission \
+              --function-name "$FN" \
+              --statement-id "$STMT_ID" \
+              --action lambda:InvokeFunction \
+              --principal apigateway.amazonaws.com \
+              --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCT:$HTTP_API_ID/*/*/*" \
+              --no-cli-pager >/dev/null
+            echo "Added invoke permission."
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Payments provisioning"
+            echo ""
+            echo "- Lambda: $FN"
+            echo "- Routes:"
+            echo "  - GET /api/my-cards"
+            echo "  - GET /api/my-payment/loan-summary"
+            echo "  - POST /api/my-payment"
+          } >> "$GITHUB_STEP_SUMMARY"

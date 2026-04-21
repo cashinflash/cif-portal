@@ -51,6 +51,9 @@ backend/
     loans.py           # GET /api/my-profile, /api/my-loans/active,
                        #   /api/my-loans/activity
                        # POST /api/my-loan/new (handoff to Vergent)
+    payments.py        # GET /api/my-cards, /api/my-payment/loan-summary
+                       # POST /api/my-payment (charges saved card via
+                       #   Vergent → Repay; posts to loan atomically)
     auth_mfa.py        # POST /api/login, /send-code, /verify-code
     twilio_verify.py   # Twilio Verify client (imported by auth_mfa)
     twilio_sms.py      # Legacy Messages client (kept, not used)
@@ -93,7 +96,7 @@ docs/                  # Reference material. See VERGENT_INTEGRATION.md,
 | CloudFront distribution | `EOV9K12LFKK8T` (→ `d1zucrj1ouu3c.cloudfront.net`) |
 | DynamoDB MFA sessions | `cif-portal-mfa-sessions-dev` |
 | SES verified domain | `cashinflash.com` (DKIM on) |
-| Lambdas (dev) | `cif-portal-loans-dev`, `cif-portal-auth-mfa-dev`, `cif-portal-search-dev`, `cif-portal-pre-signup-dev` |
+| Lambdas (dev) | `cif-portal-loans-dev`, `cif-portal-auth-mfa-dev`, `cif-portal-search-dev`, `cif-portal-pre-signup-dev`, `cif-portal-payments-dev` |
 
 **SES status:** in sandbox as of 2026-04-20; production-access ticket
 submitted 4/20, follow-up reply sent 4/20, awaiting AWS response.
@@ -270,6 +273,27 @@ organic blobs).
 ## Recent work log
 
 Update this section at the end of each session. Newest first.
+
+### 2026-04-21 — Repay card payments (MVP: saved-card only)
+- New `handlers/payments.py` exposes three routes:
+  `GET /api/my-cards`, `GET /api/my-payment/loan-summary`,
+  `POST /api/my-payment`. PAN is never handled on our side — we
+  call Vergent's `CustomerPortal/Loans/Payments/CreditCardPayment`
+  which routes to Repay and posts the payment to the loan
+  atomically. Loan balance refreshes automatically.
+- New Lambda `cif-portal-payments-dev` (provisioned by
+  `.github/workflows/provision-payments.yml`; user runs it once).
+  After provisioning, the regular `deploy.yml` updates its code on
+  every push just like the other Lambdas.
+- Frontend: full redesign of `payments.html` + new
+  `frontend/js/payments.js` — loan summary, saved-card picker,
+  amount input (defaults to amount due), error states, receipt.
+  "Use a different card" button is visible but disabled with
+  helper text — add-new-card flow is Phase 2, awaiting Vergent
+  confirmation on Repay iframe vs hosted card page.
+- Dashboard shows a one-shot "Payment of $X received" banner on
+  the next page load after a successful payment, keyed off
+  `sessionStorage.cif_payment_success`.
 
 ### 2026-04-21 — Dashboard polish
 - Removed Vergent-internal labels from dashboard copy ("CA Payday",

@@ -76,6 +76,51 @@ Resources:
               Authorizer: JwtAuthorizer
               AuthorizerId: !Ref JwtAuthorizerId
 
+  PaymentsFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub cif-portal-payments-${StackEnv}
+      CodeUri: ../backend/
+      Handler: handlers.payments.lambda_handler
+      Environment:
+        Variables:
+          VERGENT_APIM_BASE_URL: !Ref VergentBaseUrl
+          VERGENT_SECRET_ARN: !Ref VergentSecretArn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref VergentSecretArn
+      Events:
+        Cards:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/my-cards
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        LoanSummary:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/my-payment/loan-summary
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        Pay:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: POST
+            Path: /api/my-payment
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+
 Outputs:
   LoansFnArn:
     Value: !GetAtt LoansFn.Arn
