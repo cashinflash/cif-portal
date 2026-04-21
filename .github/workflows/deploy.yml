@@ -78,6 +78,7 @@ jobs:
 
       - name: Deploy loans Lambda
         if: steps.changes.outputs.loans == 'true'
+        continue-on-error: true
         run: |
           aws lambda update-function-code \
             --function-name cif-portal-loans-dev \
@@ -86,6 +87,7 @@ jobs:
 
       - name: Deploy auth-mfa Lambda
         if: steps.changes.outputs.auth_mfa == 'true'
+        continue-on-error: true
         run: |
           aws lambda update-function-code \
             --function-name cif-portal-auth-mfa-dev \
@@ -94,6 +96,7 @@ jobs:
 
       - name: Deploy search Lambda
         if: steps.changes.outputs.search == 'true'
+        continue-on-error: true
         run: |
           aws lambda update-function-code \
             --function-name cif-portal-search-dev \
@@ -102,6 +105,7 @@ jobs:
 
       - name: Deploy pre-signup Lambda
         if: steps.changes.outputs.pre_signup == 'true'
+        continue-on-error: true
         run: |
           aws lambda update-function-code \
             --function-name cif-portal-pre-signup-dev \
@@ -110,6 +114,7 @@ jobs:
 
       - name: Deploy payments Lambda
         if: steps.changes.outputs.payments == 'true'
+        continue-on-error: true
         run: |
           aws lambda update-function-code \
             --function-name cif-portal-payments-dev \
