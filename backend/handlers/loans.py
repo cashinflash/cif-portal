@@ -289,6 +289,32 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     # in Vergent's model and is NOT what we want to display.
     next_due = amount_due if amount_due is not None else (payoff if payoff is not None else min_due)
 
+    # Fee amount — try several field names Vergent may use, then fall
+    # back to (balance - principal) which is exact for an untouched
+    # payday loan. Becomes inaccurate once partial payments shrink the
+    # balance; we'll lock this to a specific field once the full key
+    # probe below shows us the real one.
+    fees = None
+    for fk in ("OriginalFees", "Fees", "LoanFees", "FeeAmount",
+               "OriginalFeeAmount", "FinanceCharge", "TotalFees"):
+        v = hdr.get(fk)
+        if v is not None:
+            fees = _to_number(v)
+            if fees is not None:
+                break
+    if fees is None and isinstance(detail, dict):
+        for fk in ("OriginalFees", "Fees", "FeeAmount", "FinanceCharge"):
+            v = detail.get(fk)
+            if v is not None:
+                fees = _to_number(v)
+                if fees is not None:
+                    break
+    if fees is None:
+        if payoff is not None and loan_amount is not None and payoff > loan_amount:
+            fees = round(payoff - loan_amount, 2)
+        elif amount_due is not None and loan_amount is not None and amount_due > loan_amount:
+            fees = round(amount_due - loan_amount, 2)
+
     # Autopay pill — disabled until we verify which Vergent v1 field
     # actually means "a payment is scheduled right now" for our tenant.
     # The IsACHOrCardPaymentScheduled flag and the various date fields
@@ -335,7 +361,7 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "isEligibleForRefi": bool(hdr.get("IsEligibleForRefi") or False),
         "isInRescindPeriod": bool(hdr.get("IsInRescindPeriod") or False),
         "apr": _to_number(hdr.get("OriginalFeeApr")),
-        "fees": _to_number(hdr.get("OriginalFees")),
+        "fees": fees,
         "feeBalance": _to_number(hdr.get("FeeBalance")),
         "numberOfPayments": hdr.get("NumberOfPayments"),
         "autopay": autopay,
