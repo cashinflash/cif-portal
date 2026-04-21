@@ -9,7 +9,6 @@
   const API_BASE = '/api';
   const TOKEN_KEY = 'cif_id_token';
   const ACTIVE_ENDPOINT = API_BASE + '/my-loans/active';
-  const ACTIVITY_ENDPOINT = API_BASE + '/my-loans/activity?limit=5';
   const LOGIN_URL = '/start.html';
 
   // ---------- Helpers ----------
@@ -111,7 +110,6 @@
     renderProfileFromClaims();   // instant render from JWT claims
     loadProfileFromApi();         // hydrate with Vergent data (account status, phone hint, text-messaging flag)
     loadActiveLoan();
-    loadActivity();
   });
 
   // ---------- Profile card ----------
@@ -236,10 +234,15 @@
     if (!card) return;
 
     api(ACTIVE_ENDPOINT, token)
-      .then(function (data) { renderActiveLoan(card, data); })
+      .then(function (data) {
+        renderActiveLoan(card, data);
+        renderLoanList(qs('#loanListBody'), (data && data.allLoans) || []);
+        renderMemberSince((data && data.allLoans) || []);
+      })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
         renderActiveLoan(card, null);
+        renderLoanList(qs('#loanListBody'), []);
       });
   }
 
@@ -351,58 +354,81 @@
     el.hidden = false;
   }
 
-  // ---------- Activity ----------
-  function loadActivity() {
-    const body = qs('#activityBody');
-    if (!body) return;
-
-    api(ACTIVITY_ENDPOINT, token)
-      .then(function (data) { renderActivity(body, (data && data.items) || []); })
-      .catch(function (err) {
-        if (err && err.message === 'unauthorized') return;
-        renderActivity(body, []);
-      });
-  }
-
-  function renderActivity(root, items) {
+  // ---------- My loans list ----------
+  function renderLoanList(root, loans) {
+    if (!root) return;
     root.innerHTML = '';
-    if (!items.length) {
+    if (!loans || !loans.length) {
       const p = document.createElement('p');
-      p.className = 'dash-activity-empty';
-      p.textContent = 'No activity yet — your payments and charges will appear here.';
+      p.className = 'dash-loanlist-empty';
+      p.textContent = 'No loans yet.';
       root.appendChild(p);
       return;
     }
-    items.forEach(function (it) {
-      const row = document.createElement('div');
-      row.className = 'dash-activity-row';
 
-      const isDebit = Number(it.amount) > 0 && (it.direction === 'debit' || it.kind === 'charge');
-      const iconWrap = document.createElement('div');
-      iconWrap.className = 'dash-activity-icon' + (isDebit ? ' dash-activity-icon--out' : '');
-      iconWrap.innerHTML = isDebit
-        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>'
-        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+    // Newest first, by loanDate / originationDate.
+    const sorted = loans.slice().sort(function (a, b) {
+      const da = new Date(a.loanDate || a.originationDate || 0).getTime();
+      const db = new Date(b.loanDate || b.originationDate || 0).getTime();
+      return db - da;
+    });
+
+    sorted.forEach(function (loan) {
+      const row = document.createElement('div');
+      row.className = 'dash-loanlist-row';
 
       const main = document.createElement('div');
-      main.className = 'dash-activity-main';
-      const strong = document.createElement('strong');
-      strong.textContent = it.description || it.label || (isDebit ? 'Charge' : 'Payment');
+      main.className = 'dash-loanlist-main';
+
+      const top = document.createElement('div');
+      top.className = 'dash-loanlist-top';
+
+      const idEl = document.createElement('strong');
+      idEl.textContent = 'Loan #' + (loan.publicId || loan.id || '—');
+      top.appendChild(idEl);
+
+      const pill = document.createElement('span');
+      pill.className = 'dash-pill ' + (loan.isOutstanding ? 'dash-pill--ok' : 'dash-pill--closed');
+      pill.textContent = loan.isOutstanding ? (loan.status || 'Current') : (loan.status || 'Closed');
+      top.appendChild(pill);
+
       const small = document.createElement('small');
-      small.textContent = formatDate(it.date);
-      main.appendChild(strong);
+      const dateStr = loan.loanDate || loan.originationDate;
+      small.textContent = 'Originated ' + (dateStr ? formatDate(dateStr) : '—');
+
+      main.appendChild(top);
       main.appendChild(small);
 
-      const amt = document.createElement('div');
-      amt.className = 'dash-activity-amount ' + (isDebit ? 'is-debit' : 'is-credit');
-      const sign = isDebit ? '+' : '−'; // debit adds to balance, credit (payment) reduces balance
-      amt.textContent = sign + formatCurrencyPrecise(Math.abs(Number(it.amount || 0)));
+      const right = document.createElement('div');
+      right.className = 'dash-loanlist-amount';
+      const label = document.createElement('small');
+      label.textContent = loan.isOutstanding ? 'Balance' : 'Borrowed';
+      const amt = document.createElement('strong');
+      amt.textContent = formatCurrencyPrecise(loan.isOutstanding ? loan.balance : loan.principal);
+      right.appendChild(label);
+      right.appendChild(amt);
 
-      row.appendChild(iconWrap);
       row.appendChild(main);
-      row.appendChild(amt);
+      row.appendChild(right);
       root.appendChild(row);
     });
+  }
+
+  // ---------- Member since (earliest loan year) ----------
+  function renderMemberSince(loans) {
+    const row = qs('#profileMemberSinceRow');
+    const val = qs('#profileMemberSince');
+    if (!row || !val || !loans || !loans.length) return;
+    let earliest = null;
+    loans.forEach(function (loan) {
+      const d = new Date(loan.loanDate || loan.originationDate || 0);
+      if (!isNaN(d.getTime()) && d.getTime() > 0 && (!earliest || d < earliest)) {
+        earliest = d;
+      }
+    });
+    if (!earliest) return;
+    val.textContent = String(earliest.getFullYear());
+    row.hidden = false;
   }
 
   // ---------- Sign out ----------

@@ -282,6 +282,24 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     payoff = _to_number(hdr.get("PayoffAmount"))
     amount_due = _to_number(hdr.get("AmountDue"))
     min_due = _to_number(hdr.get("MinAmountDue"))
+
+    # "Amount due" on the UI should be what the customer actually owes on
+    # the due date — principal + fees. For a payday loan that's AmountDue
+    # (total) or PayoffAmount. MinAmountDue can be just the fee portion
+    # in Vergent's model and is NOT what we want to display.
+    next_due = amount_due if amount_due is not None else (payoff if payoff is not None else min_due)
+
+    # Autopay pill: only true when BOTH the flag is set AND we have a
+    # scheduled payment date. The flag alone can be true for enrolled
+    # loans with no upcoming scheduled debit.
+    autopay_flag = bool(hdr.get("IsACHOrCardPaymentScheduled"))
+    scheduled_date = (
+        hdr.get("NextACHPaymentDate")
+        or hdr.get("ScheduledPaymentDate")
+        or hdr.get("NextScheduledPaymentDate")
+    )
+    autopay = autopay_flag and bool(scheduled_date)
+
     return {
         "id": hdr.get("hdr_id"),
         "publicId": detail.get("PublicLoanId") or hdr.get("PublicLoanId"),
@@ -295,7 +313,7 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "amountDue": amount_due,
         "minAmountDue": min_due,
         "nextDueDate": _format_iso(hdr.get("DueDate") or hdr.get("NextPaymentDate")),
-        "nextDueAmount": min_due if min_due is not None else amount_due,
+        "nextDueAmount": next_due,
         "originationDate": _format_iso(hdr.get("OriginationDate")),
         "loanDate": _format_iso(hdr.get("LoanDate")),
         "storeId": hdr.get("StoreId"),
@@ -307,7 +325,8 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "fees": _to_number(hdr.get("OriginalFees")),
         "feeBalance": _to_number(hdr.get("FeeBalance")),
         "numberOfPayments": hdr.get("NumberOfPayments"),
-        "autopay": bool(hdr.get("IsACHOrCardPaymentScheduled") or False),
+        "autopay": autopay,
+        "scheduledPaymentDate": _format_iso(scheduled_date),
     }
 
 
