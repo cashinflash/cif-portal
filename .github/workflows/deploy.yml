@@ -40,8 +40,14 @@ jobs:
           set -e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Manual run — deploying everything."
-            CHANGED="backend/handlers/loans.py backend/handlers/auth_mfa.py backend/handlers/search.py backend/handlers/pre_signup.py frontend/"
-          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            echo "loans=true"       >> "$GITHUB_OUTPUT"
+            echo "auth_mfa=true"    >> "$GITHUB_OUTPUT"
+            echo "search=true"      >> "$GITHUB_OUTPUT"
+            echo "pre_signup=true"  >> "$GITHUB_OUTPUT"
+            echo "frontend=true"    >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD^ HEAD)
           else
             CHANGED=$(git ls-files)
