@@ -136,6 +136,125 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     return _json_response(200, {"loan": loan})
 
 
+def _luhn_ok(digits: str) -> bool:
+    """Checksum-validate a card number. Purely defensive — Vergent will
+    reject bad PANs on its side too."""
+    if not digits or not digits.isdigit() or not (13 <= len(digits) <= 19):
+        return False
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        n = int(ch)
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return total % 10 == 0
+
+
+def _detect_card_type(digits: str) -> str:
+    """BIN-based brand detection. Matches Vergent's enum values where
+    possible; falls back to 'Other'."""
+    if not digits:
+        return "Other"
+    if digits.startswith("4"):
+        return "Visa"
+    if digits[:2] in {"34", "37"}:
+        return "Amex"
+    if digits.startswith("6011") or digits[:2] == "65" or (622126 <= int(digits[:6] or 0) <= 622925):
+        return "Discover"
+    if digits[:2] in {"51", "52", "53", "54", "55"} or (
+        2221 <= int(digits[:4] or 0) <= 2720
+    ):
+        return "MasterCard"
+    return "Other"
+
+
+def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-cards — save a new card on the signed-in customer.
+
+    We forward the card details to Vergent's
+    POST /api/CustomerPortal/Customer/Cards, which tokenizes via Repay
+    server-side. PAN passes through this Lambda over HTTPS but is
+    never stored or logged (only last4).
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+
+    name = (body.get("cardHolderName") or "").strip()
+    pan = "".join(ch for ch in (body.get("cardNumber") or "") if ch.isdigit())
+    ccv = "".join(ch for ch in (body.get("ccv") or "") if ch.isdigit())
+    try:
+        exp_month = int(body.get("expireMonth") or 0)
+        exp_year = int(body.get("expireYear") or 0)
+    except (TypeError, ValueError):
+        exp_month = exp_year = 0
+
+    # Shape checks (cheap guardrails; Vergent validates too).
+    if not name or len(name) > 80:
+        return _json_response(400, {"error": "name_invalid"})
+    if not _luhn_ok(pan):
+        return _json_response(400, {"error": "card_invalid"})
+    if not (1 <= exp_month <= 12):
+        return _json_response(400, {"error": "exp_invalid"})
+    if exp_year < 100:  # two-digit year → 2000s
+        exp_year += 2000
+    if exp_year < 2024 or exp_year > 2099:
+        return _json_response(400, {"error": "exp_invalid"})
+    if not (3 <= len(ccv) <= 4):
+        return _json_response(400, {"error": "ccv_invalid"})
+
+    card_type = (body.get("cardType") or _detect_card_type(pan)).strip() or "Other"
+    last4 = pan[-4:]
+
+    # Never log PAN or CCV. Custid + last4 + amount-ish metadata only.
+    log.info("add card attempt cid=%s last4=%s brand=%s exp=%02d/%d",
+             cid, last4, card_type, exp_month, exp_year)
+
+    vergent_body = {
+        "cardHolderName": name,
+        # Vergent's field name is misleading — swagger says
+        # 'lastFourCardNumber' but their endpoint expects the full PAN
+        # and strips/tokenizes on their side via Repay.
+        "lastFourCardNumber": pan,
+        "cardType": card_type,
+        "expireMonth": exp_month,
+        "expireYear": exp_year,
+        "ccv": ccv,
+        "isEligibleForDisbursement": False,
+    }
+
+    status, resp, raw = _apim_call(
+        "POST",
+        "/api/CustomerPortal/Customer/Cards",
+        body=vergent_body,
+    )
+
+    if status not in (200, 201) or not isinstance(resp, dict):
+        log.warning("add card upstream status=%s raw=%s", status, raw[:300] if raw else "")
+        return _json_response(502, {"error": "upstream_unavailable"})
+
+    if not resp.get("success"):
+        log.warning("add card declined cid=%s last4=%s", cid, last4)
+        return _json_response(200, {"success": False, "error": "card_declined"})
+
+    payment_id = resp.get("paymentId")
+    log.info("add card success cid=%s last4=%s paymentId=%s", cid, last4, payment_id)
+
+    return _json_response(200, {
+        "success": True,
+        "last4": last4,
+        "brand": card_type,
+    })
+
+
 def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -263,6 +382,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
         if path.endswith("/my-cards") and method == "GET":
             return get_my_cards(event)
+        if path.endswith("/my-cards") and method == "POST":
+            return post_card(event)
         if path.endswith("/my-payment/loan-summary") and method == "GET":
             return get_loan_summary(event)
         if path.endswith("/my-payment") and method == "POST":

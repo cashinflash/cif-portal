@@ -52,6 +52,10 @@ backend/
                        #   /api/my-loans/activity
                        # POST /api/my-loan/new (handoff to Vergent)
     payments.py        # GET /api/my-cards, /api/my-payment/loan-summary
+                       # POST /api/my-cards (add new card — forwards
+                       #   full PAN over HTTPS to Vergent's
+                       #   CustomerPortal/Customer/Cards; Vergent
+                       #   tokenizes via Repay server-side)
                        # POST /api/my-payment (charges saved card via
                        #   Vergent → Repay; posts to loan atomically)
     auth_mfa.py        # POST /api/login, /send-code, /verify-code
@@ -273,6 +277,27 @@ organic blobs).
 ## Recent work log
 
 Update this section at the end of each session. Newest first.
+
+### 2026-04-21 — In-portal Add Card (direct to Vergent)
+- New `POST /api/my-cards` route on the payments Lambda. Accepts
+  `{cardHolderName, cardNumber, expireMonth, expireYear, ccv,
+  cardType}`, Luhn-validates + bounds-checks, forwards to Vergent
+  `POST /api/CustomerPortal/Customer/Cards`. Vergent handles Repay
+  tokenization server-side; our Lambda never logs PAN/CCV (only
+  `last4` + brand + masked metadata).
+- PCI posture: SAQ A-EP (PAN transits our HTTPS stack but is never
+  stored or persisted). Quarterly ASV scans + annual AOC become a
+  compliance requirement for the merchant.
+- Frontend: Add Card button on `/payments.html` opens an in-page
+  modal (no new tab, no redirect). Modal has name/number/exp/CVV
+  with auto-formatting, Luhn check, BIN-based brand detection,
+  inline errors. On success: modal closes, "Card added" toast,
+  card list auto-refreshes, card immediately usable for the
+  existing Pay flow.
+- Routes wired via `infra/template.yaml` (new `AddCard` event on
+  `PaymentsFn`) and `.github/workflows/provision-payments.yml` (new
+  `POST /api/my-cards` entry). User re-runs the provisioning
+  workflow once to add the new route to the live HttpApi.
 
 ### 2026-04-21 — Repay card payments (MVP: saved-card only)
 - New `handlers/payments.py` exposes three routes:

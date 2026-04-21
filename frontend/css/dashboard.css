@@ -653,6 +653,137 @@
   line-height: 1.4;
 }
 .pay-notice svg { color: var(--cif-green); flex-shrink: 0; margin-top: 2px; }
+
+/* ---------- Add Card modal ---------- */
+.pay-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.pay-modal[hidden] { display: none; }
+.pay-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(26,26,46,.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.pay-modal-panel {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  overflow: hidden;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+}
+.pay-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--cif-hairline);
+}
+.pay-modal-head h3 {
+  margin: 0;
+  color: var(--cif-navy);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.pay-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: var(--cif-muted);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.pay-modal-close:hover { color: var(--cif-navy); }
+.pay-modal-body {
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+}
+.pay-field { margin-bottom: 16px; }
+.pay-field .pay-label { margin-bottom: 6px; }
+.pay-field input[type="text"] {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--cif-hairline);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--cif-navy);
+  background: #fff;
+  transition: border-color .15s ease;
+  font-variant-numeric: tabular-nums;
+}
+.pay-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--cif-green);
+}
+.pay-input-wrap { position: relative; }
+.pay-card-brand {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--cif-green-dark);
+  text-transform: uppercase;
+  background: rgba(14,135,65,.1);
+  padding: 3px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+.pay-card-brand:empty { display: none; }
+.pay-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .pay-modal { padding: 0; align-items: stretch; }
+  .pay-modal-panel { max-width: none; border-radius: 0; max-height: 100vh; }
+  .pay-row-2 { grid-template-columns: 1fr; }
+}
+
+/* ---------- Card-added toast ---------- */
+.pay-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translate(-50%, -20px);
+  background: var(--cif-navy);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .88rem;
+  font-weight: 600;
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  opacity: 0;
+  transition: opacity .25s ease, transform .25s ease;
+}
+.pay-toast[hidden] { display: none; }
+.pay-toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.pay-toast svg { color: #4ade80; }
 .pay-notice-close {
   margin-left: auto;
   background: transparent;

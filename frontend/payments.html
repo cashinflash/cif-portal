@@ -127,10 +127,10 @@
             <div class="skeleton-line w-60"></div>
           </div>
         </div>
-        <button type="button" class="pay-new-card" id="payAddCardBtn" disabled title="Coming soon — we're finishing the secure in-portal card entry. Call (747) 270-7121 or visit a store to add a card today.">
+        <button type="button" class="pay-new-card" id="payAddCardBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
           Add a new debit card
-          <small>Coming soon — call (747) 270-7121 or visit a store today</small>
+          <small>Securely stored with our payment partner</small>
         </button>
       </div>
 
@@ -199,6 +199,60 @@
       </div>
     </section>
   </main>
+
+  <!-- Add Card modal (hidden by default) -->
+  <div class="pay-modal" id="payAddCardModal" hidden aria-hidden="true" role="dialog" aria-labelledby="addCardTitle">
+    <div class="pay-modal-backdrop" data-close-modal></div>
+    <div class="pay-modal-panel" role="document">
+      <div class="pay-modal-head">
+        <h3 id="addCardTitle">Add a new debit card</h3>
+        <button type="button" class="pay-modal-close" data-close-modal aria-label="Close">&times;</button>
+      </div>
+      <form id="addCardForm" class="pay-modal-body" novalidate autocomplete="off">
+        <div class="pay-field">
+          <label class="pay-label" for="cardName">Cardholder name</label>
+          <input type="text" id="cardName" name="cardName" autocomplete="cc-name" maxlength="80" required>
+        </div>
+
+        <div class="pay-field">
+          <label class="pay-label" for="cardNumber">Card number</label>
+          <div class="pay-input-wrap">
+            <input type="text" id="cardNumber" name="cardNumber" inputmode="numeric" autocomplete="cc-number" maxlength="23" required placeholder="1234 5678 9012 3456">
+            <span class="pay-card-brand" id="cardBrand" aria-hidden="true"></span>
+          </div>
+        </div>
+
+        <div class="pay-row-2">
+          <div class="pay-field">
+            <label class="pay-label" for="cardExp">Expiration</label>
+            <input type="text" id="cardExp" name="cardExp" inputmode="numeric" autocomplete="cc-exp" maxlength="5" required placeholder="MM/YY">
+          </div>
+          <div class="pay-field">
+            <label class="pay-label" for="cardCcv">CVV</label>
+            <input type="text" id="cardCcv" name="cardCcv" inputmode="numeric" autocomplete="cc-csc" maxlength="4" required placeholder="123">
+          </div>
+        </div>
+
+        <div class="pay-trust">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Bank-grade encryption · PCI-protected
+        </div>
+
+        <p class="pay-error" id="addCardError" hidden></p>
+
+        <div class="pay-actions">
+          <button type="submit" class="btn-apply" id="addCardSubmit">Save card</button>
+          <button type="button" class="btn-login" data-close-modal>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Card added toast -->
+  <div class="pay-toast" id="payCardToast" hidden role="status" aria-live="polite">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+    <span>Card added</span>
+  </div>
 
   <footer class="dash-footer">
     <div class="container dash-footer-inner">
