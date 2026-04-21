@@ -305,13 +305,13 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     )
     autopay = False  # conservative default; see TODO above
     if log.isEnabledFor(logging.INFO):
-        debug_keys = {k: hdr.get(k) for k in hdr.keys()
-                      if any(s in k.lower() for s in ("sched", "ach", "autopay", "nextpay"))}
-        log.info("autopay probe hdr_id=%s flag=%s scheduled_date=%s keys=%s",
+        # One-shot full inventory — we need to see every field Vergent
+        # actually returns so we can pick the right autopay-indicator.
+        # Remove this once autopay is wired correctly.
+        log.info("autopay probe hdr_id=%s hdr_keys=%s detail_keys=%s",
                  hdr.get("hdr_id"),
-                 hdr.get("IsACHOrCardPaymentScheduled"),
-                 scheduled_date,
-                 debug_keys)
+                 sorted(hdr.keys()) if isinstance(hdr, dict) else None,
+                 sorted(detail.keys()) if isinstance(detail, dict) else None)
 
     return {
         "id": hdr.get("hdr_id"),
