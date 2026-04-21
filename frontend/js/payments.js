@@ -11,6 +11,7 @@
   const TOKEN_KEY = 'cif_id_token';
   const LOGIN_URL = '/start.html';
   const SUCCESS_KEY = 'cif_payment_success';
+  const REPAY_PORTAL_URL = 'https://cashinflash.repay.io/';
 
   function qs(sel, root) { return (root || document).querySelector(sel); }
   function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
@@ -113,6 +114,69 @@
       renderCards();
       return state.cards;
     });
+  }
+
+  function refreshCards() {
+    const btn = qs('#payRefreshCards');
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('is-spinning');
+    }
+    const list = qs('#payCardList');
+    if (list) list.style.opacity = '.5';
+    loadCards()
+      .then(function () {
+        // After refresh, re-run the form init so the pay button picks
+        // up a newly-added card.
+        initForm();
+      })
+      .catch(function () { /* keep existing list on error */ })
+      .finally(function () {
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('is-spinning');
+        }
+        if (list) list.style.opacity = '';
+      });
+  }
+
+  function openRepayPortal() {
+    // Show a small "we opened it — come back when done" banner on the
+    // page, then pop Repay's customer portal in a new tab. Repay is
+    // already linked to Vergent server-side, so any card the customer
+    // adds in the portal syncs to Vergent automatically. We refresh
+    // the list from Vergent when they come back.
+    showAddCardNotice();
+    const w = window.open(REPAY_PORTAL_URL, '_blank', 'noopener,noreferrer');
+    if (!w) {
+      const err = qs('#payError');
+      err.textContent = 'Please allow pop-ups and try again, or visit ' + REPAY_PORTAL_URL + ' directly.';
+      err.hidden = false;
+    }
+
+    // Best-effort: when the tab regains focus (user came back), auto-refresh.
+    const onFocus = function () {
+      window.removeEventListener('focus', onFocus);
+      setTimeout(refreshCards, 800);
+    };
+    window.addEventListener('focus', onFocus);
+  }
+
+  function showAddCardNotice() {
+    let notice = qs('#payAddCardNotice');
+    if (notice) { notice.hidden = false; return; }
+    notice = document.createElement('div');
+    notice.id = 'payAddCardNotice';
+    notice.className = 'pay-notice';
+    notice.innerHTML = (
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
+      '<div>We\'ve opened our secure payment partner in a new tab. Add your card there, then come back here and your new card will appear.</div>' +
+      '<button type="button" class="pay-notice-close" aria-label="Dismiss">&times;</button>'
+    );
+    const section = qs('#payAddCardBtn').closest('.pay-section');
+    if (section) section.appendChild(notice);
+    const close = qs('.pay-notice-close', notice);
+    if (close) close.addEventListener('click', function () { notice.remove(); });
   }
 
   function renderCards() {
@@ -267,8 +331,16 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function wireButtons() {
+    const refresh = qs('#payRefreshCards');
+    if (refresh) refresh.addEventListener('click', refreshCards);
+    const addBtn = qs('#payAddCardBtn');
+    if (addBtn) addBtn.addEventListener('click', openRepayPortal);
+  }
+
   // ---------- Boot ----------
   document.addEventListener('DOMContentLoaded', function () {
+    wireButtons();
     Promise.all([loadLoan(), loadCards()])
       .then(function () { initForm(); })
       .catch(function (err) {
