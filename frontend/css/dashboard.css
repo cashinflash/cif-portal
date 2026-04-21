@@ -307,15 +307,16 @@
   margin-bottom: 12px;
 }
 .dash-loan-amount {
-  font-size: clamp(2.2rem, 5.5vw, 3rem);
+  font-size: clamp(2.4rem, 5.8vw, 3.2rem);
   font-weight: 800;
-  letter-spacing: -.02em;
+  letter-spacing: -.025em;
   color: var(--cif-navy);
   line-height: 1;
   margin: 0 0 4px;
+  font-variant-numeric: tabular-nums;
 }
 .dash-loan-amount small {
-  font-size: .35em;
+  font-size: .38em;
   vertical-align: super;
   color: var(--cif-muted);
   font-weight: 600;
@@ -347,6 +348,7 @@
   font-size: 1.1rem;
   font-weight: 700;
   color: var(--cif-navy);
+  font-variant-numeric: tabular-nums;
 }
 .dash-loan-cta-row {
   display: flex;
@@ -361,10 +363,10 @@
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: var(--cif-radius-pill);
-  font-size: .72rem;
+  border-radius: 6px;
+  font-size: .7rem;
   font-weight: 700;
-  letter-spacing: .04em;
+  letter-spacing: .06em;
   text-transform: uppercase;
 }
 .dash-pill::before {
@@ -384,19 +386,19 @@
   letter-spacing: .04em;
   color: var(--cif-muted);
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 3px 8px;
   background: rgba(14,135,65,.08);
-  border-radius: 999px;
+  border-radius: 6px;
   text-transform: none;
   font-variant-numeric: tabular-nums;
 }
 
 /* Payment progress + due-date countdown */
-.dash-loan-progress { margin: 18px 0 18px; }
+.dash-loan-progress { margin: 20px 0 18px; }
 .dash-loan-progress-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(14,135,65,.1);
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(14,135,65,.12);
   overflow: hidden;
 }
 .dash-loan-progress-bar > span {
@@ -404,7 +406,7 @@
   height: 100%;
   width: 0;
   background: var(--cif-green);
-  border-radius: 999px;
+  border-radius: 3px;
   transition: width .4s ease;
 }
 .dash-loan-progress-labels {
@@ -414,11 +416,13 @@
   font-size: .8rem;
   color: var(--cif-muted);
 }
-.dash-loan-progress-labels strong { color: var(--cif-navy); font-weight: 700; }
+.dash-loan-progress-labels strong { color: var(--cif-navy); font-weight: 700; font-variant-numeric: tabular-nums; }
 .dash-loan-countdown {
-  font-size: .85rem;
+  font-size: .82rem;
   color: var(--cif-muted);
   margin: 0 0 18px;
+  font-weight: 500;
+  letter-spacing: .01em;
 }
 .dash-loan-countdown.is-soon { color: #8a6d00; font-weight: 600; }
 .dash-loan-countdown.is-late { color: var(--cif-danger); font-weight: 600; }
@@ -518,6 +522,7 @@
   color: var(--cif-navy);
   font-weight: 700;
   font-size: 1rem;
+  font-variant-numeric: tabular-nums;
 }
 .dash-loanlist-empty {
   color: var(--cif-muted);
