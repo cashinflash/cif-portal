@@ -13,6 +13,7 @@ on:
 env:
   AWS_REGION: us-east-1
   S3_BUCKET: cif-portal-frontend-dev-730667140069
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   restore:

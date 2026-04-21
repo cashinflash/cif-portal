@@ -15,6 +15,9 @@ env:
   AWS_REGION: us-east-1
   S3_BUCKET: cif-portal-frontend-dev-730667140069
   CF_DISTRIBUTION: EOV9K12LFKK8T
+  # Silence Node 20 deprecation warnings from actions that haven't
+  # shipped a Node 24 build yet. Safe — forces them to run on Node 24.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
