@@ -95,19 +95,46 @@ def _brand_key(s: str) -> str:
 
 
 def _load_card_types() -> None:
-    """Populate _card_types_by_name from Vergent once per warm container."""
+    """Populate _card_types_by_name from Vergent once per warm container.
+
+    Vergent returns a FLAT dict {"Visa": 2, "MasterCard": 1, ...} —
+    not the list-of-objects Swagger suggests. Handle both shapes.
+    """
     global _card_types_by_name, _card_types_by_id
     if _card_types_by_name is not None:
         return
     status, body, _raw = _v1_request("GET", "/V1/GetCustomerCardTypes")
     names: Dict[str, int] = {}
     ids: Dict[int, str] = {}
-    if status == 200:
-        items = body if isinstance(body, list) else (body.get("CardTypes") if isinstance(body, dict) else None)
-        if isinstance(items, list):
-            for t in items:
-                if not isinstance(t, dict):
-                    continue
+    if status == 200 and isinstance(body, dict):
+        # Flat-dict format {name: id} — observed on our tenant.
+        flat_ok = True
+        for k, v in body.items():
+            try:
+                names[_brand_key(str(k))] = int(v)
+                ids[int(v)] = str(k)
+            except (TypeError, ValueError):
+                flat_ok = False
+                break
+        if not flat_ok:
+            names.clear(); ids.clear()
+            # Try nested variants: {CardTypes: [...]}, {items: [...]}
+            items = body.get("CardTypes") or body.get("items") or body.get("Items")
+            if isinstance(items, list):
+                for t in items:
+                    if isinstance(t, dict):
+                        name = (t.get("name") or t.get("Name") or t.get("TypeName") or "").strip()
+                        tid = t.get("id") or t.get("Id") or t.get("TypeId")
+                        if name and tid is not None:
+                            try:
+                                tid_int = int(tid)
+                            except (TypeError, ValueError):
+                                continue
+                            names[_brand_key(name)] = tid_int
+                            ids[tid_int] = name
+    elif status == 200 and isinstance(body, list):
+        for t in body:
+            if isinstance(t, dict):
                 name = (t.get("name") or t.get("Name") or t.get("TypeName") or "").strip()
                 tid = t.get("id") or t.get("Id") or t.get("TypeId")
                 if name and tid is not None:
@@ -117,6 +144,7 @@ def _load_card_types() -> None:
                         continue
                     names[_brand_key(name)] = tid_int
                     ids[tid_int] = name
+
     if not names:
         log.warning("GetCustomerCardTypes yielded no usable mapping; falling back to static guesses. body=%s",
                     str(body)[:300] if body else None)
