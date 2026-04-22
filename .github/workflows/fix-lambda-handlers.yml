@@ -1,0 +1,72 @@
+name: Fix Lambda handler paths
+
+# One-off repair workflow. Our deploy pipeline zips backend/handlers/*
+# so every Python file lands under a `handlers/` prefix inside the
+# zip. Each Lambda's Handler config must therefore read
+# `handlers.<module>.lambda_handler`. If a function got created or
+# reconfigured with `<module>.lambda_handler` (no prefix), its init
+# fails with `Runtime.ImportModuleError: No module named '<module>'`
+# on every invocation and API Gateway returns a generic 500.
+#
+# This workflow asserts the correct handler path on each function so
+# we never fight configuration drift again. Triggers on dispatch or
+# when .github/fix-handlers-trigger.txt is touched.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/fix-handlers-trigger.txt'
+
+env:
+  AWS_REGION: us-east-1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Assert handler paths
+        run: |
+          set -e
+          declare -A MAP=(
+            [cif-portal-loans-dev]=handlers.loans.lambda_handler
+            [cif-portal-auth-mfa-dev]=handlers.auth_mfa.lambda_handler
+            [cif-portal-search-dev]=handlers.search.lambda_handler
+            [cif-portal-pre-signup-dev]=handlers.pre_signup.lambda_handler
+            [cif-portal-payments-dev]=handlers.payments.lambda_handler
+          )
+          for FN in "${!MAP[@]}"; do
+            WANT="${MAP[$FN]}"
+            if ! aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
+              echo "::warning::$FN not found, skipping."
+              continue
+            fi
+            HAVE=$(aws lambda get-function-configuration \
+              --function-name "$FN" --query 'Handler' --output text)
+            if [ "$HAVE" = "$WANT" ]; then
+              echo "$FN: OK ($HAVE)"
+            else
+              echo "$FN: fixing $HAVE -> $WANT"
+              aws lambda wait function-updated --function-name "$FN"
+              aws lambda update-function-configuration \
+                --function-name "$FN" \
+                --handler "$WANT" \
+                --no-cli-pager >/dev/null
+              aws lambda wait function-updated --function-name "$FN"
+              echo "$FN: set to $WANT"
+            fi
+          done
