@@ -179,6 +179,23 @@ jobs:
             -H 'Access-Control-Request-Headers: content-type')
           echo "- Preflight OPTIONS: \`$PRE_CODE\`" >> "$REPORT"
 
+          echo "" >> "$REPORT"
+          echo "## 10. Current /api/if/list contents (metadata only)" >> "$REPORT"
+          # Pull the view secret and call the list endpoint ourselves
+          # so we can see whether records exist regardless of the
+          # dashboard's Render deploy status.
+          SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id cif-portal/if/view-secret \
+            --query SecretString --output text 2>/dev/null | jq -r '.secret' || echo "")
+          LIST_CODE=$(curl -s -o /tmp/list.json -w "%{http_code}" \
+            -X GET "https://$HTTP_API_ID.execute-api.$AWS_REGION.amazonaws.com/dev/api/if/list" \
+            -H "X-View-Secret: $SECRET")
+          echo "- HTTP: \`$LIST_CODE\`" >> "$REPORT"
+          echo '```json' >> "$REPORT"
+          jq '.count, (.submissions // [] | map({id: .submissionId, borrower: .borrowerName, brand, last4, status, submittedAt}))' /tmp/list.json >> "$REPORT" 2>/dev/null || head -c 500 /tmp/list.json >> "$REPORT"
+          echo '' >> "$REPORT"
+          echo '```' >> "$REPORT"
+
       - name: Commit report
         run: |
           git config user.email "actions@github.com"
