@@ -1,4 +1,5 @@
 name: Provision IF (instant-funding) vault
+# Auto-retrigger: 1776896192
 
 # Creates all infrastructure for the /if card-handoff flow:
 #   - KMS key (alias/cif-portal-if-vault) used to envelope-encrypt
