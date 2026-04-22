@@ -1,0 +1,53 @@
+name: Enable HttpApi CORS
+
+# One-off + idempotent. Sets API-level CORS configuration on the
+# cif-portal HttpApi so every response (including routing errors
+# and preflights) carries the right Access-Control-* headers.
+#
+# Why this matters: HttpApi v2 routes without an OPTIONS handler,
+# or unmatched paths that return 404, emit API-Gateway-native
+# responses WITHOUT CORS headers. That causes browsers to surface
+# the request as a network/CORS error instead of as the real
+# status code — making cross-origin pages (like cashinflash.com/if
+# talking to the HttpApi) fail in ways that look like "blocked by
+# browser" even when the underlying issue is something else.
+#
+# API-level CORS lives alongside per-Lambda CORS headers; the
+# Lambdas' responses still carry their own headers, and the API
+# CORS is the default for anything the API generates itself.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/workflows/enable-httpapi-cors.yml'
+
+env:
+  AWS_REGION: us-east-1
+  HTTP_API_ID: anh066l1wf
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Apply CORS configuration
+        run: |
+          set -e
+          CORS_JSON='{"AllowOrigins":["*"],"AllowMethods":["GET","POST","OPTIONS"],"AllowHeaders":["Content-Type","Authorization","X-View-Secret"],"MaxAge":600}'
+          aws apigatewayv2 update-api \
+            --api-id "$HTTP_API_ID" \
+            --cors-configuration "$CORS_JSON" \
+            --no-cli-pager >/dev/null
+          echo "API-level CORS applied to $HTTP_API_ID"
+          aws apigatewayv2 get-api --api-id "$HTTP_API_ID" \
+            --query 'CorsConfiguration' --output json
