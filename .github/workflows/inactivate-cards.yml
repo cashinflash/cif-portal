@@ -110,10 +110,13 @@ jobs:
           for ID in "${IDS[@]}"; do
             ID_TRIM=$(echo "$ID" | tr -d '[:space:]')
             [ -z "$ID_TRIM" ] && continue
+            # IIS wants a Content-Length header even for an empty PUT;
+            # pass an empty body via --data "" so curl sets it.
             CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
               -X PUT "$V1_BASE/V1/PutCustomerInactivateCard/$ID_TRIM?custId=$CID" \
               -H "Token: $TOKEN" \
-              -H "Content-Type: application/json")
+              -H "Content-Type: application/json" \
+              --data "")
             BODY=$(head -c 400 /tmp/resp.json)
             echo "$ID_TRIM → HTTP $CODE"
             {
