@@ -1,0 +1,138 @@
+name: Capture Lambda logs (any function)
+
+# Generic version of capture-payments-logs. Triggers on any change to
+# .github/lambda-log-trigger.txt — that file's first line must be:
+#   <function-suffix> [minutes] [filter-pattern]
+# e.g.
+#   auth-mfa 60 email
+#   search 30
+#   payments 15 "add card"
+#
+# <function-suffix> resolves to cif-portal-<suffix>-dev. Output lands
+# in debug/<suffix>-logs.md and is committed back with [skip ci].
+
+on:
+  workflow_dispatch:
+    inputs:
+      function_suffix:
+        description: Function suffix (payments, auth-mfa, search, loans)
+        required: true
+      minutes:
+        description: How many minutes of logs
+        required: true
+        default: "30"
+      filter:
+        description: Optional CloudWatch filter pattern
+        required: false
+        default: ""
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/lambda-log-trigger.txt'
+
+env:
+  AWS_REGION: us-east-1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve inputs
+        id: inputs
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SUFFIX="${{ github.event.inputs.function_suffix }}"
+            MINS="${{ github.event.inputs.minutes }}"
+            FILTER="${{ github.event.inputs.filter }}"
+          else
+            LINE=$(cat .github/lambda-log-trigger.txt | head -1)
+            SUFFIX=$(echo "$LINE" | awk '{print $1}')
+            MINS=$(echo "$LINE" | awk '{print $2}')
+            FILTER=$(echo "$LINE" | cut -d' ' -f3-)
+            [ -z "$MINS" ] && MINS="30"
+          fi
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+          echo "minutes=$MINS" >> "$GITHUB_OUTPUT"
+          echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
+          echo "fn=cif-portal-$SUFFIX-dev" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch CloudWatch log events
+        env:
+          FN: ${{ steps.inputs.outputs.fn }}
+          MINS: ${{ steps.inputs.outputs.minutes }}
+          FILTER: ${{ steps.inputs.outputs.filter }}
+          SUFFIX: ${{ steps.inputs.outputs.suffix }}
+        run: |
+          set -e
+          START=$(( $(date +%s) * 1000 - MINS * 60 * 1000 ))
+          GROUP="/aws/lambda/$FN"
+          echo "Group: $GROUP, Since: ${MINS} min, Filter: ${FILTER:-(none)}"
+
+          if [ -n "$FILTER" ]; then
+            aws logs filter-log-events \
+              --log-group-name "$GROUP" \
+              --start-time "$START" \
+              --filter-pattern "$FILTER" \
+              --limit 500 \
+              --output json > /tmp/events.json
+          else
+            aws logs filter-log-events \
+              --log-group-name "$GROUP" \
+              --start-time "$START" \
+              --limit 500 \
+              --output json > /tmp/events.json
+          fi
+
+          mkdir -p debug
+          {
+            echo "# Lambda logs — $FN"
+            echo ""
+            echo "- Function: \`$FN\`"
+            echo "- Window: last ${MINS} minute(s)"
+            echo "- Filter: \`${FILTER:-(none)}\`"
+            echo "- Captured at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            COUNT=$(jq '.events | length' /tmp/events.json)
+            echo "## $COUNT event(s)"
+            echo ""
+            if [ "$COUNT" = "0" ]; then
+              echo "_No events in window. Trigger an action on the function and retry._"
+            else
+              echo '```'
+              jq -r '.events[] | "\((.timestamp/1000) | strftime("%H:%M:%S"))  \(.message | rtrimstr("\n"))"' /tmp/events.json
+              echo '```'
+            fi
+          } > "debug/${SUFFIX}-logs.md"
+
+      - name: Commit logs back
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUFFIX: ${{ steps.inputs.outputs.suffix }}
+        run: |
+          set -e
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add "debug/${SUFFIX}-logs.md"
+          if git diff --staged --quiet; then
+            echo "No change"
+            exit 0
+          fi
+          git commit -m "debug: ${SUFFIX} Lambda logs [skip ci]"
+          git push origin HEAD:"${GITHUB_REF#refs/heads/}"
