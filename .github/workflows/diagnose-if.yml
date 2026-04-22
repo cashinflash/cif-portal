@@ -157,17 +157,27 @@ jobs:
           echo '```' >> "$REPORT"
 
           echo "" >> "$REPORT"
-          echo "## 9. Re-test POST after deploy" >> "$REPORT"
-          sleep 4
+          echo "## 9. Stage-prefixed URL probe (with /dev/)" >> "$REPORT"
+          # HttpApi stages that aren't named \$default require the stage
+          # name in the URL path. Our stage is 'dev'.
+          STAGED_ENDPOINT="https://$HTTP_API_ID.execute-api.$AWS_REGION.amazonaws.com/dev/api/if/submit"
+          echo "- Endpoint: \`$STAGED_ENDPOINT\`" >> "$REPORT"
           HTTP_CODE=$(curl -s -o /tmp/body2.txt -w "%{http_code}" \
-            -X POST "$ENDPOINT" \
+            -X POST "$STAGED_ENDPOINT" \
             -H 'Content-Type: application/json' \
             -d '{"diagnostic":true}')
-          echo "- POST \`$ENDPOINT\`: HTTP \`$HTTP_CODE\`" >> "$REPORT"
+          echo "- POST HTTP status: \`$HTTP_CODE\`" >> "$REPORT"
           echo '```' >> "$REPORT"
           head -c 600 /tmp/body2.txt >> "$REPORT"
           echo '' >> "$REPORT"
           echo '```' >> "$REPORT"
+
+          PRE_CODE=$(curl -s -o /tmp/pre2.txt -w "%{http_code}" \
+            -X OPTIONS "$STAGED_ENDPOINT" \
+            -H 'Origin: https://cashinflash.com' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type')
+          echo "- Preflight OPTIONS: \`$PRE_CODE\`" >> "$REPORT"
 
       - name: Commit report
         run: |
