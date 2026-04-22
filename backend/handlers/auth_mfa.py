@@ -62,7 +62,13 @@ log.setLevel(logging.INFO)
 USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 APP_CLIENT_ID = os.environ["COGNITO_APP_CLIENT_ID"]
 TABLE = os.environ.get("MFA_SESSION_TABLE", "cif-portal-mfa-sessions-dev")
-EMAIL_SENDER = os.environ.get("MFA_EMAIL_SENDER", "lhdcapital@gmail.com")
+# SES requires a verified identity as the Source. Our DKIM-verified
+# domain is cashinflash.com so any address at that domain works —
+# "no-reply@" is the conventional choice for transactional mail. The
+# previous default (lhdcapital@gmail.com) was unverified which is why
+# email codes never landed. Override with MFA_EMAIL_SENDER if you
+# want support@ / loans@ / noreply@ instead.
+EMAIL_SENDER = os.environ.get("MFA_EMAIL_SENDER", "no-reply@cashinflash.com")
 CODE_TTL = int(os.environ.get("MFA_CODE_TTL_SECS", "300"))
 MAX_ATTEMPTS = 3
 
@@ -447,8 +453,19 @@ def _send_email(to: str, code: str) -> bool:
         )
         return True
     except ClientError as e:
-        err_code = e.response.get("Error", {}).get("Code")
-        log.error("SES send_email failed: %s", err_code)
+        err = e.response.get("Error", {}) if hasattr(e, "response") else {}
+        log.error(
+            "SES send_email failed: Source=%s to=%s code=%s type=%s msg=%s",
+            EMAIL_SENDER,
+            to,
+            err.get("Code"),
+            err.get("Type"),
+            err.get("Message"),
+        )
+        return False
+    except Exception as e:
+        log.exception("SES send_email unexpected failure Source=%s to=%s: %s",
+                      EMAIL_SENDER, to, e)
         return False
 
 

@@ -206,13 +206,20 @@ document.getElementById('searchForm').addEventListener('submit', async (e) => {
     } else if (result.match === 'none') {
       window.location.href = 'https://apply.cashinflash.com';
     } else if (result.match === 'multiple') {
-      errDiv.textContent = 'We found more than one record matching that information. Please call us at 1-800-XXX-XXXX so we can help.';
+      errDiv.textContent = 'We found more than one record matching that information. Please call us at (747) 270-7121 so we can help.';
       errDiv.style.display = 'block';
       btn.disabled = false;
       btn.textContent = 'Search';
     }
   } catch (err) {
-    errDiv.textContent = err.message || 'Something went wrong. Please try again.';
+    // Prefer a friendly message from our structured error body; fall
+    // back to a generic text if the server leaked the API Gateway
+    // "Internal Server Error" default.
+    let msg = err && err.body && err.body.error;
+    if (!msg || msg === 'Internal Server Error') {
+      msg = "We couldn't look up your account right now. Please try again in a moment, or call us at (747) 270-7121.";
+    }
+    errDiv.textContent = msg;
     errDiv.style.display = 'block';
     btn.disabled = false;
     btn.textContent = 'Search';

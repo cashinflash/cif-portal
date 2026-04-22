@@ -45,6 +45,21 @@ _V1_TOKEN_TTL = 60 * 60
 
 
 def lambda_handler(event, context):
+    # Top-level safety net — any uncaught exception below returns a
+    # structured 500 so the customer sees a useful message instead of
+    # the API Gateway-native "Internal Server Error".
+    try:
+        return _handle_search(event, context)
+    except Exception as exc:
+        _log.exception("search handler unhandled exception: %s", exc)
+        return error(
+            "We couldn't look up your account right now. Please try again or call (747) 270-7121.",
+            status=500,
+            code="internal_error",
+        )
+
+
+def _handle_search(event, context):
     body = parse_body(event)
     required = ["firstName", "lastName", "dob", "idNumber"]
     missing = [k for k in required if not body.get(k)]
@@ -88,13 +103,24 @@ def lambda_handler(event, context):
     first_name = customer.get("firstName") or body["firstName"]
     last_name = customer.get("lastName") or body["lastName"]
 
+    # Cognito user-exists check is best-effort. If Cognito throws an
+    # unexpected exception (throttle, region outage, unknown boto3
+    # shape), degrade to hasPortalAccount=false so the customer can
+    # still proceed to the code-send step instead of hitting a 500.
+    try:
+        has_portal_account = _cognito_user_exists(email, vergent_customer_id)
+    except Exception as cog_exc:
+        _log.exception("cognito_user_exists failed cid=%s: %s",
+                       vergent_customer_id, cog_exc)
+        has_portal_account = False
+
     return ok({
         "match": "single",
         "vergentCustomerId": vergent_customer_id,
         "email": email,
         "firstName": first_name,
         "lastName": last_name,
-        "hasPortalAccount": _cognito_user_exists(email, vergent_customer_id),
+        "hasPortalAccount": has_portal_account,
     })
 
 
