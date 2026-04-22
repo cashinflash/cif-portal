@@ -28,6 +28,7 @@ Environment:
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -46,11 +47,16 @@ from handlers.loans import (
     _get_v1_token,
     _http,
     _json_response,
+    _secrets,
     _shape_v1_loan,
     _v1_get,
 )
 
 VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
+REPAY_SECRET_ARN = os.environ.get("REPAY_SECRET_ARN",
+                                  "cif-portal/repay/credentials")
+REPAY_GATEWAY_BASE = os.environ.get("REPAY_GATEWAY_BASE",
+                                    "https://api.repayonline.com/rgapi/v1.0")
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -210,6 +216,149 @@ def _apim_call(method: str, path: str, *,
     return _http(f"{APIM_BASE}{path}", method, body=body, headers=h)
 
 
+# ─────────────────────────────────────────
+# Repay RGAPI (card tokenization)
+# ─────────────────────────────────────────
+_repay_creds_cache: Optional[Dict[str, str]] = None
+# The first call probes a handful of likely tokenize endpoints; once one
+# returns a usable id/token we lock the path for the rest of the warm
+# container's lifetime. Saves a round-trip per Add Card after bootstrap.
+_repay_tokenize_path: Optional[str] = None
+
+
+def _get_repay_creds() -> Optional[Dict[str, str]]:
+    """Fetch Repay credentials from Secrets Manager, cached per container.
+
+    Expected shape (written by .github/workflows/store-repay-secrets.yml):
+      gatewayApiUser, gatewaySecureToken, gatewayMerchantId,
+      customerPortalUrl, customerPortalToken,
+      achApiUser, achSecureToken, achMerchantId
+    """
+    global _repay_creds_cache
+    if _repay_creds_cache:
+        return _repay_creds_cache
+    try:
+        resp = _secrets.get_secret_value(SecretId=REPAY_SECRET_ARN)
+        _repay_creds_cache = json.loads(resp["SecretString"])
+        return _repay_creds_cache
+    except Exception as e:
+        log.warning("repay secret read failed arn=%s err=%s", REPAY_SECRET_ARN, e)
+        return None
+
+
+def _extract_repay_token(body: Any) -> Optional[str]:
+    """Pull the card-vault identifier out of a Repay tokenize response.
+
+    Different endpoints return the token under different keys; accept
+    any of the likely ones and return the first non-empty string.
+    """
+    if not isinstance(body, dict):
+        return None
+    for key in ("id", "token", "card_id", "card_reference",
+                "card_ref", "card_guid", "vault_id", "payment_method_id"):
+        val = body.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    # Sometimes wrapped: {data: {id: ...}} or {card: {id: ...}}
+    for container in ("data", "card", "payment_method"):
+        inner = body.get(container)
+        if isinstance(inner, dict):
+            tok = _extract_repay_token(inner)
+            if tok:
+                return tok
+    return None
+
+
+def _repay_tokenize_card(pan: str,
+                         exp_month: int,
+                         exp_year: int,
+                         ccv: str,
+                         zip_code: str,
+                         cardholder_name: str) -> Optional[str]:
+    """POST card details to Repay's RGAPI, return the tokenized card id.
+
+    First call probes a short list of likely endpoints + body shapes;
+    once one returns a usable token, the endpoint is cached. Full
+    probe results are logged so we can lock to the winner.
+
+    Returns the token string on success, or None (caller surfaces
+    tokenization_failed to the UI).
+    """
+    global _repay_tokenize_path
+    creds = _get_repay_creds()
+    if not creds:
+        return None
+
+    api_user = creds.get("gatewayApiUser") or ""
+    secure_token = creds.get("gatewaySecureToken") or ""
+    merchant_id = creds.get("gatewayMerchantId") or ""
+    if not (api_user and secure_token and merchant_id):
+        log.warning("repay creds missing required fields; skipping tokenize")
+        return None
+
+    auth = base64.b64encode(f"{api_user}:{secure_token}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth}",
+        "X-Merchant-Id": str(merchant_id),
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    # Two common body shapes; gateways differ on field names.
+    body_snake = {
+        "merchant_id": str(merchant_id),
+        "card_number": pan,
+        "expiration_month": exp_month,
+        "expiration_year": exp_year,
+        "cvv": ccv,
+        "cardholder_name": cardholder_name,
+        "billing_zip": zip_code,
+    }
+    body_camel = {
+        "merchantId": str(merchant_id),
+        "cardNumber": pan,
+        "expirationMonth": exp_month,
+        "expirationYear": exp_year,
+        "cvv": ccv,
+        "cardholderName": cardholder_name,
+        "billingZip": zip_code,
+    }
+
+    # If we've locked an endpoint + body on a previous warm call, try it first.
+    candidates = []
+    if _repay_tokenize_path:
+        candidates.append(_repay_tokenize_path)
+    for p in ("/cards", "/tokens", "/payment_methods", "/vault/cards",
+              "/card/tokenize", "/tokenize"):
+        if p not in candidates:
+            candidates.append(p)
+
+    last4 = pan[-4:]
+    tried = []
+    for path in candidates:
+        url = f"{REPAY_GATEWAY_BASE}{path}"
+        for body_shape, shape_name in ((body_snake, "snake"), (body_camel, "camel")):
+            status, parsed, raw = _http(url, "POST", body=body_shape, headers=headers)
+            token = _extract_repay_token(parsed)
+            tried.append(f"{path}:{shape_name}={status}")
+            if status in (200, 201) and token:
+                _repay_tokenize_path = path
+                log.info("repay tokenize ok path=%s shape=%s last4=%s tried=%s",
+                         path, shape_name, last4, tried)
+                return token
+            # 404 means wrong path — skip the camel retry for the same path.
+            if status == 404:
+                break
+    # Exhausted candidates — log the full probe result so we can fix.
+    flat_raw = (raw or "").replace("\n", " ")[:400] if raw else ""
+    log.warning("repay tokenize failed last4=%s tried=%s last_raw=%s",
+                last4, tried, flat_raw)
+    return None
+
+
+# ─────────────────────────────────────────
+# Vergent v1 helpers
+# ─────────────────────────────────────────
 def _v1_request(method: str, path: str, *,
                 body: Optional[Dict[str, Any]] = None
                 ) -> tuple:
@@ -342,12 +491,19 @@ def _detect_card_type(digits: str) -> str:
 
 
 def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/my-cards — save a new card on the signed-in customer.
+    """POST /api/my-cards — tokenize at Repay, then save to Vergent.
 
-    We forward the card details to Vergent's
-    POST /api/CustomerPortal/Customer/Cards, which tokenizes via Repay
-    server-side. PAN passes through this Lambda over HTTPS but is
-    never stored or logged (only last4).
+    Flow:
+      1. Validate the card data locally (Luhn, exp, CCV, ZIP).
+      2. Call Repay's RGAPI with the PAN → get a card-vault token.
+      3. POST /V1/PostCustomerCardTokenized with card_ref=<token>.
+      4. Re-fetch the card via GetCustomerCards and confirm
+         CardProcessor='Repay' + is_active=True before returning
+         success.
+
+    Without step 2, Vergent creates a metadata-only record with
+    CardProcessor='None' that's hidden from the admin UI and can't
+    be charged.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -393,18 +549,18 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     log.info("add card attempt cid=%s last4=%s brand=%s exp=%02d/%d",
              cid, last4, card_type, exp_month, exp_year)
 
-    # Use v1 PostCustomerCard. v1 takes customerId in the body and
-    # auths with our service Token header — no customer-scoped JWT
-    # needed (which is what was failing on the v2 endpoint).
-    # Schema (snake_case): id, company_id, customer_id, card_type_id,
-    # card_holder, card_number, card_id, card_ref,
-    # is_eligible_for_disbursement. Also send expire_month/year/ccv —
-    # Vergent ignores fields it doesn't recognize and these are
-    # documented for the tokenized variant.
-    # Vergent's PostCustomerCardTokenized is the Repay-routed variant;
-    # PostCustomerCard saves a metadata-only record with
-    # CardProcessor="None" (not chargeable, hidden in admin UI).
-    # Match the body shape Vergent's own admin form submits.
+    # Step 1 — tokenize at Repay.
+    repay_token = _repay_tokenize_card(pan, exp_month, exp_year, ccv, zip_code, name)
+    if not repay_token:
+        # Most common cause: Repay creds not yet in Secrets Manager
+        # (dispatch store-repay-secrets.yml) or IAM not granted
+        # (re-run provision-payments.yml).
+        return _json_response(502, {"error": "tokenization_failed"})
+
+    log.info("repay tokenized cid=%s last4=%s token_len=%s",
+             cid, last4, len(repay_token))
+
+    # Step 2 — save the tokenized card on the Vergent customer record.
     v1_body = {
         "id": 0,
         "company_id": VERGENT_COMPANY_ID,
@@ -414,70 +570,64 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         "card_number": pan,
         "last_four_digits": last4,
         "card_id": "",
-        "card_ref": "",
+        "card_ref": repay_token,
         "is_eligible_for_disbursement": False,
         "expire_month": exp_month,
         "expire_year": exp_year,
         "ccv": ccv,
         "billing_zip_code": zip_code,
     }
-
-    # Try the tokenized endpoint first (Repay-routed). If Vergent
-    # returns an error that suggests this endpoint needs a
-    # pre-tokenized card_ref, we'll fall back to the plain endpoint
-    # below.
     status, resp, raw = _v1_request("POST", "/V1/PostCustomerCardTokenized", body=v1_body)
-    if status not in (200, 201):
-        log.info("PostCustomerCardTokenized status=%s raw=%s — retrying plain PostCustomerCard",
-                 status, ((raw or "").replace("\n", " ")[:300]))
-        status, resp, raw = _v1_request("POST", "/V1/PostCustomerCard", body=v1_body)
 
     if status not in (200, 201):
-        # Flatten newlines so CloudWatch doesn't split the multi-line
-        # Vergent error body into separate log events (which makes the
-        # tail truncate before we see the actual error).
         flat_raw = (raw or "").replace("\n", " ").replace("\r", " ")
         redacted = dict(v1_body)
         redacted["card_number"] = f"****{last4}"
         redacted["ccv"] = "***"
-        log.warning("PostCustomerCard upstream status=%s body=%s raw=%s",
+        redacted["card_ref"] = f"<len={len(repay_token)}>"
+        log.warning("PostCustomerCardTokenized upstream status=%s body=%s raw=%s",
                     status, redacted, flat_raw[:1500])
         return _json_response(502, {"error": "upstream_unavailable"})
 
-    # v1's success response can be empty {} or carry the new card id;
-    # we treat any 200/201 as success and look for 'Errors' to detect
-    # in-band failures.
     if isinstance(resp, dict) and resp.get("Errors"):
-        log.warning("PostCustomerCard returned errors cid=%s last4=%s errors=%s",
+        log.warning("PostCustomerCardTokenized errors cid=%s last4=%s errors=%s",
                     cid, last4, resp.get("Errors"))
         return _json_response(200, {"success": False, "error": "card_declined"})
 
     new_card_id = resp.get("id") if isinstance(resp, dict) else None
-    # Log everything useful about the outcome so we can see whether
-    # Vergent actually wired the card to Repay. Fields of interest:
-    # is_existing, is_active, card_processor_type, CardProcessor.
     debug_flags = {}
     if isinstance(resp, dict):
-        for k in ("is_existing", "is_active", "card_processor_type", "CardProcessor", "status", "card_guid"):
+        for k in ("is_existing", "is_active", "card_processor_type",
+                  "CardProcessor", "status", "card_guid"):
             if k in resp:
                 debug_flags[k] = resp.get(k)
     log.info("add card success cid=%s last4=%s new_card_id=%s flags=%s",
              cid, last4, new_card_id, debug_flags)
 
-    # Verify the card shows up on GetCustomerCards. If it doesn't,
-    # Vergent accepted our POST but didn't actually register the card
-    # for charging (CardProcessor="None" observed on plain
-    # PostCustomerCard calls). Logs make it obvious next time.
+    # Step 3 — verify the card is actually chargeable. Vergent has
+    # historically returned 200 OK on records that are still stuck
+    # with CardProcessor='None'. Surface that as a real error so the
+    # SPA doesn't celebrate a phantom save.
     st_v, verify_body, _raw = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
+    is_chargeable = False
     if st_v == 200 and isinstance(verify_body, list):
-        found = any(
-            isinstance(c, dict) and str(c.get("id")) == str(new_card_id)
-            for c in verify_body
-        )
-        log.info("add card verify cid=%s new_card_id=%s in_list=%s list_count=%s",
-                 cid, new_card_id, found, len(verify_body))
-    else:
-        log.warning("add card verify failed st=%s", st_v)
+        for c in verify_body:
+            if isinstance(c, dict) and str(c.get("id")) == str(new_card_id):
+                is_chargeable = (
+                    bool(c.get("is_active"))
+                    and (c.get("CardProcessor") or "None") != "None"
+                )
+                log.info("add card verify cid=%s new_card_id=%s active=%s processor=%s",
+                         cid, new_card_id, c.get("is_active"), c.get("CardProcessor"))
+                break
+    if not is_chargeable:
+        log.warning("add card saved but not chargeable cid=%s new_card_id=%s",
+                    cid, new_card_id)
+        return _json_response(200, {
+            "success": False,
+            "error": "tokenization_not_linked",
+            "cardId": new_card_id,
+        })
 
     return _json_response(200, {
         "success": True,

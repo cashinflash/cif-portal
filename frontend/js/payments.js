@@ -583,8 +583,11 @@
       card_declined: 'We couldn\'t save that card. Please try a different one.',
       exp_invalid: 'That expiration date isn\'t valid.',
       ccv_invalid: 'CVV should be 3 or 4 digits.',
+      zip_invalid: 'Please enter a 5-digit ZIP code.',
       name_invalid: 'Please check the cardholder name.',
       bad_body: 'Something about the card entry is off. Please try again.',
+      tokenization_failed: 'We couldn\'t reach our card processor right now. Please try again in a minute.',
+      tokenization_not_linked: 'The card saved but didn\'t connect to our processor. Please try again or call (747) 270-7121.',
       upstream_unavailable: 'Our payment system is temporarily unavailable. Try again in a minute.',
       network_error: 'Network error. Please check your connection and try again.',
     })[code] || 'Could not save the card. Please try again.';

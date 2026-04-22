@@ -154,6 +154,45 @@ jobs:
             echo "Added invoke permission."
           fi
 
+      - name: Grant Repay secret read to payments Lambda and set env
+        run: |
+          set -e
+          REPAY_ARN=$(aws secretsmanager describe-secret \
+            --secret-id cif-portal/repay/credentials \
+            --query ARN --output text 2>/dev/null || echo "")
+          if [ -z "$REPAY_ARN" ] || [ "$REPAY_ARN" = "None" ]; then
+            echo "::warning::Repay secret not yet created. Dispatch store-repay-secrets.yml, then re-run this workflow."
+            exit 0
+          fi
+          echo "Repay secret ARN: $REPAY_ARN"
+
+          ROLE_ARN=$(aws lambda get-function-configuration \
+            --function-name "$FN" --query 'Role' --output text)
+          ROLE_NAME=$(echo "$ROLE_ARN" | awk -F/ '{print $NF}')
+          echo "Lambda role: $ROLE_NAME"
+
+          aws iam put-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name payments-read-repay-secret \
+            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"$REPAY_ARN\"}]}"
+          echo "IAM policy payments-read-repay-secret attached."
+
+          # Set REPAY_SECRET_ARN on the Lambda so the handler knows
+          # which secret to read. Preserve any existing env vars.
+          EXISTING_ENV=$(aws lambda get-function-configuration \
+            --function-name "$FN" \
+            --query 'Environment.Variables' --output json 2>/dev/null)
+          if [ "$EXISTING_ENV" = "null" ] || [ -z "$EXISTING_ENV" ]; then
+            EXISTING_ENV='{}'
+          fi
+          NEW_ENV=$(echo "$EXISTING_ENV" | jq --arg v "$REPAY_ARN" '. + {REPAY_SECRET_ARN: $v}')
+          aws lambda update-function-configuration \
+            --function-name "$FN" \
+            --environment "{\"Variables\": $NEW_ENV}" \
+            --no-cli-pager >/dev/null
+          aws lambda wait function-updated --function-name "$FN"
+          echo "REPAY_SECRET_ARN set on $FN."
+
       - name: Summary
         if: always()
         run: |
