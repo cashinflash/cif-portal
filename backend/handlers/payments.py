@@ -38,15 +38,19 @@ from typing import Any, Dict, Optional
 from handlers.loans import (
     APIM_BASE,
     CORS_HEADERS,
+    V1_BASE,
     _claims,
     _customer_id,
     _get_apim_token,
     _get_creds,
+    _get_v1_token,
     _http,
     _json_response,
     _shape_v1_loan,
     _v1_get,
 )
+
+VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -55,22 +59,46 @@ log.setLevel(logging.INFO)
 # ─────────────────────────────────────────
 # Shape helpers
 # ─────────────────────────────────────────
-def _shape_card(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize Vergent's CustomerCreditCardModel → UI shape.
+# Card-type id → display brand. Vergent v1's GetCustomerCardTypes
+# returns the source-of-truth list at runtime; this is a fallback for
+# the most common four. Confirmed empirically — adjust if a different
+# id surfaces in CloudWatch.
+_CARD_TYPE_NAMES = {
+    1: "Visa",
+    2: "MasterCard",
+    3: "Amex",
+    4: "Discover",
+}
+_BRAND_TO_TYPE_ID = {
+    "Visa": 1,
+    "MasterCard": 2,
+    "Amex": 3,
+    "Discover": 4,
+}
 
-    Vergent returns: id, cardTypeId, cardType, accountNumberMasked,
-    expirationMonth, expirationYear, isExpired.
+
+def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize Vergent v1's customer_card → UI shape.
+
+    v1 returns snake_case: id, company_id, customer_id, card_type_id,
+    card_holder, card_number (masked), card_id, card_ref. There's no
+    expiry/expired flag in the basic shape — those come back through
+    the tokenized variant if present.
     """
-    masked = raw.get("accountNumberMasked") or ""
+    masked = (raw.get("card_number") or "")
     digits = [c for c in masked if c.isdigit()]
     last4 = "".join(digits[-4:]) if len(digits) >= 4 else ""
+    type_id = raw.get("card_type_id") or 0
+    brand = _CARD_TYPE_NAMES.get(int(type_id) if isinstance(type_id, (int, str)) else 0, "Card")
     return {
         "id": raw.get("id"),
-        "brand": raw.get("cardType") or "Card",
+        "brand": brand,
         "last4": last4,
-        "expMonth": raw.get("expirationMonth"),
-        "expYear": raw.get("expirationYear"),
-        "isExpired": bool(raw.get("isExpired")),
+        # v1 base shape doesn't carry exp / isExpired; surface what we have.
+        "expMonth": raw.get("exp_month") or raw.get("expire_month"),
+        "expYear": raw.get("exp_year") or raw.get("expire_year"),
+        "isExpired": False,
+        "cardRef": raw.get("card_ref") or "",
     }
 
 
@@ -92,6 +120,30 @@ def _apim_call(method: str, path: str, *,
     return _http(f"{APIM_BASE}{path}", method, body=body, headers=h)
 
 
+def _v1_request(method: str, path: str, *,
+                body: Optional[Dict[str, Any]] = None
+                ) -> tuple:
+    """Call a Vergent v1 LMS endpoint with the service Token header.
+
+    Same auth pattern as `loans.py::_v1_get` but supports any method
+    and returns the raw response body too (for debugging upstream
+    errors). Refreshes the token once on 401/403 then retries.
+    """
+    tok = _get_v1_token()
+    if not tok:
+        return 0, None, ""
+    url = f"{V1_BASE}{path}"
+    status, parsed, raw = _http(url, method, body=body, headers={"Token": tok})
+    if status in (401, 403):
+        # Force token refresh and retry once.
+        from handlers import loans as _loans
+        _loans._v1_token_exp = 0
+        tok2 = _get_v1_token()
+        if tok2:
+            status, parsed, raw = _http(url, method, body=body, headers={"Token": tok2})
+    return status, parsed, raw
+
+
 # ─────────────────────────────────────────
 # Loan lookup — shared by loan-summary + payment validation
 # ─────────────────────────────────────────
@@ -111,20 +163,25 @@ def _fetch_active_loan(cid: str) -> Optional[Dict[str, Any]]:
 # Routes
 # ─────────────────────────────────────────
 def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
+    """List the signed-in customer's saved cards via Vergent v1.
+
+    Calls GET /api/V1/GetCustomerCards?custId=<cid> with the service
+    Token header. v1's customerId-in-querystring auth model means we
+    can use our service token without needing AuthenticateCognito
+    (which is broken for our tenant).
+    """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"cards": [], "expiredCards": []})
 
-    status, body, raw = _apim_call("GET", "/api/CustomerPortal/Customer/Cards")
+    status, body, raw = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
     if status != 200 or not isinstance(body, list):
-        log.warning("Customer/Cards status=%s raw=%s", status, raw[:200] if raw else "")
+        log.warning("GetCustomerCards status=%s raw=%s", status, (raw or "")[:300])
         return _json_response(200, {"cards": [], "expiredCards": [], "error": "upstream_unavailable"})
 
-    shaped = [_shape_card(c) for c in body if isinstance(c, dict)]
-    cards = [c for c in shaped if not c["isExpired"]]
-    expired = [c for c in shaped if c["isExpired"]]
-    return _json_response(200, {"cards": cards, "expiredCards": expired})
+    shaped = [_shape_card_v1(c) for c in body if isinstance(c, dict)]
+    return _json_response(200, {"cards": shaped, "expiredCards": []})
 
 
 def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -212,46 +269,58 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(400, {"error": "ccv_invalid"})
 
     card_type = (body.get("cardType") or _detect_card_type(pan)).strip() or "Other"
+    card_type_id = _BRAND_TO_TYPE_ID.get(card_type, 0)
     last4 = pan[-4:]
 
     # Never log PAN or CCV. Custid + last4 + amount-ish metadata only.
     log.info("add card attempt cid=%s last4=%s brand=%s exp=%02d/%d",
              cid, last4, card_type, exp_month, exp_year)
 
-    vergent_body = {
-        "cardHolderName": name,
-        # Vergent's field name is misleading — swagger says
-        # 'lastFourCardNumber' but their endpoint expects the full PAN
-        # and strips/tokenizes on their side via Repay.
-        "lastFourCardNumber": pan,
-        "cardType": card_type,
-        "expireMonth": exp_month,
-        "expireYear": exp_year,
+    # Use v1 PostCustomerCard. v1 takes customerId in the body and
+    # auths with our service Token header — no customer-scoped JWT
+    # needed (which is what was failing on the v2 endpoint).
+    # Schema (snake_case): id, company_id, customer_id, card_type_id,
+    # card_holder, card_number, card_id, card_ref,
+    # is_eligible_for_disbursement. Also send expire_month/year/ccv —
+    # Vergent ignores fields it doesn't recognize and these are
+    # documented for the tokenized variant.
+    v1_body = {
+        "id": 0,
+        "company_id": VERGENT_COMPANY_ID,
+        "customer_id": int(cid),
+        "card_type_id": card_type_id,
+        "card_holder": name,
+        "card_number": pan,
+        "card_id": "",
+        "card_ref": "",
+        "is_eligible_for_disbursement": False,
+        "expire_month": exp_month,
+        "expire_year": exp_year,
         "ccv": ccv,
-        "isEligibleForDisbursement": False,
     }
 
-    status, resp, raw = _apim_call(
-        "POST",
-        "/api/CustomerPortal/Customer/Cards",
-        body=vergent_body,
-    )
+    status, resp, raw = _v1_request("POST", "/V1/PostCustomerCard", body=v1_body)
 
-    if status not in (200, 201) or not isinstance(resp, dict):
-        log.warning("add card upstream status=%s raw=%s", status, raw[:300] if raw else "")
+    if status not in (200, 201):
+        log.warning("PostCustomerCard upstream status=%s raw=%s", status, (raw or "")[:300])
         return _json_response(502, {"error": "upstream_unavailable"})
 
-    if not resp.get("success"):
-        log.warning("add card declined cid=%s last4=%s", cid, last4)
+    # v1's success response can be empty {} or carry the new card id;
+    # we treat any 200/201 as success and look for 'Errors' to detect
+    # in-band failures.
+    if isinstance(resp, dict) and resp.get("Errors"):
+        log.warning("PostCustomerCard returned errors cid=%s last4=%s errors=%s",
+                    cid, last4, resp.get("Errors"))
         return _json_response(200, {"success": False, "error": "card_declined"})
 
-    payment_id = resp.get("paymentId")
-    log.info("add card success cid=%s last4=%s paymentId=%s", cid, last4, payment_id)
+    new_card_id = resp.get("id") if isinstance(resp, dict) else None
+    log.info("add card success cid=%s last4=%s new_card_id=%s", cid, last4, new_card_id)
 
     return _json_response(200, {
         "success": True,
         "last4": last4,
         "brand": card_type,
+        "cardId": new_card_id,
     })
 
 
