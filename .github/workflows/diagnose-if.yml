@@ -1,0 +1,141 @@
+name: Diagnose IF endpoint
+
+# Proves whether:
+#  - The cif-portal-if-dev Lambda exists
+#  - The API Gateway route POST /api/if/submit is wired to it
+#  - A real POST to that route succeeds from the server side
+#
+# Anything we learn here is committed to debug/if-endpoint-diag.md.
+# Run manually or by touching .github/if-diag-trigger.txt.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/if-diag-trigger.txt'
+
+env:
+  AWS_REGION: us-east-1
+  FN: cif-portal-if-dev
+  HTTP_API_ID: anh066l1wf
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Probe
+        id: probe
+        run: |
+          set +e
+          mkdir -p debug
+          REPORT=debug/if-endpoint-diag.md
+          : > "$REPORT"
+          {
+            echo "# IF endpoint diagnostic"
+            echo ""
+            echo "_Captured at: $(date -u +%Y-%m-%dT%H:%M:%SZ)_"
+            echo ""
+          } >> "$REPORT"
+
+          echo "## 1. Lambda existence + handler path" >> "$REPORT"
+          if aws lambda get-function-configuration --function-name "$FN" >/tmp/fn.json 2>/tmp/fn.err; then
+            H=$(jq -r '.Handler' /tmp/fn.json)
+            R=$(jq -r '.Runtime' /tmp/fn.json)
+            A=$(jq -r '.Architectures[0]' /tmp/fn.json)
+            S=$(jq -r '.State' /tmp/fn.json)
+            LM=$(jq -r '.LastModified' /tmp/fn.json)
+            ENV_KEYS=$(jq -r '.Environment.Variables | keys | join(", ")' /tmp/fn.json)
+            {
+              echo ""
+              echo "- Exists: **YES**"
+              echo "- Handler: \`$H\`"
+              echo "- Runtime: \`$R\`  Arch: \`$A\`  State: \`$S\`"
+              echo "- Last modified: \`$LM\`"
+              echo "- Env var keys: \`$ENV_KEYS\`"
+            } >> "$REPORT"
+          else
+            ERR=$(cat /tmp/fn.err)
+            {
+              echo ""
+              echo "- Exists: **NO**"
+              echo '```'
+              echo "$ERR"
+              echo '```'
+              echo ""
+              echo "**Fix:** re-run the \`Provision IF (instant-funding) vault\` workflow."
+            } >> "$REPORT"
+          fi
+
+          echo "" >> "$REPORT"
+          echo "## 2. HttpApi routes matching /api/if/*" >> "$REPORT"
+          echo '```' >> "$REPORT"
+          aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
+            --query "Items[?starts_with(RouteKey,'POST /api/if') || starts_with(RouteKey,'GET /api/if') || starts_with(RouteKey,'OPTIONS /api/if')].{Route:RouteKey,Target:Target,Auth:AuthorizationType}" \
+            --output table >> "$REPORT" 2>&1
+          echo '```' >> "$REPORT"
+
+          echo "" >> "$REPORT"
+          echo "## 3. Integration → function mapping" >> "$REPORT"
+          echo '```' >> "$REPORT"
+          aws apigatewayv2 get-integrations --api-id "$HTTP_API_ID" \
+            --query "Items[?contains(IntegrationUri, 'cif-portal-if')].{IntegrationId:IntegrationId,Uri:IntegrationUri,PayloadVersion:PayloadFormatVersion}" \
+            --output table >> "$REPORT" 2>&1
+          echo '```' >> "$REPORT"
+
+          echo "" >> "$REPORT"
+          echo "## 4. Live POST to /api/if/submit (bad body on purpose)" >> "$REPORT"
+          ENDPOINT="https://$HTTP_API_ID.execute-api.$AWS_REGION.amazonaws.com/api/if/submit"
+          echo "- Endpoint: \`$ENDPOINT\`" >> "$REPORT"
+          HTTP_CODE=$(curl -s -o /tmp/body.txt -w "%{http_code}" \
+            -X POST "$ENDPOINT" \
+            -H 'Content-Type: application/json' \
+            -d '{"diagnostic":true}')
+          echo "- HTTP status: \`$HTTP_CODE\`" >> "$REPORT"
+          echo "- Response body:" >> "$REPORT"
+          echo '```' >> "$REPORT"
+          head -c 800 /tmp/body.txt >> "$REPORT"
+          echo '' >> "$REPORT"
+          echo '```' >> "$REPORT"
+
+          echo "" >> "$REPORT"
+          echo "## 5. Live OPTIONS preflight (what the browser does first)" >> "$REPORT"
+          HTTP_CODE=$(curl -s -o /tmp/preflight.txt -w "%{http_code}" \
+            -X OPTIONS "$ENDPOINT" \
+            -H 'Origin: https://cashinflash.com' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type')
+          echo "- Preflight status: \`$HTTP_CODE\`" >> "$REPORT"
+          echo "- Preflight response headers + body (if any):" >> "$REPORT"
+          curl -s -o /dev/null -D /tmp/preflight-headers.txt \
+            -X OPTIONS "$ENDPOINT" \
+            -H 'Origin: https://cashinflash.com' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type'
+          echo '```' >> "$REPORT"
+          cat /tmp/preflight-headers.txt >> "$REPORT" 2>/dev/null
+          echo '```' >> "$REPORT"
+
+      - name: Commit report
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add debug/if-endpoint-diag.md
+          if git diff --staged --quiet; then exit 0; fi
+          git commit -m "debug: if endpoint diag [skip ci]"
+          git push origin HEAD:"${GITHUB_REF#refs/heads/}"
