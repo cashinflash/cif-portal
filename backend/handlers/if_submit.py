@@ -26,7 +26,10 @@ Environment:
   IF_DDB_TABLE        DynamoDB table name for submissions
   IF_NOTIFY_EMAIL     staff inbox for submission notifications
   IF_VIEW_SHARED_SECRET  secret the dashboard sends on GET/view
-  IF_VIEW_URL_BASE    e.g. https://app.cashinflash.com/if/view
+  IF_VIEW_URL_BASE    e.g. https://app.cashinflash.com/app?if=
+                      (submission id is concatenated directly — if
+                      your env value needs a / separator, put it in
+                      the env value itself)
   MFA_EMAIL_SENDER    verified SES From address (reuses auth-mfa var)
 """
 from __future__ import annotations
@@ -59,7 +62,7 @@ IF_KMS_KEY_ID = os.environ.get("IF_KMS_KEY_ID", "alias/cif-portal-if-vault")
 IF_DDB_TABLE = os.environ.get("IF_DDB_TABLE", "cif-portal-if-submissions-dev")
 IF_NOTIFY_EMAIL = os.environ.get("IF_NOTIFY_EMAIL", "loans@cashinflash.com")
 IF_VIEW_SHARED_SECRET = os.environ.get("IF_VIEW_SHARED_SECRET", "")
-IF_VIEW_URL_BASE = os.environ.get("IF_VIEW_URL_BASE", "https://app.cashinflash.com/if/view")
+IF_VIEW_URL_BASE = os.environ.get("IF_VIEW_URL_BASE", "https://app.cashinflash.com/app?if=")
 EMAIL_SENDER = os.environ.get("MFA_EMAIL_SENDER", "no-reply@cashinflash.com")
 
 # 72 hours — plenty of time for staff to process, then the record
@@ -202,7 +205,10 @@ def _decrypt(ciphertext_b64: str, submission_id: str) -> bytes:
 # ─────────────────────────────────────────
 def _send_staff_notification(submission_id: str,
                              meta: Dict[str, Any]) -> None:
-    view_url = f"{IF_VIEW_URL_BASE}/{submission_id}"
+    # Concatenate directly — the env value carries its own separator
+    # (either a trailing slash for path-style or '?if=' for query
+    # style). Keeps us flexible if the dashboard URL scheme changes.
+    view_url = f"{IF_VIEW_URL_BASE}{submission_id}"
     text_body = (
         f"Cash in Flash — new debit card submission\n\n"
         f"Borrower:  {meta['borrower_name']}\n"

@@ -36,7 +36,11 @@ env:
   TABLE: cif-portal-if-submissions-dev
   KMS_ALIAS: alias/cif-portal-if-vault
   NOTIFY_EMAIL: loans@cashinflash.com
-  VIEW_URL_BASE: https://app.cashinflash.com/if/view
+  # Staff notification emails link the cardholder record into the
+  # main dashboard tab via ?if=<UUID>. app.html's onload handler
+  # reads that query param, switches to the Instant Funding tab,
+  # and auto-opens the reveal modal for that submission.
+  VIEW_URL_BASE: https://app.cashinflash.com/app?if=
   MFA_FROM: no-reply@cashinflash.com
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
