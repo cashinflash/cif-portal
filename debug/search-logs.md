@@ -1,9 +1,9 @@
 # Lambda logs — cif-portal-search-dev
 
 - Function: `cif-portal-search-dev`
-- Window: last 30 minute(s)
+- Window: last 15 minute(s)
 - Filter: `(none)`
-- Captured at: 2026-04-22T21:04:12Z
+- Captured at: 2026-04-22T21:06:04Z
 
 ## 10 event(s)
 
