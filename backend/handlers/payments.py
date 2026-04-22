@@ -264,6 +264,23 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
         log.warning("GetCustomerCards status=%s raw=%s", status, (raw or "")[:300])
         return _json_response(200, {"cards": [], "expiredCards": [], "error": "upstream_unavailable"})
 
+    # Log full list so we can compare against the Vergent admin UI and
+    # see whether our PostCustomerCard outputs are actually persisted.
+    summary = [
+        {
+            "id": c.get("id"),
+            "type_id": c.get("card_type_id"),
+            "holder": c.get("card_holder"),
+            "last4": "".join(ch for ch in (c.get("card_number") or "") if ch.isdigit())[-4:],
+            "is_existing": c.get("is_existing"),
+            "is_active": c.get("is_active"),
+            "CardProcessor": c.get("CardProcessor"),
+            "card_processor_type": c.get("card_processor_type"),
+        }
+        for c in body if isinstance(c, dict)
+    ]
+    log.info("GetCustomerCards cid=%s count=%s cards=%s", cid, len(summary), summary)
+
     shaped = [_shape_card_v1(c) for c in body if isinstance(c, dict)]
     return _json_response(200, {"cards": shaped, "expiredCards": []})
 
