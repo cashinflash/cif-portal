@@ -1,0 +1,108 @@
+name: Capture last failed run
+
+# Helper workflow. When triggered (manually, on schedule, or by a
+# touch-file change), it finds the most recent failed Actions run on
+# this branch, downloads its logs, summarizes into debug/last-failure.md,
+# and commits that file back with [skip ci] so Claude (or you) can read
+# the failure without clicking through the Actions UI.
+#
+# Requires only the built-in GITHUB_TOKEN — no AWS creds.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/debug-trigger.txt'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find the latest failed run on this branch and capture logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -e
+          echo "Looking for failed runs on branch: $BRANCH"
+
+          RUN_JSON=$(gh run list \
+            --branch "$BRANCH" \
+            --limit 30 \
+            --json databaseId,displayTitle,workflowName,headSha,conclusion,createdAt,url \
+            | jq '[.[] | select(.conclusion == "failure")] | sort_by(.createdAt) | last')
+
+          if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "null" ]; then
+            echo "No failed runs on this branch — nothing to capture."
+            mkdir -p debug
+            echo "_No failed runs found on branch \`$BRANCH\` at capture time._" > debug/last-failure.md
+            exit 0
+          fi
+
+          RUN_ID=$(echo "$RUN_JSON" | jq -r '.databaseId')
+          WF_NAME=$(echo "$RUN_JSON" | jq -r '.workflowName')
+          TITLE=$(echo "$RUN_JSON" | jq -r '.displayTitle')
+          SHA=$(echo "$RUN_JSON" | jq -r '.headSha')
+          CREATED=$(echo "$RUN_JSON" | jq -r '.createdAt')
+          URL=$(echo "$RUN_JSON" | jq -r '.url')
+          echo "Capturing run #$RUN_ID ($WF_NAME) — $TITLE"
+
+          # Log of only failed jobs / steps. `--log-failed` trims to just
+          # the steps that failed, including surrounding context.
+          gh run view "$RUN_ID" --log-failed > /tmp/failed.log 2>&1 || true
+          # Also grab the last 200 lines of the full log for broader context.
+          gh run view "$RUN_ID" --log > /tmp/full.log 2>&1 || true
+
+          mkdir -p debug
+          {
+            echo "# Last failed run"
+            echo ""
+            echo "- Workflow: **$WF_NAME**"
+            echo "- Title: $TITLE"
+            echo "- Run ID: $RUN_ID"
+            echo "- Commit: \`$SHA\`"
+            echo "- Created: $CREATED"
+            echo "- URL: $URL"
+            echo ""
+            echo "## Failed steps (trimmed)"
+            echo ""
+            echo '```'
+            sed -n '1,400p' /tmp/failed.log
+            echo '```'
+            echo ""
+            echo "## Full log — last 200 lines"
+            echo ""
+            echo '```'
+            tail -200 /tmp/full.log
+            echo '```'
+          } > debug/last-failure.md
+
+      - name: Commit report back
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+
+          git add debug/last-failure.md
+          if git diff --staged --quiet; then
+            echo "No change to debug/last-failure.md"
+            exit 0
+          fi
+          # [skip ci] so this commit doesn't retrigger the deploy/provision
+          # workflows and create a loop.
+          git commit -m "debug: capture last failed run [skip ci]"
+          git push origin HEAD:"${GITHUB_REF#refs/heads/}"
