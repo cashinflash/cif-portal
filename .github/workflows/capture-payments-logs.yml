@@ -1,0 +1,112 @@
+name: Capture payments Lambda logs
+
+# Helper workflow. Pulls the most recent CloudWatch log events for the
+# payments Lambda and commits them to debug/payments-logs.md so we can
+# see what's actually happening upstream without manual log-tailing.
+#
+# Triggers on:
+#  - manual dispatch
+#  - any change to .github/payments-log-trigger.txt
+#
+# Commits back with [skip ci] so it doesn't loop.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: How many minutes of logs to fetch
+        required: true
+        default: "30"
+      filter:
+        description: Optional CloudWatch filter pattern
+        required: false
+        default: ""
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/payments-log-trigger.txt'
+
+env:
+  AWS_REGION: us-east-1
+  FN: cif-portal-payments-dev
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fetch CloudWatch log events
+        env:
+          MINS: ${{ github.event.inputs.minutes || '30' }}
+          FILTER: ${{ github.event.inputs.filter || '' }}
+        run: |
+          set -e
+          START=$(( $(date +%s) * 1000 - MINS * 60 * 1000 ))
+          GROUP="/aws/lambda/$FN"
+          echo "Group: $GROUP, Since: ${MINS} min ago, Filter: ${FILTER:-(none)}"
+
+          if [ -n "$FILTER" ]; then
+            aws logs filter-log-events \
+              --log-group-name "$GROUP" \
+              --start-time "$START" \
+              --filter-pattern "$FILTER" \
+              --limit 500 \
+              --output json > /tmp/events.json
+          else
+            aws logs filter-log-events \
+              --log-group-name "$GROUP" \
+              --start-time "$START" \
+              --limit 500 \
+              --output json > /tmp/events.json
+          fi
+
+          mkdir -p debug
+          {
+            echo "# Payments Lambda logs"
+            echo ""
+            echo "- Function: \`$FN\`"
+            echo "- Window: last ${MINS} minute(s)"
+            echo "- Filter: \`${FILTER:-(none)}\`"
+            echo "- Captured at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            COUNT=$(jq '.events | length' /tmp/events.json)
+            echo "## $COUNT event(s)"
+            echo ""
+            if [ "$COUNT" = "0" ]; then
+              echo "_No events in window. Trigger an Add Card attempt and re-run._"
+            else
+              echo '```'
+              jq -r '.events[] | "\((.timestamp/1000) | strftime("%H:%M:%S"))  \(.message | rtrimstr("\n"))"' /tmp/events.json
+              echo '```'
+            fi
+          } > debug/payments-logs.md
+
+      - name: Commit logs back
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add debug/payments-logs.md
+          if git diff --staged --quiet; then
+            echo "No change in payments-logs.md"
+            exit 0
+          fi
+          git commit -m "debug: payments Lambda logs [skip ci]"
+          git push origin HEAD:"${GITHUB_REF#refs/heads/}"
