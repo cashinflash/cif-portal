@@ -1,0 +1,148 @@
+name: Inactivate cards
+
+# One-off maintenance workflow. Calls Vergent v1
+# PUT /api/V1/PutCustomerInactivateCard/{id} to mark a card as
+# inactive so it's hidden from the customer portal and can't be used
+# for payments.
+#
+# Triggers:
+# - workflow_dispatch (accept customerId + comma-separated card ids)
+# - push that touches .github/inactivate-cards-trigger.txt
+#   (for push-triggered runs it reads the same file for the list —
+#    format: "CUSTOMER_ID CARD_ID1,CARD_ID2,...")
+
+on:
+  workflow_dispatch:
+    inputs:
+      customer_id:
+        description: Vergent customer id
+        required: true
+        default: "601488"
+      card_ids:
+        description: Comma-separated card ids to inactivate
+        required: true
+        default: "237127,237129"
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - '.github/inactivate-cards-trigger.txt'
+
+env:
+  AWS_REGION: us-east-1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  V1_BASE: https://shared.vergentlms.com/api/api
+  SECRET_NAME: cif-portal/vergent/credentials
+
+permissions:
+  contents: write
+
+jobs:
+  inactivate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Read inputs
+        id: inputs
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "cid=${{ github.event.inputs.customer_id }}" >> "$GITHUB_OUTPUT"
+            echo "cards=${{ github.event.inputs.card_ids }}" >> "$GITHUB_OUTPUT"
+          else
+            LINE=$(cat .github/inactivate-cards-trigger.txt | head -1)
+            CID=$(echo "$LINE" | awk '{print $1}')
+            CARDS=$(echo "$LINE" | awk '{print $2}')
+            echo "cid=$CID" >> "$GITHUB_OUTPUT"
+            echo "cards=$CARDS" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch Vergent credentials
+        id: secret
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_NAME" \
+            --query SecretString --output text)
+          LOGON=$(echo "$SECRET_JSON" | jq -r '.logonName')
+          PASSWORD=$(echo "$SECRET_JSON" | jq -r '.password')
+          echo "::add-mask::$PASSWORD"
+          echo "logon=$LOGON" >> "$GITHUB_OUTPUT"
+          echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate with Vergent v1 and inactivate cards
+        env:
+          CID: ${{ steps.inputs.outputs.cid }}
+          CARDS: ${{ steps.inputs.outputs.cards }}
+          LOGON: ${{ steps.secret.outputs.logon }}
+          PASSWORD: ${{ steps.secret.outputs.password }}
+        run: |
+          set -e
+          # Auth → service token
+          AUTH=$(curl -s -X POST "$V1_BASE/authenticate" \
+            -H "Content-Type: application/json" \
+            -d "{\"LogonName\":\"$LOGON\",\"Password\":\"$PASSWORD\"}")
+          TOKEN=$(echo "$AUTH" | jq -r '.Token // empty')
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Vergent auth failed"
+            echo "$AUTH" | head -c 400
+            exit 1
+          fi
+          echo "Authenticated. Inactivating cards for customer $CID: $CARDS"
+
+          mkdir -p debug
+          REPORT=debug/inactivate-cards-result.md
+          {
+            echo "# Inactivate cards result"
+            echo ""
+            echo "- Customer: \`$CID\`"
+            echo "- Card ids: \`$CARDS\`"
+            echo "- Ran at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            echo "## Per-card results"
+          } > "$REPORT"
+
+          IFS=',' read -ra IDS <<< "$CARDS"
+          for ID in "${IDS[@]}"; do
+            ID_TRIM=$(echo "$ID" | tr -d '[:space:]')
+            [ -z "$ID_TRIM" ] && continue
+            CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+              -X PUT "$V1_BASE/V1/PutCustomerInactivateCard/$ID_TRIM?custId=$CID" \
+              -H "Token: $TOKEN" \
+              -H "Content-Type: application/json")
+            BODY=$(head -c 400 /tmp/resp.json)
+            echo "$ID_TRIM → HTTP $CODE"
+            {
+              echo ""
+              echo "### Card \`$ID_TRIM\`"
+              echo "- HTTP: \`$CODE\`"
+              echo "- Body: \`$(echo "$BODY" | tr '\n' ' ')\`"
+            } >> "$REPORT"
+          done
+
+          echo ""
+          echo "## Post-inactivation list"
+          LIST=$(curl -s "$V1_BASE/V1/GetCustomerCards?custId=$CID" -H "Token: $TOKEN")
+          {
+            echo ""
+            echo "## Remaining cards after inactivation"
+            echo '```json'
+            echo "$LIST" | jq '[.[] | {id, card_type_id, card_holder, is_existing, is_active, CardProcessor}]'
+            echo '```'
+          } >> "$REPORT"
+
+      - name: Commit report
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add debug/inactivate-cards-result.md
+          if git diff --staged --quiet; then
+            echo "No change"
+            exit 0
+          fi
+          git commit -m "debug: inactivate-cards result [skip ci]"
+          git push origin HEAD:"${GITHUB_REF#refs/heads/}"
