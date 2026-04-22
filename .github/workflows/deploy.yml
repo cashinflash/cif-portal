@@ -48,6 +48,7 @@ jobs:
             echo "search=true"      >> "$GITHUB_OUTPUT"
             echo "pre_signup=true"  >> "$GITHUB_OUTPUT"
             echo "payments=true"    >> "$GITHUB_OUTPUT"
+            echo "if_submit=true"   >> "$GITHUB_OUTPUT"
             echo "frontend=true"    >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -63,6 +64,7 @@ jobs:
           echo "search=$(echo "$CHANGED"    | grep -qE '^backend/handlers/search\.py$'                          && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "pre_signup=$(echo "$CHANGED"| grep -qE '^backend/handlers/pre_signup\.py$'                      && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "payments=$(echo "$CHANGED"  | grep -qE '^backend/handlers/payments\.py$'                          && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "if_submit=$(echo "$CHANGED" | grep -qE '^backend/handlers/if_submit\.py$'                         && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "frontend=$(echo "$CHANGED"  | grep -qE '^frontend/'                                              && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       # One zip of all handler modules is shared across every Lambda. Each
@@ -70,7 +72,7 @@ jobs:
       # (e.g. handlers.loans.lambda_handler), so uploading the full package
       # is safe and simpler than building per-Lambda bundles.
       - name: Package backend handlers
-        if: steps.changes.outputs.loans == 'true' || steps.changes.outputs.auth_mfa == 'true' || steps.changes.outputs.search == 'true' || steps.changes.outputs.pre_signup == 'true' || steps.changes.outputs.payments == 'true'
+        if: steps.changes.outputs.loans == 'true' || steps.changes.outputs.auth_mfa == 'true' || steps.changes.outputs.search == 'true' || steps.changes.outputs.pre_signup == 'true' || steps.changes.outputs.payments == 'true' || steps.changes.outputs.if_submit == 'true'
         run: |
           cd backend
           zip -qr /tmp/handlers.zip handlers -x "handlers/__pycache__/*" "*.pyc"
@@ -120,6 +122,19 @@ jobs:
             --function-name cif-portal-payments-dev \
             --zip-file fileb:///tmp/handlers.zip \
             --no-cli-pager
+
+      - name: Deploy if Lambda
+        if: steps.changes.outputs.if_submit == 'true'
+        continue-on-error: true
+        run: |
+          if aws lambda get-function --function-name cif-portal-if-dev >/dev/null 2>&1; then
+            aws lambda update-function-code \
+              --function-name cif-portal-if-dev \
+              --zip-file fileb:///tmp/handlers.zip \
+              --no-cli-pager
+          else
+            echo "cif-portal-if-dev not found. Run provision-if.yml first."
+          fi
 
       - name: Sync frontend to S3
         if: steps.changes.outputs.frontend == 'true'
