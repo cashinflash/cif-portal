@@ -1,6 +1,6 @@
 # IF endpoint diagnostic
 
-_Captured at: 2026-04-22T22:43:36Z_
+_Captured at: 2026-04-22T22:44:55Z_
 
 ## 1. Lambda existence + handler path
 
@@ -50,9 +50,37 @@ _Captured at: 2026-04-22T22:43:36Z_
 - Preflight response headers + body (if any):
 ```
 HTTP/2 404 
-date: Wed, 22 Apr 2026 22:43:40 GMT
+date: Wed, 22 Apr 2026 22:45:01 GMT
 content-type: application/json
 content-length: 23
-apigw-requestid: cPlMih7_oAMEbcw=
+apigw-requestid: cPlZKicToAMESDA=
 
+```
+
+## 6. HttpApi stages + auto-deploy
+```
+-----------------------------------------------------------------------------
+|                                 GetStages                                 |
++--------------+------------------------------------------------------------+
+|  AutoDeploy  |  True                                                      |
+|  LastDeployed|  Successfully deployed stage with deployment ID 'o5p2on'   |
+|  Stage       |  dev                                                       |
++--------------+------------------------------------------------------------+
+```
+
+## 7. Known-working neighbor (payments) for comparison
+- `GET https://anh066l1wf.execute-api.us-east-1.amazonaws.com/api/my-cards`: HTTP `404`
+  (401 = route exists + auth guard. 404 = path not on this API.)
+
+## 8. Force redeploy $default stage
+```
+
+aws: [ERROR]: An error occurred (BadRequestException) when calling the CreateDeployment operation: Stage $default does not exist. StageName specified on a CreateDeployment request must exist so the stage can be updated with the new deployment.
+
+```
+
+## 9. Re-test POST after deploy
+- POST `https://anh066l1wf.execute-api.us-east-1.amazonaws.com/api/if/submit`: HTTP `404`
+```
+{"message":"Not Found"}
 ```
