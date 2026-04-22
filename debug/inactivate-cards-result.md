@@ -2,17 +2,17 @@
 
 - Customer: `601488`
 - Card ids: `237127,237129`
-- Ran at: 2026-04-22T18:41:17Z
+- Ran at: 2026-04-22T18:42:09Z
 
 ## Per-card results
 
 ### Card `237127`
-- HTTP: `411`
-- Body: `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN""http://www.w3.org/TR/html4/strict.dtd"> <HTML><HEAD><TITLE>Length Required</TITLE> <META HTTP-EQUIV="Content-Type" Content="text/html; charset=us-ascii"></HEAD> <BODY><h2>Length Required</h2> <hr><p>HTTP Error 411. The request must be chunked or have a content length.</p> </BODY></HTML> `
+- HTTP: `500`
+- Body: `{   "Message": "An error has occurred.",   "ExceptionMessage": "Object reference not set to an instance of an object.",   "ExceptionType": "System.NullReferenceException",   "StackTrace": "   at eCashWebAPIV1.Controllers.V1Controller.VB$StateMachine_66_PutCustomerInactivateCard.MoveNext() in C:\\devops-agent-01\\_work\\281\\s\\eCashWebAPIV1\\Controllers\\V1Controller.vb:line 2432\r\n--- End of `
 
 ### Card `237129`
-- HTTP: `411`
-- Body: `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN""http://www.w3.org/TR/html4/strict.dtd"> <HTML><HEAD><TITLE>Length Required</TITLE> <META HTTP-EQUIV="Content-Type" Content="text/html; charset=us-ascii"></HEAD> <BODY><h2>Length Required</h2> <hr><p>HTTP Error 411. The request must be chunked or have a content length.</p> </BODY></HTML> `
+- HTTP: `500`
+- Body: `{   "Message": "An error has occurred.",   "ExceptionMessage": "Object reference not set to an instance of an object.",   "ExceptionType": "System.NullReferenceException",   "StackTrace": "   at eCashWebAPIV1.Controllers.V1Controller.VB$StateMachine_66_PutCustomerInactivateCard.MoveNext() in C:\\devops-agent-01\\_work\\281\\s\\eCashWebAPIV1\\Controllers\\V1Controller.vb:line 2432\r\n--- End of `
 
 ## Remaining cards after inactivation
 ```json
