@@ -134,7 +134,12 @@ jobs:
 
           # Grant HttpApi permission to invoke the Lambda (one broad statement).
           STMT_ID=apigateway-invoke-payments
-          if aws lambda get-policy --function-name "$FN" 2>/dev/null | grep -q "\"Sid\":\"$STMT_ID\""; then
+          # Properly parse the policy doc — a grep on the raw string
+          # has to match escaped quotes ("\"Sid\":...") which is fragile.
+          EXISTING_SIDS=$(aws lambda get-policy --function-name "$FN" 2>/dev/null \
+            | jq -r '.Policy | fromjson | .Statement[].Sid' 2>/dev/null \
+            || true)
+          if echo "$EXISTING_SIDS" | grep -qxF "$STMT_ID"; then
             echo "Lambda permission $STMT_ID already set."
           else
             aws lambda add-permission \
