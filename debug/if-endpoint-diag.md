@@ -1,6 +1,6 @@
 # IF endpoint diagnostic
 
-_Captured at: 2026-04-22T22:44:55Z_
+_Captured at: 2026-04-22T22:46:11Z_
 
 ## 1. Lambda existence + handler path
 
@@ -50,10 +50,10 @@ _Captured at: 2026-04-22T22:44:55Z_
 - Preflight response headers + body (if any):
 ```
 HTTP/2 404 
-date: Wed, 22 Apr 2026 22:45:01 GMT
+date: Wed, 22 Apr 2026 22:46:15 GMT
 content-type: application/json
 content-length: 23
-apigw-requestid: cPlZKicToAMESDA=
+apigw-requestid: cPlkwj4PoAMEVIA=
 
 ```
 
@@ -79,8 +79,10 @@ aws: [ERROR]: An error occurred (BadRequestException) when calling the CreateDep
 
 ```
 
-## 9. Re-test POST after deploy
-- POST `https://anh066l1wf.execute-api.us-east-1.amazonaws.com/api/if/submit`: HTTP `404`
+## 9. Stage-prefixed URL probe (with /dev/)
+- Endpoint: `https://anh066l1wf.execute-api.us-east-1.amazonaws.com/dev/api/if/submit`
+- POST HTTP status: `400`
 ```
-{"message":"Not Found"}
+{"error": "invalid_BorrowerFirstName"}
 ```
+- Preflight OPTIONS: `204`
