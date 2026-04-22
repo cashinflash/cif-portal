@@ -1,14 +1,23 @@
 name: Provision payments Lambda
 
-# One-time manual workflow to create the cif-portal-payments-dev
-# Lambda and wire its three HttpApi routes. After this runs once,
-# the regular deploy.yml takes over for code updates.
+# Runs on every push to the feature branches AND on manual dispatch.
+# Creates the Lambda on first run, updates the code on subsequent
+# runs, and reconciles any missing HttpApi routes. Fully idempotent:
+# routes that already exist are skipped, and the Lambda code gets
+# whatever's in the current commit's backend/handlers/ folder.
 #
-# Idempotent: safe to re-run. If the function already exists, it just
-# updates the code + any missing routes.
+# Auto-running this on push means we never again ship a code change
+# that references a route we haven't wired.
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'backend/handlers/**'
+      - '.github/workflows/provision-payments.yml'
 
 env:
   AWS_REGION: us-east-1

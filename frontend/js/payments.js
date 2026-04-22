@@ -50,12 +50,26 @@
       body: opts.body ? JSON.stringify(opts.body) : undefined,
       credentials: 'omit',
     }).then(function (res) {
-      if (res.status === 401 || res.status === 403) {
-        sessionStorage.removeItem(TOKEN_KEY);
-        window.location.replace(LOGIN_URL);
-        throw new Error('unauthorized');
-      }
-      return res.json().then(function (body) {
+      // Parse body first so we can distinguish API-Gateway auth rejections
+      // (no JSON body, or {message: "Unauthorized"}) from Lambda-returned
+      // errors with a specific code. Only the former should log the user
+      // out; the latter should surface as a normal error to the caller.
+      return res.text().then(function (txt) {
+        let body = {};
+        try { body = txt ? JSON.parse(txt) : {}; } catch (e) { body = { raw: txt }; }
+
+        if (res.status === 401 || res.status === 403) {
+          const isLambdaErr = body && typeof body === 'object' && ('error' in body);
+          if (!isLambdaErr) {
+            sessionStorage.removeItem(TOKEN_KEY);
+            window.location.replace(LOGIN_URL);
+            throw new Error('unauthorized');
+          }
+          // Lambda-returned auth error — throw with the body attached.
+          const err = new Error('http ' + res.status);
+          err.body = body;
+          throw err;
+        }
         if (!res.ok) {
           const err = new Error('http ' + res.status);
           err.body = body;
