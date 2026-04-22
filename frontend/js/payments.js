@@ -179,9 +179,11 @@
       const body = document.createElement('span');
       body.className = 'pay-card-body';
       const strong = document.createElement('strong');
-      strong.textContent = (bank.name || 'Bank') + ' · ' + (bank.last4 ? '••' + bank.last4 : '••••');
+      strong.textContent = (bank.name || 'Bank') +
+        ' · ' + (bank.last4 ? '••••' + bank.last4 : '••••');
       const small = document.createElement('small');
-      small.textContent = (bank.accountType || 'Checking');
+      small.textContent = (bank.accountType || 'Checking') +
+        (bank.last4 ? ' · ends in ' + bank.last4 : '');
       body.appendChild(strong);
       body.appendChild(small);
       opt.appendChild(input);

@@ -324,21 +324,41 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def _extract_last4(candidates) -> str:
+    """Given any string-ish, pull the trailing 4 digits. Returns '' if
+    fewer than 4 digits are present anywhere in the string."""
+    for c in candidates:
+        if not c:
+            continue
+        digits = [ch for ch in str(c) if ch.isdigit()]
+        if len(digits) >= 4:
+            return "".join(digits[-4:])
+    return ""
+
+
 def _shape_bank_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize Vergent v1 customer_bank → UI shape.
 
-    v1 returns: id, company_id, customer_id, bank_name (or name),
-    account_number (masked), routing_number, account_type_id,
-    is_primary, etc. Field names vary — be defensive.
+    Field names are inconsistent across Vergent's v1 surfaces so we
+    check every variant we've seen before giving up.
     """
-    account = raw.get("account_number") or raw.get("AccountNumber") or ""
-    digits = [c for c in account if c.isdigit()]
-    last4 = "".join(digits[-4:]) if len(digits) >= 4 else ""
-    type_id = raw.get("account_type_id") or raw.get("AccountTypeId") or 0
-    type_name = {1: "Checking", 2: "Savings"}.get(int(type_id) if type_id else 0, "Checking")
+    last4 = _extract_last4([
+        raw.get("account_number"), raw.get("AccountNumber"),
+        raw.get("account_number_masked"), raw.get("AccountNumberMasked"),
+        raw.get("MaskedAccountNumber"), raw.get("AcctLast4"),
+        raw.get("last4"), raw.get("Last4"),
+        raw.get("AccountNum"),
+    ])
+    type_id = raw.get("account_type_id") or raw.get("AccountTypeId") or raw.get("type_id") or 0
+    try:
+        type_id_int = int(type_id) if type_id not in (None, "") else 0
+    except (TypeError, ValueError):
+        type_id_int = 0
+    type_name = {1: "Checking", 2: "Savings"}.get(type_id_int, "Checking")
     return {
-        "id": raw.get("id") or raw.get("Id"),
-        "name": raw.get("bank_name") or raw.get("name") or raw.get("Name") or "Bank",
+        "id": raw.get("id") or raw.get("Id") or raw.get("bank_id"),
+        "name": (raw.get("bank_name") or raw.get("name") or raw.get("Name")
+                 or raw.get("BankName") or "Bank"),
         "last4": last4,
         "accountType": type_name,
         "isPrimary": bool(raw.get("is_primary") or raw.get("IsPrimary")),
@@ -346,19 +366,72 @@ def _shape_bank_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_my_banks(event: Dict[str, Any]) -> Dict[str, Any]:
-    """List the signed-in customer's saved bank accounts (ACH) via v1."""
+    """List the signed-in customer's saved bank accounts (ACH) via v1.
+
+    Primary source: /api/V1/GetCustomerBanks?custId=<cid>. If that
+    returns an empty list, fall back to the bank embedded on the
+    active loan (LoanDetail.AccountNum). Vergent originations usually
+    capture the customer's bank on the loan itself, and that field is
+    always a masked string we can show.
+    """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"banks": []})
 
     status, body, raw = _v1_request("GET", f"/V1/GetCustomerBanks?custId={cid}")
-    if status != 200 or not isinstance(body, list):
+    shaped: list = []
+    if status == 200 and isinstance(body, list):
+        shaped = [_shape_bank_v1(b) for b in body if isinstance(b, dict)]
+        # One-shot probe so we can see Vergent's actual field names.
+        if body:
+            first = body[0] if isinstance(body[0], dict) else {}
+            log.info("GetCustomerBanks probe cid=%s count=%s first_keys=%s",
+                     cid, len(body), sorted(first.keys()))
+    else:
         log.warning("GetCustomerBanks status=%s raw=%s", status, (raw or "")[:300])
-        return _json_response(200, {"banks": [], "error": "upstream_unavailable"})
 
-    shaped = [_shape_bank_v1(b) for b in body if isinstance(b, dict)]
+    # Fallback: bank on the active loan record (LoanDetail.AccountNum).
+    # Harut's loan carries this even when GetCustomerBanks returns [].
+    if not shaped:
+        fallback = _fallback_bank_from_loan(cid)
+        if fallback:
+            shaped = [fallback]
+
     return _json_response(200, {"banks": shaped})
+
+
+def _fallback_bank_from_loan(cid: str) -> Optional[Dict[str, Any]]:
+    """Pull a minimal bank record from the active loan's LoanDetail.
+
+    We don't get a real bank id from the loan detail; use the header's
+    PaymentBankAccountId (if present) as an id stand-in so the UI
+    radio-group works. Server-side payment validation re-checks
+    against GetCustomerBanks, so a synthetic id here only affects
+    display.
+    """
+    status, body = _v1_get(f"/V1/{cid}/loans")
+    if status != 200 or not isinstance(body, list) or not body:
+        return None
+    for rec in body:
+        if not isinstance(rec, dict):
+            continue
+        detail = rec.get("LoanDetail") if isinstance(rec.get("LoanDetail"), dict) else {}
+        hdr = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else {}
+        account = detail.get("AccountNum") or detail.get("accountNum")
+        if not account:
+            continue
+        last4 = _extract_last4([account])
+        if not last4:
+            continue
+        return {
+            "id": hdr.get("PaymentBankAccountId") or detail.get("BankAccountId") or 0,
+            "name": detail.get("Lender") or detail.get("BankName") or "Bank on file",
+            "last4": last4,
+            "accountType": "Checking",
+            "isPrimary": True,
+        }
+    return None
 
 
 def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
