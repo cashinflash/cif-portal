@@ -47,11 +47,12 @@ jobs:
         run: |
           set -e
           if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
-            echo "$FN already exists — updating code."
-            aws lambda update-function-code \
-              --function-name "$FN" \
-              --zip-file fileb:///tmp/handlers.zip \
-              --no-cli-pager >/dev/null
+            # Lambda already exists — deploy.yml handles code updates on
+            # every push. Skip the update here to avoid racing with it
+            # (ResourceConflictException when both workflows fire on the
+            # same commit). Routes + permissions are still reconciled
+            # below, which is the whole point of re-running provision.
+            echo "$FN already exists — leaving code to deploy.yml."
           else
             echo "$FN does not exist — creating from loans Lambda template."
             LOANS_CFG=$(aws lambda get-function-configuration --function-name cif-portal-loans-dev)
