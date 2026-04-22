@@ -491,20 +491,30 @@ def _detect_card_type(digits: str) -> str:
 
 
 def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/my-cards — tokenize at Repay, then save to Vergent.
+    """POST /api/my-cards — DISABLED for PCI SAQ A compliance.
 
-    Flow:
-      1. Validate the card data locally (Luhn, exp, CCV, ZIP).
-      2. Call Repay's RGAPI with the PAN → get a card-vault token.
-      3. POST /V1/PostCustomerCardTokenized with card_ref=<token>.
-      4. Re-fetch the card via GetCustomerCards and confirm
-         CardProcessor='Repay' + is_active=True before returning
-         success.
+    Self-service Add Card is intentionally turned off in the portal.
+    Cards are added by Cash in Flash agents via Vergent's admin UI
+    (which performs server-side Repay tokenization on Vergent's
+    infrastructure). This keeps PAN entirely off our infrastructure.
 
-    Without step 2, Vergent creates a metadata-only record with
-    CardProcessor='None' that's hidden from the admin UI and can't
-    be charged.
+    Re-enable by:
+      1. Integrating Repay's Hosted Fields iframe in the SPA so PAN
+         goes browser → Repay (never our server).
+      2. Removing this short-circuit so the body below runs and
+         saves the resulting Repay token to Vergent via
+         /V1/PostCustomerCardTokenized.
+
+    Until then, return 410 Gone immediately — never parse the body,
+    never touch any cardholder data even briefly.
     """
+    log.info("post_card invoked while disabled — returning 410")
+    return _json_response(410, {
+        "error": "self_service_disabled",
+        "message": "Card entry is handled by Cash in Flash agents at (747) 270-7121 or any store location.",
+    })
+
+    # ─── Implementation below is intentionally unreachable. ──────
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:

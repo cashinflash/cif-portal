@@ -585,6 +585,48 @@
   border-radius: 4px;
 }
 
+/* Adding-a-card secure-by-design panel inside the Card tab */
+.pay-secure-panel {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: #f7fafa;
+  border: 1px solid var(--cif-hairline);
+  border-radius: 8px;
+}
+.pay-secure-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(14, 135, 65, 0.10);
+  color: var(--cif-green-dark);
+}
+.pay-secure-body strong {
+  display: block;
+  color: var(--cif-navy);
+  font-weight: 600;
+  font-size: .95rem;
+  margin-bottom: 4px;
+}
+.pay-secure-body p {
+  margin: 0;
+  color: var(--cif-muted);
+  font-size: .87rem;
+  line-height: 1.5;
+}
+.pay-secure-body a {
+  color: var(--cif-green-dark);
+  font-weight: 600;
+  text-decoration: none;
+}
+.pay-secure-body a:hover { text-decoration: underline; }
+
 /* Page-level help line (replaces the 'Other ways to pay' card) */
 .pay-help-line {
   text-align: center;
