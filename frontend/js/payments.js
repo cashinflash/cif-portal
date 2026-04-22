@@ -455,13 +455,14 @@
 
   function onCardNumberInput() {
     const el = qs('#cardNumber');
-    // Limit total digits by detected brand (so a Visa/MC can't accept
-    // 19 when it should be 16, and Amex stops at 15).
+    // Hard-cap at 16 for debit (Visa/MC/Discover). Amex debit is 15.
+    // We don't accept 19-digit Visa credit-only variants for the
+    // portal; all CIF card-on-file usage is a 16-digit debit.
     let rawDigits = el.value.replace(/\D/g, '');
     const brand = detectBrand(rawDigits);
     const cap = {
-      Visa: 19, MasterCard: 16, Amex: 15, Discover: 16,
-    }[brand] || 19;
+      Visa: 16, MasterCard: 16, Amex: 15, Discover: 16,
+    }[brand] || 16;
     const digits = rawDigits.slice(0, cap);
     let grouped;
     if (brand === 'Amex') {

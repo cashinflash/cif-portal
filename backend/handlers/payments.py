@@ -302,7 +302,14 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     status, resp, raw = _v1_request("POST", "/V1/PostCustomerCard", body=v1_body)
 
     if status not in (200, 201):
-        log.warning("PostCustomerCard upstream status=%s raw=%s", status, (raw or "")[:300])
+        # Dump a redacted copy of our request (no PAN, no CCV) alongside
+        # Vergent's raw error so we can see exactly which field they
+        # disagreed with.
+        redacted = dict(v1_body)
+        redacted["card_number"] = f"****{last4}"
+        redacted["ccv"] = "***"
+        log.warning("PostCustomerCard upstream status=%s body=%s raw=%s",
+                    status, redacted, (raw or "")[:400])
         return _json_response(502, {"error": "upstream_unavailable"})
 
     # v1's success response can be empty {} or carry the new card id;
