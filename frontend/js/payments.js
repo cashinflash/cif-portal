@@ -84,7 +84,10 @@
   const state = {
     loan: null,
     cards: [],
+    banks: [],
     selectedCardId: null,
+    selectedBankId: null,
+    paymentMethod: 'card', // 'card' | 'bank'
     submitting: false,
   };
 
@@ -131,66 +134,60 @@
   }
 
   function refreshCards() {
-    const btn = qs('#payRefreshCards');
-    if (btn) {
-      btn.disabled = true;
-      btn.classList.add('is-spinning');
+    // Called after a successful Add Card. Silently re-pulls cards + banks
+    // and re-inits the form so the new card is selectable.
+    return Promise.all([loadCards(), loadBanks()]).then(function () { initForm(); });
+  }
+
+  // ---------- Banks (ACH) ----------
+  function loadBanks() {
+    return api('/api/my-banks').then(function (data) {
+      state.banks = (data && data.banks) || [];
+      renderBanks();
+      return state.banks;
+    }).catch(function () {
+      state.banks = [];
+      renderBanks();
+    });
+  }
+
+  function renderBanks() {
+    const root = qs('#payBankList');
+    if (!root) return;
+    root.innerHTML = '';
+    if (!state.banks.length) {
+      const p = document.createElement('p');
+      p.className = 'pay-empty';
+      p.textContent = 'No bank account on file. Visit any Cash in Flash location to add one.';
+      root.appendChild(p);
+      return;
     }
-    const list = qs('#payCardList');
-    if (list) list.style.opacity = '.5';
-    loadCards()
-      .then(function () {
-        // After refresh, re-run the form init so the pay button picks
-        // up a newly-added card.
-        initForm();
-      })
-      .catch(function () { /* keep existing list on error */ })
-      .finally(function () {
-        if (btn) {
-          btn.disabled = false;
-          btn.classList.remove('is-spinning');
-        }
-        if (list) list.style.opacity = '';
+    state.banks.forEach(function (bank, idx) {
+      const opt = document.createElement('label');
+      opt.className = 'pay-card-option';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'bank';
+      input.value = String(bank.id);
+      if (idx === 0) {
+        input.checked = true;
+        state.selectedBankId = bank.id;
+      }
+      input.addEventListener('change', function () {
+        state.selectedBankId = bank.id;
       });
-  }
-
-  function openRepayPortal() {
-    // Show a small "we opened it — come back when done" banner on the
-    // page, then pop Repay's customer portal in a new tab. Repay is
-    // already linked to Vergent server-side, so any card the customer
-    // adds in the portal syncs to Vergent automatically. We refresh
-    // the list from Vergent when they come back.
-    showAddCardNotice();
-    const w = window.open(REPAY_PORTAL_URL, '_blank', 'noopener,noreferrer');
-    if (!w) {
-      const err = qs('#payError');
-      err.textContent = 'Please allow pop-ups and try again, or visit ' + REPAY_PORTAL_URL + ' directly.';
-      err.hidden = false;
-    }
-
-    // Best-effort: when the tab regains focus (user came back), auto-refresh.
-    const onFocus = function () {
-      window.removeEventListener('focus', onFocus);
-      setTimeout(refreshCards, 800);
-    };
-    window.addEventListener('focus', onFocus);
-  }
-
-  function showAddCardNotice() {
-    let notice = qs('#payAddCardNotice');
-    if (notice) { notice.hidden = false; return; }
-    notice = document.createElement('div');
-    notice.id = 'payAddCardNotice';
-    notice.className = 'pay-notice';
-    notice.innerHTML = (
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
-      '<div>We\'ve opened our secure payment partner in a new tab. Add your card there, then come back here and your new card will appear.</div>' +
-      '<button type="button" class="pay-notice-close" aria-label="Dismiss">&times;</button>'
-    );
-    const section = qs('#payAddCardBtn').closest('.pay-section');
-    if (section) section.appendChild(notice);
-    const close = qs('.pay-notice-close', notice);
-    if (close) close.addEventListener('click', function () { notice.remove(); });
+      const body = document.createElement('span');
+      body.className = 'pay-card-body';
+      const strong = document.createElement('strong');
+      strong.textContent = (bank.name || 'Bank') + ' · ' + (bank.last4 ? '••' + bank.last4 : '••••');
+      const small = document.createElement('small');
+      small.textContent = (bank.accountType || 'Checking');
+      body.appendChild(strong);
+      body.appendChild(small);
+      opt.appendChild(input);
+      opt.appendChild(body);
+      root.appendChild(opt);
+    });
   }
 
   function renderCards() {
@@ -253,15 +250,44 @@
 
     function updateBtn() {
       const amt = Number(amountEl.value);
-      const ok = state.cards.length > 0 && amt > 0 && amt <= payoff + 0.01 && !state.submitting;
+      const haveMethod =
+        (state.paymentMethod === 'card' && state.cards.length > 0 && state.selectedCardId) ||
+        (state.paymentMethod === 'bank' && state.banks.length > 0 && state.selectedBankId);
+      const ok = haveMethod && amt > 0 && amt <= payoff + 0.01 && !state.submitting;
       btn.disabled = !ok;
       btn.textContent = state.submitting ? 'Processing…' : ('Pay ' + money(amt));
     }
     amountEl.addEventListener('input', updateBtn);
+    // Re-evaluate on tab / selection changes by polling via a MutationObserver
+    // on the radio inputs — simpler: listen on the container.
+    ['payCardList', 'payBankList'].forEach(function (id) {
+      const root = qs('#' + id);
+      if (root) root.addEventListener('change', updateBtn);
+    });
     updateBtn();
 
     btn.addEventListener('click', function () {
       pay();
+    });
+  }
+
+  // ---------- Tabs ----------
+  function wireTabs() {
+    const tabs = qsa('.pay-tab');
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        const which = tab.getAttribute('data-tab') || 'card';
+        state.paymentMethod = which;
+        tabs.forEach(function (t) {
+          const isActive = t === tab;
+          t.classList.toggle('is-active', isActive);
+          t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+        qsa('.pay-panel').forEach(function (p) {
+          p.hidden = p.getAttribute('data-panel') !== which;
+        });
+        initForm();
+      });
     });
   }
 
@@ -271,25 +297,39 @@
     errEl.hidden = true;
     errEl.textContent = '';
 
-    if (state.submitting || !state.loan || !state.selectedCardId) return;
+    if (state.submitting || !state.loan) return;
     const amountEl = qs('#payAmount');
     const amount = Number(amountEl.value);
     if (!(amount > 0)) return;
+
+    let body;
+    if (state.paymentMethod === 'card') {
+      if (!state.selectedCardId) return;
+      body = {
+        method: 'card',
+        loanId: state.loan.id,
+        cardId: state.selectedCardId,
+        amount: Number(amount.toFixed(2)),
+      };
+    } else {
+      if (!state.selectedBankId) return;
+      body = {
+        method: 'bank',
+        loanId: state.loan.id,
+        bankId: state.selectedBankId,
+        amount: Number(amount.toFixed(2)),
+      };
+    }
 
     state.submitting = true;
     const btn = qs('#payBtn');
     btn.disabled = true;
     btn.textContent = 'Processing…';
 
-    const idempotencyKey = (Date.now() + '-' + Math.random().toString(16).slice(2, 10));
+    body.idempotencyKey = Date.now() + '-' + Math.random().toString(16).slice(2, 10);
     api('/api/my-payment', {
       method: 'POST',
-      body: {
-        loanId: state.loan.id,
-        cardId: state.selectedCardId,
-        amount: Number(amount.toFixed(2)),
-        idempotencyKey: idempotencyKey,
-      },
+      body: body,
     }).then(function (res) {
       if (res && res.success) {
         showReceipt(res, amount);
@@ -346,11 +386,10 @@
   }
 
   function wireButtons() {
-    const refresh = qs('#payRefreshCards');
-    if (refresh) refresh.addEventListener('click', refreshCards);
     const addBtn = qs('#payAddCardBtn');
     if (addBtn) addBtn.addEventListener('click', openAddCardModal);
     wireAddCardModal();
+    wireTabs();
   }
 
   // ---------- Add Card modal ----------
@@ -414,11 +453,17 @@
 
   function onCardNumberInput() {
     const el = qs('#cardNumber');
-    const digits = el.value.replace(/\D/g, '').slice(0, 19);
-    // Amex is 4-6-5 groups; everything else is 4-4-4-4.
-    const brand = detectBrand(digits);
+    // Limit total digits by detected brand (so a Visa/MC can't accept
+    // 19 when it should be 16, and Amex stops at 15).
+    let rawDigits = el.value.replace(/\D/g, '');
+    const brand = detectBrand(rawDigits);
+    const cap = {
+      Visa: 19, MasterCard: 16, Amex: 15, Discover: 16,
+    }[brand] || 19;
+    const digits = rawDigits.slice(0, cap);
     let grouped;
     if (brand === 'Amex') {
+      // 4-6-5 groups
       grouped = (digits.slice(0, 4) +
         (digits.length > 4 ? ' ' + digits.slice(4, 10) : '') +
         (digits.length > 10 ? ' ' + digits.slice(10, 15) : '')).trim();
@@ -427,6 +472,12 @@
     }
     el.value = grouped;
     setBrandTag(brand);
+    // Set CCV length appropriately: Amex uses 4 digits, others use 3.
+    const ccv = qs('#cardCcv');
+    if (ccv) {
+      ccv.setAttribute('maxlength', brand === 'Amex' ? '4' : '3');
+      ccv.setAttribute('placeholder', brand === 'Amex' ? '4 digits' : '3 digits');
+    }
   }
 
   function onExpInput() {
@@ -555,7 +606,7 @@
   // ---------- Boot ----------
   document.addEventListener('DOMContentLoaded', function () {
     wireButtons();
-    Promise.all([loadLoan(), loadCards()])
+    Promise.all([loadLoan(), loadCards(), loadBanks()])
       .then(function () { initForm(); })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;

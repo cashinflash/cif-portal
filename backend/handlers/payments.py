@@ -324,25 +324,72 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def _shape_bank_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize Vergent v1 customer_bank → UI shape.
+
+    v1 returns: id, company_id, customer_id, bank_name (or name),
+    account_number (masked), routing_number, account_type_id,
+    is_primary, etc. Field names vary — be defensive.
+    """
+    account = raw.get("account_number") or raw.get("AccountNumber") or ""
+    digits = [c for c in account if c.isdigit()]
+    last4 = "".join(digits[-4:]) if len(digits) >= 4 else ""
+    type_id = raw.get("account_type_id") or raw.get("AccountTypeId") or 0
+    type_name = {1: "Checking", 2: "Savings"}.get(int(type_id) if type_id else 0, "Checking")
+    return {
+        "id": raw.get("id") or raw.get("Id"),
+        "name": raw.get("bank_name") or raw.get("name") or raw.get("Name") or "Bank",
+        "last4": last4,
+        "accountType": type_name,
+        "isPrimary": bool(raw.get("is_primary") or raw.get("IsPrimary")),
+    }
+
+
+def get_my_banks(event: Dict[str, Any]) -> Dict[str, Any]:
+    """List the signed-in customer's saved bank accounts (ACH) via v1."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(200, {"banks": []})
+
+    status, body, raw = _v1_request("GET", f"/V1/GetCustomerBanks?custId={cid}")
+    if status != 200 or not isinstance(body, list):
+        log.warning("GetCustomerBanks status=%s raw=%s", status, (raw or "")[:300])
+        return _json_response(200, {"banks": [], "error": "upstream_unavailable"})
+
+    shaped = [_shape_bank_v1(b) for b in body if isinstance(b, dict)]
+    return _json_response(200, {"banks": shaped})
+
+
 def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-payment — charge a card OR debit a bank account.
+
+    Body:
+      { method: 'card' | 'bank',
+        loanId, amount,
+        cardId  (when method=card),
+        bankId  (when method=bank),
+        idempotencyKey }
+
+    Both flows use v1 PostCustomerLoanPayment — v1 auths with the
+    service Token header and takes customerId-free context (loan id
+    + payment method id). No customer JWT required.
+    """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(401, {"error": "unauthorized"})
 
-    # Parse body
     try:
         body = json.loads(event.get("body") or "{}")
     except (TypeError, ValueError):
         return _json_response(400, {"error": "bad_body"})
 
+    pay_method = (body.get("method") or "card").lower()
     loan_id = body.get("loanId")
-    card_id = body.get("cardId")
     amount = body.get("amount")
-    idempotency_key = body.get("idempotencyKey") or ""
 
-    # Basic shape check
-    if loan_id is None or card_id is None or amount is None:
+    if loan_id is None or amount is None:
         return _json_response(400, {"error": "missing_fields"})
     try:
         amount_num = float(amount)
@@ -351,14 +398,12 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     if amount_num <= 0:
         return _json_response(400, {"error": "amount_invalid"})
 
-    # Ownership: confirm loanId belongs to this customer and get payoff.
+    # Ownership + payoff guard via v1 (same pattern as before).
     loan = _fetch_active_loan(cid)
     if not loan or str(loan.get("id")) != str(loan_id):
-        # Also allow paying a non-first outstanding loan in case the
-        # customer has multiple — refetch the full list.
-        status, raw_loans = _v1_get(f"/V1/{cid}/loans")
+        status_ok, raw_loans = _v1_get(f"/V1/{cid}/loans")
         found = None
-        if status == 200 and isinstance(raw_loans, list):
+        if status_ok == 200 and isinstance(raw_loans, list):
             for r in raw_loans:
                 if isinstance(r, dict):
                     shaped = _shape_v1_loan(r)
@@ -374,65 +419,90 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     if amount_num > float(payoff) + 0.01:
         return _json_response(400, {"error": "amount_invalid", "payoff": payoff})
 
-    # Ownership: confirm cardId is in the customer's card list.
-    st_c, body_c, _ = _apim_call("GET", "/api/CustomerPortal/Customer/Cards")
-    if st_c != 200 or not isinstance(body_c, list):
-        return _json_response(502, {"error": "upstream_unavailable"})
-    card = next(
-        (c for c in body_c if isinstance(c, dict) and str(c.get("id")) == str(card_id)),
-        None,
-    )
-    if not card:
-        return _json_response(403, {"error": "card_not_yours"})
-    if card.get("isExpired"):
-        return _json_response(400, {"error": "card_expired"})
+    store_id = loan.get("storeId") or 0
+    hdr_id = int(loan.get("id")) if loan.get("id") else 0
 
-    last4 = "".join(c for c in (card.get("accountNumberMasked") or "") if c.isdigit())[-4:]
+    # Vergent v1 PostCustomerLoanPayment body shape (documented):
+    #   CompanyId, StoreId, UserId, HeaderId, PaymentDate, PaymentAmount,
+    #   PaymentMethod (object: Type + reference fields depending on type)
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    # Execute the charge. Vergent's CreditCardPaymentRequestModel fields:
-    # loanId (int), paymentId (int, which is the card's id), amountDue (number).
+    if pay_method == "card":
+        card_id = body.get("cardId")
+        if card_id is None:
+            return _json_response(400, {"error": "missing_fields"})
+        # Ownership: confirm the cardId is in the customer's saved cards.
+        st_c, cards_body, _ = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
+        if st_c != 200 or not isinstance(cards_body, list):
+            return _json_response(502, {"error": "upstream_unavailable"})
+        card = next(
+            (c for c in cards_body if isinstance(c, dict) and str(c.get("id")) == str(card_id)),
+            None,
+        )
+        if not card:
+            return _json_response(403, {"error": "card_not_yours"})
+        last4 = "".join(ch for ch in (card.get("card_number") or "") if ch.isdigit())[-4:]
+        method_obj = {"Type": "Card", "CardId": int(card_id)}
+    elif pay_method == "bank":
+        bank_id = body.get("bankId")
+        if bank_id is None:
+            return _json_response(400, {"error": "missing_fields"})
+        # Ownership: confirm the bankId is in the customer's saved banks.
+        st_b, banks_body, _ = _v1_request("GET", f"/V1/GetCustomerBanks?custId={cid}")
+        if st_b != 200 or not isinstance(banks_body, list):
+            return _json_response(502, {"error": "upstream_unavailable"})
+        bank = next(
+            (b for b in banks_body if isinstance(b, dict) and str(b.get("id")) == str(bank_id)),
+            None,
+        )
+        if not bank:
+            return _json_response(403, {"error": "bank_not_yours"})
+        last4 = "".join(ch for ch in (bank.get("account_number") or "") if ch.isdigit())[-4:]
+        method_obj = {"Type": "ACH", "BankId": int(bank_id)}
+    else:
+        return _json_response(400, {"error": "method_invalid"})
+
     charge_body = {
-        "loanId": int(loan_id),
-        "paymentId": int(card_id),
-        "amountDue": round(amount_num, 2),
+        "CompanyId": VERGENT_COMPANY_ID,
+        "StoreId": int(store_id) if store_id else 0,
+        "HeaderId": hdr_id,
+        "PaymentDate": now_iso,
+        "PaymentAmount": round(amount_num, 2),
+        "PaymentMethod": method_obj,
     }
-    extra_headers = {"X-Idempotency-Key": idempotency_key} if idempotency_key else None
 
-    log.info("payment attempt cid=%s loan_id=%s card_id=%s last4=%s amount=%s",
-             cid, loan_id, card_id, last4, amount_num)
+    log.info("payment attempt cid=%s method=%s loan_id=%s last4=%s amount=%s",
+             cid, pay_method, loan_id, last4, amount_num)
 
-    status, charge, raw = _apim_call(
-        "POST",
-        "/api/CustomerPortal/Loans/Payments/CreditCardPayment",
-        body=charge_body,
-        extra_headers=extra_headers,
-    )
+    status, charge, raw = _v1_request("POST", "/V1/PostCustomerLoanPayment", body=charge_body)
 
-    if status not in (200, 201) or not isinstance(charge, dict):
-        log.warning("payment upstream status=%s raw=%s", status, raw[:300] if raw else "")
+    if status not in (200, 201):
+        log.warning("payment upstream status=%s raw=%s", status, (raw or "")[:300])
         return _json_response(502, {"error": "upstream_unavailable"})
 
-    if not charge.get("success"):
-        log.warning("payment declined cid=%s loan_id=%s card_id=%s", cid, loan_id, card_id)
+    if isinstance(charge, dict) and charge.get("Errors"):
+        log.warning("payment declined cid=%s loan_id=%s errors=%s",
+                    cid, loan_id, charge.get("Errors"))
         return _json_response(200, {"success": False, "error": "card_declined"})
 
     # Re-fetch the loan so we can tell the UI the new balance.
     refreshed = _fetch_active_loan(cid)
     new_balance = refreshed.get("balance") if refreshed else None
 
-    # Vergent's response doesn't carry a clean "confirmation id" — use
-    # scheduleDate or fall back to a local UTC timestamp.
-    confirmation_id = charge.get("scheduleDate") or ""
+    trans_id = charge.get("TransactionId") if isinstance(charge, dict) else None
+    confirmation_id = str(trans_id) if trans_id else now_iso
 
-    log.info("payment success cid=%s loan_id=%s last4=%s amount=%s conf=%s new_balance=%s",
-             cid, loan_id, last4, amount_num, confirmation_id, new_balance)
+    log.info("payment success cid=%s method=%s loan_id=%s last4=%s amount=%s trans=%s new_balance=%s",
+             cid, pay_method, loan_id, last4, amount_num, trans_id, new_balance)
 
     return _json_response(200, {
         "success": True,
         "confirmationId": confirmation_id,
-        "scheduleDate": charge.get("scheduleDate"),
+        "transactionId": trans_id,
         "amount": round(amount_num, 2),
         "last4": last4,
+        "paymentMethod": pay_method,
         "newBalance": new_balance,
     })
 
@@ -453,6 +523,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_my_cards(event)
         if path.endswith("/my-cards") and method == "POST":
             return post_card(event)
+        if path.endswith("/my-banks") and method == "GET":
+            return get_my_banks(event)
         if path.endswith("/my-payment/loan-summary") and method == "GET":
             return get_loan_summary(event)
         if path.endswith("/my-payment") and method == "POST":

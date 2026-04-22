@@ -111,6 +111,7 @@ jobs:
           ROUTES=(
             "GET /api/my-cards"
             "POST /api/my-cards"
+            "GET /api/my-banks"
             "GET /api/my-payment/loan-summary"
             "POST /api/my-payment"
           )
