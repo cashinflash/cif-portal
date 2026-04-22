@@ -131,6 +131,44 @@ jobs:
           cat /tmp/preflight-headers.txt >> "$REPORT" 2>/dev/null
           echo '```' >> "$REPORT"
 
+          echo "" >> "$REPORT"
+          echo "## 6. HttpApi stages + auto-deploy" >> "$REPORT"
+          echo '```' >> "$REPORT"
+          aws apigatewayv2 get-stages --api-id "$HTTP_API_ID" \
+            --query "Items[].{Stage:StageName,AutoDeploy:AutoDeploy,LastDeployed:LastDeploymentStatusMessage}" \
+            --output table >> "$REPORT" 2>&1
+          echo '```' >> "$REPORT"
+
+          echo "" >> "$REPORT"
+          echo "## 7. Known-working neighbor (payments) for comparison" >> "$REPORT"
+          P_ENDPOINT="https://$HTTP_API_ID.execute-api.$AWS_REGION.amazonaws.com/api/my-cards"
+          P_CODE=$(curl -s -o /tmp/pbody.txt -w "%{http_code}" \
+            -X GET "$P_ENDPOINT")
+          echo "- \`GET $P_ENDPOINT\`: HTTP \`$P_CODE\`" >> "$REPORT"
+          echo "  (401 = route exists + auth guard. 404 = path not on this API.)" >> "$REPORT"
+
+          echo "" >> "$REPORT"
+          echo "## 8. Force redeploy \$default stage" >> "$REPORT"
+          DEPLOY=$(aws apigatewayv2 create-deployment --api-id "$HTTP_API_ID" \
+            --stage-name '$default' --output json 2>&1) || true
+          echo '```' >> "$REPORT"
+          echo "$DEPLOY" | head -c 600 >> "$REPORT"
+          echo '' >> "$REPORT"
+          echo '```' >> "$REPORT"
+
+          echo "" >> "$REPORT"
+          echo "## 9. Re-test POST after deploy" >> "$REPORT"
+          sleep 4
+          HTTP_CODE=$(curl -s -o /tmp/body2.txt -w "%{http_code}" \
+            -X POST "$ENDPOINT" \
+            -H 'Content-Type: application/json' \
+            -d '{"diagnostic":true}')
+          echo "- POST \`$ENDPOINT\`: HTTP \`$HTTP_CODE\`" >> "$REPORT"
+          echo '```' >> "$REPORT"
+          head -c 600 /tmp/body2.txt >> "$REPORT"
+          echo '' >> "$REPORT"
+          echo '```' >> "$REPORT"
+
       - name: Commit report
         run: |
           git config user.email "actions@github.com"
