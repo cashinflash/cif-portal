@@ -3,87 +3,11 @@
 - Function: `cif-portal-payments-dev`
 - Window: last 30 minute(s)
 - Filter: `(none)`
-- Captured at: 2026-04-22T18:30:44Z
+- Captured at: 2026-04-22T18:37:15Z
 
-## 175 event(s)
+## 177 event(s)
 
 ```
-18:02:32  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
-18:02:32  [INFO]	2026-04-22T18:02:32.588Z		Found credentials in environment variables.
-18:05:29  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
-18:05:29  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
-18:05:29  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
-18:05:29  [INFO]	2026-04-22T18:05:29.591Z		Found credentials in environment variables.
-18:05:29  [INFO]	2026-04-22T18:05:29.625Z		Found credentials in environment variables.
-18:05:29  START RequestId: 4a690518-e92a-4eab-8122-02727e9fbfa2 Version: $LATEST
-18:05:29  START RequestId: c902510b-0253-44b4-b4ac-ba1db3463cdb Version: $LATEST
-18:05:29  [INFO]	2026-04-22T18:05:29.764Z		Found credentials in environment variables.
-18:05:29  START RequestId: 0a7c731f-7ea3-4791-aaa8-641d95b9cfe2 Version: $LATEST
-18:05:30  [INFO]	2026-04-22T18:05:30.058Z	c902510b-0253-44b4-b4ac-ba1db3463cdb	v1 service Token cached (3600s) userId=8434
-18:05:30  [INFO]	2026-04-22T18:05:30.092Z	4a690518-e92a-4eab-8122-02727e9fbfa2	v1 service Token cached (3600s) userId=8434
-18:05:30  [INFO]	2026-04-22T18:05:30.146Z	c902510b-0253-44b4-b4ac-ba1db3463cdb	GetCustomerBanks probe cid=601488 count=1 first_keys=['AccountNum', 'AccountOpenDate', 'BankVerification', 'CodChkNum', 'CompanyId', 'CustomerId', 'DDAPRN', 'Errors', 'IsDDA', 'IsDirectDep', 'IsPrimary', 'Name', 'Phone', 'PrevStmtDate', 'RoutingNum', 'Status', 'TypeId', 'TypeName', 'id']
-18:05:30  END RequestId: c902510b-0253-44b4-b4ac-ba1db3463cdb
-18:05:30  REPORT RequestId: c902510b-0253-44b4-b4ac-ba1db3463cdb	Duration: 424.22 ms	Billed Duration: 773 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	Init Duration: 348.32 ms	
-18:05:30  [INFO]	2026-04-22T18:05:30.264Z	0a7c731f-7ea3-4791-aaa8-641d95b9cfe2	v1 service Token cached (3600s) userId=8434
-18:05:30  END RequestId: 0a7c731f-7ea3-4791-aaa8-641d95b9cfe2
-18:05:30  REPORT RequestId: 0a7c731f-7ea3-4791-aaa8-641d95b9cfe2	Duration: 458.11 ms	Billed Duration: 919 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	Init Duration: 460.30 ms	
-18:05:30  [INFO]	2026-04-22T18:05:30.735Z	4a690518-e92a-4eab-8122-02727e9fbfa2	autopay probe hdr_id=4823221 hdr_keys=['AchOptOut', 'AmountDue', 'ChannelId', 'CompanyId', 'CosignerId', 'CustomerId', 'DueDate', 'Errors', 'FundingDate', 'HeldBankAccountId', 'HeldCheckNumber', 'InitialLoanStatus', 'IsEligibleForRefi', 'IsInRescindPeriod', 'IsStatusOutstanding', 'LoanAmount', 'LoanClassId', 'LoanModelId', 'LoanModelName', 'LoanTypeName', 'LocCreditLimit', 'MinAmountDue', 'MinLoanAmount', 'NumberOfPayments', 'OriginationDate', 'PaymentBankAccountId', 'PayoffAmount', 'PrinPerPayment', 'PrinReduction', 'RPP', 'RescindEndDate', 'RescindType', 'RescindValue', 'StatusId', 'StoreId', 'SubStatusId', 'ToCustomer', 'adv_trans_id', 'hdr_id', 'original_hdr_id', 'prev_hdr_id', 'prev_sys_id', 'product_root_hdr_id', 'root_hdr_id'] detail_keys=['AccountNum', 'AutoPayCardId', 'AutoPayMethod', 'AvailableCredit', 'Balance', 'CreditLimit', 'DaysLate', 'EarnedFees', 'EarnedPrin', 'Errors', 'FeeBalance', 'IRepoStatus', 'IsAutoPay', 'IsSoftVoid', 'LastPmtDate', 'Lender', 'LoanModelName', 'PaidOffDate', 'PastDueAmount', 'PrinBalance', 'PublicLoanId', 'Recent', 'StateDbId', 'Status', 'StoreName', 'SubStatus', 'SuretyBondCo', 'Tags']
-18:05:30  END RequestId: 4a690518-e92a-4eab-8122-02727e9fbfa2
-18:05:30  REPORT RequestId: 4a690518-e92a-4eab-8122-02727e9fbfa2	Duration: 1032.96 ms	Billed Duration: 1419 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	Init Duration: 385.90 ms	
-18:05:45  START RequestId: 1f60973f-5546-4269-a285-b77d4bb49764 Version: $LATEST
-18:05:45  [INFO]	2026-04-22T18:05:45.043Z	1f60973f-5546-4269-a285-b77d4bb49764	add card attempt cid=601488 last4=0295 brand=Visa exp=04/2031
-18:05:45  [WARNING]	2026-04-22T18:05:45.159Z	1f60973f-5546-4269-a285-b77d4bb49764	Vergent POST https://shared.vergentlms.com/api/api/V1/PostCustomerCard -> 400: {
-  "id": 0,
-  "company_id": 386,
-  "customer_id": 601488,
-  "card_type_id": 1,
-  "card_holder": "Harut Darakchyan",
-  "card_number": "4833160326650295",
-  "card_id": "",
-  "card_ref": "",
-  "is_eligible_for_disbursement": false,
-  "card_account_guid": null,
-  "card_guid": null,
-  "last_
-18:05:45  [WARNING]	2026-04-22T18:05:45.160Z	1f60973f-5546-4269-a285-b77d4bb49764	PostCustomerCard upstream status=400 body={'id': 0, 'company_id': 386, 'customer_id': 601488, 'card_type_id': 1, 'card_holder': 'Harut Darakchyan', 'card_number': '****0295', 'card_id': '', 'card_ref': '', 'is_eligible_for_disbursement': False, 'expire_month': 4, 'expire_year': 2031, 'ccv': '***'} raw={    "id": 0,    "company_id": 386,    "customer_id": 601488,    "card_type_id": 1,    "card_holder": "Harut Darakchyan",    "card_number": "4833160326650295",    "card_id": "",    "card_ref": "",    "is_eligible_for_disbursement": false,    "card_account_guid": null,    "card_guid": null,    "last_four_digits": null,    "product_id": 0,    "expire_month": 4,    "expire_year": 2031,    "ccv": "106",    "security_answer": null,    "direct_deposit_number": null,    "insight_prod_settings": null,    "created_dt": null,    "status": 0,    "Errors": [      "The card number does not match for the selected card type",      "An error occurred during PostCustomerCard: Customer card validation failed."    ],    "billing_zip_code": null,    "card_processor_type": 0,    "CardProcessor": "None",    "CardTokens": null,    "is_existing": false,    "is_active": false  }
-18:05:45  END RequestId: 1f60973f-5546-4269-a285-b77d4bb49764
-18:05:45  REPORT RequestId: 1f60973f-5546-4269-a285-b77d4bb49764	Duration: 118.93 ms	Billed Duration: 119 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	
-18:05:49  START RequestId: 2432f238-9899-4725-ba81-c4cb6397b5e5 Version: $LATEST
-18:05:49  [INFO]	2026-04-22T18:05:49.242Z	2432f238-9899-4725-ba81-c4cb6397b5e5	add card attempt cid=601488 last4=0295 brand=Visa exp=04/2031
-18:05:49  [WARNING]	2026-04-22T18:05:49.348Z	2432f238-9899-4725-ba81-c4cb6397b5e5	Vergent POST https://shared.vergentlms.com/api/api/V1/PostCustomerCard -> 400: {
-  "id": 0,
-  "company_id": 386,
-  "customer_id": 601488,
-  "card_type_id": 1,
-  "card_holder": "Harut Darakchyan",
-  "card_number": "4833160326650295",
-  "card_id": "",
-  "card_ref": "",
-  "is_eligible_for_disbursement": false,
-  "card_account_guid": null,
-  "card_guid": null,
-  "last_
-18:05:49  [WARNING]	2026-04-22T18:05:49.348Z	2432f238-9899-4725-ba81-c4cb6397b5e5	PostCustomerCard upstream status=400 body={'id': 0, 'company_id': 386, 'customer_id': 601488, 'card_type_id': 1, 'card_holder': 'Harut Darakchyan', 'card_number': '****0295', 'card_id': '', 'card_ref': '', 'is_eligible_for_disbursement': False, 'expire_month': 4, 'expire_year': 2031, 'ccv': '***'} raw={    "id": 0,    "company_id": 386,    "customer_id": 601488,    "card_type_id": 1,    "card_holder": "Harut Darakchyan",    "card_number": "4833160326650295",    "card_id": "",    "card_ref": "",    "is_eligible_for_disbursement": false,    "card_account_guid": null,    "card_guid": null,    "last_four_digits": null,    "product_id": 0,    "expire_month": 4,    "expire_year": 2031,    "ccv": "106",    "security_answer": null,    "direct_deposit_number": null,    "insight_prod_settings": null,    "created_dt": null,    "status": 0,    "Errors": [      "The card number does not match for the selected card type",      "An error occurred during PostCustomerCard: Customer card validation failed."    ],    "billing_zip_code": null,    "card_processor_type": 0,    "CardProcessor": "None",    "CardTokens": null,    "is_existing": false,    "is_active": false  }
-18:05:49  END RequestId: 2432f238-9899-4725-ba81-c4cb6397b5e5
-18:05:49  REPORT RequestId: 2432f238-9899-4725-ba81-c4cb6397b5e5	Duration: 107.67 ms	Billed Duration: 108 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	
-18:05:51  START RequestId: 6306e708-d7a3-4fc5-9632-b5665775048f Version: $LATEST
-18:05:51  [INFO]	2026-04-22T18:05:51.642Z	6306e708-d7a3-4fc5-9632-b5665775048f	add card attempt cid=601488 last4=0295 brand=Visa exp=04/2031
-18:05:51  [WARNING]	2026-04-22T18:05:51.729Z	6306e708-d7a3-4fc5-9632-b5665775048f	Vergent POST https://shared.vergentlms.com/api/api/V1/PostCustomerCard -> 400: {
-  "id": 0,
-  "company_id": 386,
-  "customer_id": 601488,
-  "card_type_id": 1,
-  "card_holder": "Harut Darakchyan",
-  "card_number": "4833160326650295",
-  "card_id": "",
-  "card_ref": "",
-  "is_eligible_for_disbursement": false,
-  "card_account_guid": null,
-  "card_guid": null,
-  "last_
-18:05:51  [WARNING]	2026-04-22T18:05:51.729Z	6306e708-d7a3-4fc5-9632-b5665775048f	PostCustomerCard upstream status=400 body={'id': 0, 'company_id': 386, 'customer_id': 601488, 'card_type_id': 1, 'card_holder': 'Harut Darakchyan', 'card_number': '****0295', 'card_id': '', 'card_ref': '', 'is_eligible_for_disbursement': False, 'expire_month': 4, 'expire_year': 2031, 'ccv': '***'} raw={    "id": 0,    "company_id": 386,    "customer_id": 601488,    "card_type_id": 1,    "card_holder": "Harut Darakchyan",    "card_number": "4833160326650295",    "card_id": "",    "card_ref": "",    "is_eligible_for_disbursement": false,    "card_account_guid": null,    "card_guid": null,    "last_four_digits": null,    "product_id": 0,    "expire_month": 4,    "expire_year": 2031,    "ccv": "106",    "security_answer": null,    "direct_deposit_number": null,    "insight_prod_settings": null,    "created_dt": null,    "status": 0,    "Errors": [      "The card number does not match for the selected card type",      "An error occurred during PostCustomerCard: Customer card validation failed."    ],    "billing_zip_code": null,    "card_processor_type": 0,    "CardProcessor": "None",    "CardTokens": null,    "is_existing": false,    "is_active": false  }
-18:05:51  END RequestId: 6306e708-d7a3-4fc5-9632-b5665775048f
-18:05:51  REPORT RequestId: 6306e708-d7a3-4fc5-9632-b5665775048f	Duration: 88.84 ms	Billed Duration: 89 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	
 18:08:37  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
 18:08:37  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
 18:08:37  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
@@ -255,4 +179,46 @@
 18:26:33  [WARNING]	2026-04-22T18:26:33.343Z	c290237d-c559-4147-b453-e699784e9f88	PostCustomerCard returned errors cid=601488 last4=0295 errors=['Unable to save card data: Repay processing error - Invalid card. . ']
 18:26:33  END RequestId: c290237d-c559-4147-b453-e699784e9f88
 18:26:33  REPORT RequestId: c290237d-c559-4147-b453-e699784e9f88	Duration: 594.72 ms	Billed Duration: 595 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	
+18:34:00  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
+18:34:01  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
+18:34:01  INIT_START Runtime Version: python:3.12.mainlinev2.v7	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:2b830756c5b10ff133ebda3f21aaa7e31ccd9f7038e1342adb459865da7617a3
+18:34:01  [INFO]	2026-04-22T18:34:01.241Z		Found credentials in environment variables.
+18:34:01  START RequestId: 862461cc-ef6a-4dd4-a4be-dacb9d64c2c7 Version: $LATEST
+18:34:01  [INFO]	2026-04-22T18:34:01.407Z		Found credentials in environment variables.
+18:34:01  [INFO]	2026-04-22T18:34:01.440Z		Found credentials in environment variables.
+18:34:01  START RequestId: 44f63035-0b89-45fb-8fa7-03c28fbe1038 Version: $LATEST
+18:34:01  START RequestId: 0633b156-64d5-4be6-ad52-8bdc433ec947 Version: $LATEST
+18:34:01  [INFO]	2026-04-22T18:34:01.732Z	862461cc-ef6a-4dd4-a4be-dacb9d64c2c7	v1 service Token cached (3600s) userId=8434
+18:34:01  [INFO]	2026-04-22T18:34:01.821Z	862461cc-ef6a-4dd4-a4be-dacb9d64c2c7	GetCustomerBanks probe cid=601488 count=1 first_keys=['AccountNum', 'AccountOpenDate', 'BankVerification', 'CodChkNum', 'CompanyId', 'CustomerId', 'DDAPRN', 'Errors', 'IsDDA', 'IsDirectDep', 'IsPrimary', 'Name', 'Phone', 'PrevStmtDate', 'RoutingNum', 'Status', 'TypeId', 'TypeName', 'id']
+18:34:01  END RequestId: 862461cc-ef6a-4dd4-a4be-dacb9d64c2c7
+18:34:01  REPORT RequestId: 862461cc-ef6a-4dd4-a4be-dacb9d64c2c7	Duration: 480.02 ms	Billed Duration: 845 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	Init Duration: 364.97 ms	
+18:34:02  [INFO]	2026-04-22T18:34:02.005Z	0633b156-64d5-4be6-ad52-8bdc433ec947	v1 service Token cached (3600s) userId=8434
+18:34:02  [INFO]	2026-04-22T18:34:02.054Z	44f63035-0b89-45fb-8fa7-03c28fbe1038	v1 service Token cached (3600s) userId=8434
+18:34:02  [INFO]	2026-04-22T18:34:02.128Z	0633b156-64d5-4be6-ad52-8bdc433ec947	GetCustomerCards cid=601488 count=1 cards=[{'id': 237127, 'type_id': 2, 'holder': 'Harut Darakchyan', 'last4': '', 'is_existing': False, 'is_active': False, 'CardProcessor': 'None', 'card_processor_type': 0}]
+18:34:02  [INFO]	2026-04-22T18:34:02.215Z	0633b156-64d5-4be6-ad52-8bdc433ec947	GetCustomerCardTypes loaded: {3: 'AMEX', 4: 'Discover', 7: 'Insight', 1: 'MasterCard', 9: 'Netspend DDA', 8: 'Netspend GPR', 2: 'Visa'}
+18:34:02  END RequestId: 0633b156-64d5-4be6-ad52-8bdc433ec947
+18:34:02  REPORT RequestId: 0633b156-64d5-4be6-ad52-8bdc433ec947	Duration: 632.92 ms	Billed Duration: 1133 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	Init Duration: 499.50 ms	
+18:34:02  [INFO]	2026-04-22T18:34:02.765Z	44f63035-0b89-45fb-8fa7-03c28fbe1038	autopay probe hdr_id=4823221 hdr_keys=['AchOptOut', 'AmountDue', 'ChannelId', 'CompanyId', 'CosignerId', 'CustomerId', 'DueDate', 'Errors', 'FundingDate', 'HeldBankAccountId', 'HeldCheckNumber', 'InitialLoanStatus', 'IsEligibleForRefi', 'IsInRescindPeriod', 'IsStatusOutstanding', 'LoanAmount', 'LoanClassId', 'LoanModelId', 'LoanModelName', 'LoanTypeName', 'LocCreditLimit', 'MinAmountDue', 'MinLoanAmount', 'NumberOfPayments', 'OriginationDate', 'PaymentBankAccountId', 'PayoffAmount', 'PrinPerPayment', 'PrinReduction', 'RPP', 'RescindEndDate', 'RescindType', 'RescindValue', 'StatusId', 'StoreId', 'SubStatusId', 'ToCustomer', 'adv_trans_id', 'hdr_id', 'original_hdr_id', 'prev_hdr_id', 'prev_sys_id', 'product_root_hdr_id', 'root_hdr_id'] detail_keys=['AccountNum', 'AutoPayCardId', 'AutoPayMethod', 'AvailableCredit', 'Balance', 'CreditLimit', 'DaysLate', 'EarnedFees', 'EarnedPrin', 'Errors', 'FeeBalance', 'IRepoStatus', 'IsAutoPay', 'IsSoftVoid', 'LastPmtDate', 'Lender', 'LoanModelName', 'PaidOffDate', 'PastDueAmount', 'PrinBalance', 'PublicLoanId', 'Recent', 'StateDbId', 'Status', 'StoreName', 'SubStatus', 'SuretyBondCo', 'Tags']
+18:34:02  END RequestId: 44f63035-0b89-45fb-8fa7-03c28fbe1038
+18:34:02  REPORT RequestId: 44f63035-0b89-45fb-8fa7-03c28fbe1038	Duration: 1228.87 ms	Billed Duration: 1704 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	Init Duration: 474.32 ms	
+18:34:27  START RequestId: 86309c25-6465-48c7-85f9-9edc2402a001 Version: $LATEST
+18:34:27  [INFO]	2026-04-22T18:34:27.307Z	86309c25-6465-48c7-85f9-9edc2402a001	GetCustomerCardTypes loaded: {3: 'AMEX', 4: 'Discover', 7: 'Insight', 1: 'MasterCard', 9: 'Netspend DDA', 8: 'Netspend GPR', 2: 'Visa'}
+18:34:27  [INFO]	2026-04-22T18:34:27.307Z	86309c25-6465-48c7-85f9-9edc2402a001	add card attempt cid=601488 last4=0295 brand=Visa exp=04/2031
+18:34:28  [WARNING]	2026-04-22T18:34:28.374Z	86309c25-6465-48c7-85f9-9edc2402a001	PostCustomerCard returned errors cid=601488 last4=0295 errors=['Unable to save card data: Repay processing error - Invalid card. . ']
+18:34:28  END RequestId: 86309c25-6465-48c7-85f9-9edc2402a001
+18:34:28  REPORT RequestId: 86309c25-6465-48c7-85f9-9edc2402a001	Duration: 1164.51 ms	Billed Duration: 1165 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	
+18:34:54  START RequestId: 2ecd3e55-1da3-4557-8f37-319d5299962b Version: $LATEST
+18:34:54  [INFO]	2026-04-22T18:34:54.323Z	2ecd3e55-1da3-4557-8f37-319d5299962b	add card attempt cid=601488 last4=2217 brand=Visa exp=07/2028
+18:34:56  [INFO]	2026-04-22T18:34:56.604Z	2ecd3e55-1da3-4557-8f37-319d5299962b	add card success cid=601488 last4=2217 new_card_id=237129 flags={'is_existing': False, 'is_active': False, 'card_processor_type': 1, 'CardProcessor': 'None', 'status': 0, 'card_guid': ''}
+18:34:56  [INFO]	2026-04-22T18:34:56.676Z	2ecd3e55-1da3-4557-8f37-319d5299962b	add card verify cid=601488 new_card_id=237129 in_list=True list_count=2
+18:34:56  END RequestId: 2ecd3e55-1da3-4557-8f37-319d5299962b
+18:34:56  REPORT RequestId: 2ecd3e55-1da3-4557-8f37-319d5299962b	Duration: 2355.22 ms	Billed Duration: 2356 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	
+18:34:56  START RequestId: 3b4799f8-7eb2-41d6-aaa1-1e0f17a1c7ed Version: $LATEST
+18:34:56  START RequestId: 827562ae-bcd9-46c6-ab54-dc722634f6ca Version: $LATEST
+18:34:56  [INFO]	2026-04-22T18:34:56.997Z	3b4799f8-7eb2-41d6-aaa1-1e0f17a1c7ed	GetCustomerBanks probe cid=601488 count=1 first_keys=['AccountNum', 'AccountOpenDate', 'BankVerification', 'CodChkNum', 'CompanyId', 'CustomerId', 'DDAPRN', 'Errors', 'IsDDA', 'IsDirectDep', 'IsPrimary', 'Name', 'Phone', 'PrevStmtDate', 'RoutingNum', 'Status', 'TypeId', 'TypeName', 'id']
+18:34:56  END RequestId: 3b4799f8-7eb2-41d6-aaa1-1e0f17a1c7ed
+18:34:56  REPORT RequestId: 3b4799f8-7eb2-41d6-aaa1-1e0f17a1c7ed	Duration: 93.66 ms	Billed Duration: 94 ms	Memory Size: 256 MB	Max Memory Used: 90 MB	
+18:34:57  [INFO]	2026-04-22T18:34:57.071Z	827562ae-bcd9-46c6-ab54-dc722634f6ca	GetCustomerCards cid=601488 count=2 cards=[{'id': 237129, 'type_id': 2, 'holder': 'Harut Darakchyan', 'last4': '', 'is_existing': False, 'is_active': False, 'CardProcessor': 'None', 'card_processor_type': 1}, {'id': 237127, 'type_id': 2, 'holder': 'Harut Darakchyan', 'last4': '', 'is_existing': False, 'is_active': False, 'CardProcessor': 'None', 'card_processor_type': 0}]
+18:34:57  END RequestId: 827562ae-bcd9-46c6-ab54-dc722634f6ca
+18:34:57  REPORT RequestId: 827562ae-bcd9-46c6-ab54-dc722634f6ca	Duration: 85.82 ms	Billed Duration: 86 ms	Memory Size: 256 MB	Max Memory Used: 89 MB	
 ```
