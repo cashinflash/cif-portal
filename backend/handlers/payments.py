@@ -388,12 +388,10 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     # is_eligible_for_disbursement. Also send expire_month/year/ccv —
     # Vergent ignores fields it doesn't recognize and these are
     # documented for the tokenized variant.
-    # Vergent's PostCustomerCard accepts full card data and tokenizes
-    # via Repay internally — but only if we tell it which processor
-    # to use. Earlier submissions without card_processor_type landed
-    # with CardProcessor="None" (saved record, not chargeable, hidden
-    # in the admin UI). Sending processor type 1 + billing_zip_code
-    # matches what Vergent's own admin form submits.
+    # Vergent's PostCustomerCardTokenized is the Repay-routed variant;
+    # PostCustomerCard saves a metadata-only record with
+    # CardProcessor="None" (not chargeable, hidden in admin UI).
+    # Match the body shape Vergent's own admin form submits.
     v1_body = {
         "id": 0,
         "company_id": VERGENT_COMPANY_ID,
@@ -401,6 +399,7 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         "card_type_id": card_type_id,
         "card_holder": name,
         "card_number": pan,
+        "last_four_digits": last4,
         "card_id": "",
         "card_ref": "",
         "is_eligible_for_disbursement": False,
@@ -408,10 +407,17 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         "expire_year": exp_year,
         "ccv": ccv,
         "billing_zip_code": zip_code,
-        "card_processor_type": 1,  # Repay on our tenant; confirmed in logs.
     }
 
-    status, resp, raw = _v1_request("POST", "/V1/PostCustomerCard", body=v1_body)
+    # Try the tokenized endpoint first (Repay-routed). If Vergent
+    # returns an error that suggests this endpoint needs a
+    # pre-tokenized card_ref, we'll fall back to the plain endpoint
+    # below.
+    status, resp, raw = _v1_request("POST", "/V1/PostCustomerCardTokenized", body=v1_body)
+    if status not in (200, 201):
+        log.info("PostCustomerCardTokenized status=%s raw=%s — retrying plain PostCustomerCard",
+                 status, ((raw or "").replace("\n", " ")[:300]))
+        status, resp, raw = _v1_request("POST", "/V1/PostCustomerCard", body=v1_body)
 
     if status not in (200, 201):
         # Flatten newlines so CloudWatch doesn't split the multi-line
