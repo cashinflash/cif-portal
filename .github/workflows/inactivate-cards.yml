@@ -110,13 +110,27 @@ jobs:
           for ID in "${IDS[@]}"; do
             ID_TRIM=$(echo "$ID" | tr -d '[:space:]')
             [ -z "$ID_TRIM" ] && continue
-            # IIS wants a Content-Length header even for an empty PUT;
-            # pass an empty body via --data "" so curl sets it.
+
+            # Attempt 1 — PutCustomerInactivateCard (empty body with
+            # Content-Length).
             CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
               -X PUT "$V1_BASE/V1/PutCustomerInactivateCard/$ID_TRIM?custId=$CID" \
               -H "Token: $TOKEN" \
               -H "Content-Type: application/json" \
               --data "")
+
+            if [ "$CODE" != "200" ] && [ "$CODE" != "204" ]; then
+              echo "Inactivate endpoint returned $CODE — trying PutCustomerCard with is_active=false"
+              # Attempt 2 — pull the full card record, flip is_active
+              # to false, PUT it back.
+              CARD_GET=$(curl -s "$V1_BASE/V1/GetCustomerCard/$ID_TRIM?custId=$CID" -H "Token: $TOKEN")
+              CARD_PATCHED=$(echo "$CARD_GET" | jq '. + {is_active: false, is_existing: false}')
+              CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+                -X PUT "$V1_BASE/V1/PutCustomerCard/$ID_TRIM" \
+                -H "Token: $TOKEN" \
+                -H "Content-Type: application/json" \
+                --data "$CARD_PATCHED")
+            fi
             BODY=$(head -c 400 /tmp/resp.json)
             echo "$ID_TRIM → HTTP $CODE"
             {
