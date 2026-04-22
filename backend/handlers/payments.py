@@ -164,9 +164,12 @@ def _vergent_card_type_id(brand: str) -> int:
 
 def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize Vergent v1's customer_card → UI shape."""
-    masked = (raw.get("card_number") or "")
-    digits = [c for c in masked if c.isdigit()]
-    last4 = "".join(digits[-4:]) if len(digits) >= 4 else ""
+    # Prefer the explicit last_four_digits field; fall back to derived.
+    last4 = (raw.get("last_four_digits") or "").strip()
+    if not last4:
+        masked = (raw.get("card_number") or "")
+        digits = [c for c in masked if c.isdigit()]
+        last4 = "".join(digits[-4:]) if len(digits) >= 4 else ""
     type_id = raw.get("card_type_id") or 0
     try:
         type_id_int = int(type_id)
@@ -182,6 +185,9 @@ def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
         "expMonth": raw.get("exp_month") or raw.get("expire_month"),
         "expYear": raw.get("exp_year") or raw.get("expire_year"),
         "isExpired": False,
+        "isActive": bool(raw.get("is_active")),
+        "isExisting": bool(raw.get("is_existing")),
+        "processor": raw.get("CardProcessor") or "",
         "cardRef": raw.get("card_ref") or "",
     }
 
@@ -282,7 +288,14 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
     log.info("GetCustomerCards cid=%s count=%s cards=%s", cid, len(summary), summary)
 
     shaped = [_shape_card_v1(c) for c in body if isinstance(c, dict)]
-    return _json_response(200, {"cards": shaped, "expiredCards": []})
+    # Hide broken/inactive records from the customer — anything that
+    # Vergent wouldn't let us charge anyway. Keeps the portal clean
+    # when earlier failed saves leave zombie records on the account.
+    active = [
+        c for c in shaped
+        if c.get("isActive") and c.get("processor") and c.get("processor") != "None"
+    ]
+    return _json_response(200, {"cards": active, "expiredCards": []})
 
 
 def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
