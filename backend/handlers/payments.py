@@ -406,7 +406,31 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(200, {"success": False, "error": "card_declined"})
 
     new_card_id = resp.get("id") if isinstance(resp, dict) else None
-    log.info("add card success cid=%s last4=%s new_card_id=%s", cid, last4, new_card_id)
+    # Log everything useful about the outcome so we can see whether
+    # Vergent actually wired the card to Repay. Fields of interest:
+    # is_existing, is_active, card_processor_type, CardProcessor.
+    debug_flags = {}
+    if isinstance(resp, dict):
+        for k in ("is_existing", "is_active", "card_processor_type", "CardProcessor", "status", "card_guid"):
+            if k in resp:
+                debug_flags[k] = resp.get(k)
+    log.info("add card success cid=%s last4=%s new_card_id=%s flags=%s",
+             cid, last4, new_card_id, debug_flags)
+
+    # Verify the card shows up on GetCustomerCards. If it doesn't,
+    # Vergent accepted our POST but didn't actually register the card
+    # for charging (CardProcessor="None" observed on plain
+    # PostCustomerCard calls). Logs make it obvious next time.
+    st_v, verify_body, _raw = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
+    if st_v == 200 and isinstance(verify_body, list):
+        found = any(
+            isinstance(c, dict) and str(c.get("id")) == str(new_card_id)
+            for c in verify_body
+        )
+        log.info("add card verify cid=%s new_card_id=%s in_list=%s list_count=%s",
+                 cid, new_card_id, found, len(verify_body))
+    else:
+        log.warning("add card verify failed st=%s", st_v)
 
     return _json_response(200, {
         "success": True,
