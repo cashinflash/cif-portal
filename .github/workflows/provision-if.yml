@@ -207,7 +207,7 @@ jobs:
               Version: "2012-10-17",
               Statement: [
                 {Effect: "Allow", Action: ["kms:Encrypt","kms:Decrypt"], Resource: $kms},
-                {Effect: "Allow", Action: ["dynamodb:PutItem","dynamodb:GetItem","dynamodb:DeleteItem"], Resource: $ddb},
+                {Effect: "Allow", Action: ["dynamodb:PutItem","dynamodb:GetItem","dynamodb:DeleteItem","dynamodb:Scan"], Resource: $ddb},
                 {Effect: "Allow", Action: ["ses:SendEmail","ses:SendRawEmail"], Resource: "*"},
                 {Effect: "Allow", Action: ["secretsmanager:GetSecretValue"], Resource: $secret}
               ]
@@ -246,7 +246,7 @@ jobs:
           # /view authorizes via the X-View-Secret header check in
           # the Lambda (so curl -H 'X-View-Secret: $VALUE' works for
           # the dashboard without a JWT dance).
-          ROUTES=("POST /api/if/submit" "GET /api/if/view/{id}" "OPTIONS /api/if/submit" "OPTIONS /api/if/view/{id}")
+          ROUTES=("POST /api/if/submit" "GET /api/if/list" "GET /api/if/view/{id}" "OPTIONS /api/if/submit" "OPTIONS /api/if/list" "OPTIONS /api/if/view/{id}")
           for RK in "${ROUTES[@]}"; do
             EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
               --query "Items[?RouteKey=='$RK'].RouteId | [0]" \

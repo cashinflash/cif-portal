@@ -360,6 +360,62 @@ def submit(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def _list_auth_ok(event: Dict[str, Any]) -> bool:
+    """X-View-Secret check shared by list + view."""
+    headers = event.get("headers") or {}
+    got = headers.get("x-view-secret") or headers.get("X-View-Secret") or ""
+    return bool(IF_VIEW_SHARED_SECRET) and got == IF_VIEW_SHARED_SECRET
+
+
+def list_submissions(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/if/list — return metadata for all non-expired submissions.
+
+    No PAN, CVV, card_ref, or ciphertext in the response. Just enough
+    for the staff dashboard to render a table and link to each view
+    page.
+
+    Auth: same X-View-Secret header as /view.
+    """
+    if not _list_auth_ok(event):
+        log.warning("IF list unauthorized call")
+        return _json_response(401, {"error": "unauthorized"})
+
+    items: list = []
+    try:
+        # Volume is low (handful per day); full-table scan is fine.
+        paginator = _ddb.get_paginator("scan")
+        for page in paginator.paginate(
+            TableName=IF_DDB_TABLE,
+            ProjectionExpression=(
+                "submission_id, borrower_name, cardholder_name, brand, "
+                "last4, exp_month, exp_year, billing_zip, submitted_at, "
+                "#s, ttl_epoch"
+            ),
+            ExpressionAttributeNames={"#s": "status"},
+        ):
+            for it in page.get("Items", []):
+                items.append({
+                    "submissionId":    it.get("submission_id",   {}).get("S"),
+                    "borrowerName":    it.get("borrower_name",   {}).get("S"),
+                    "cardholderName":  it.get("cardholder_name", {}).get("S"),
+                    "brand":           it.get("brand",           {}).get("S"),
+                    "last4":           it.get("last4",           {}).get("S"),
+                    "expMonth":        int(it.get("exp_month",   {}).get("N") or 0) or None,
+                    "expYear":         int(it.get("exp_year",    {}).get("N") or 0) or None,
+                    "billingZip":      it.get("billing_zip",     {}).get("S"),
+                    "submittedAt":     it.get("submitted_at",    {}).get("S"),
+                    "status":          it.get("status",          {}).get("S"),
+                    "ttlEpoch":        int(it.get("ttl_epoch",   {}).get("N") or 0) or None,
+                })
+    except ClientError as e:
+        log.exception("DDB scan failed: %s", e)
+        return _json_response(502, {"error": "storage_failed"})
+
+    # Newest first.
+    items.sort(key=lambda x: x.get("submittedAt") or "", reverse=True)
+    return _json_response(200, {"submissions": items, "count": len(items)})
+
+
 def view(event: Dict[str, Any]) -> Dict[str, Any]:
     """GET /api/if/view/{id} — shared-secret auth'd, read-once.
 
@@ -367,11 +423,7 @@ def view(event: Dict[str, Any]) -> Dict[str, Any]:
     On success we return plaintext card details AND delete the
     DynamoDB record so the same link can't be reused.
     """
-    headers = event.get("headers") or {}
-    # HTTP API lowercases header names
-    got_secret = (headers.get("x-view-secret")
-                  or headers.get("X-View-Secret") or "")
-    if not IF_VIEW_SHARED_SECRET or got_secret != IF_VIEW_SHARED_SECRET:
+    if not _list_auth_ok(event):
         log.warning("IF view unauthorized call")
         return _json_response(401, {"error": "unauthorized"})
 
@@ -448,6 +500,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
         if method == "POST" and path.endswith("/api/if/submit"):
             return submit(event)
+        if method == "GET" and path.endswith("/api/if/list"):
+            return list_submissions(event)
         if method == "GET" and "/api/if/view/" in path:
             return view(event)
 
