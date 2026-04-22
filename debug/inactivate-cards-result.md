@@ -2,17 +2,17 @@
 
 - Customer: `601488`
 - Card ids: `237127,237129`
-- Ran at: 2026-04-22T18:42:09Z
+- Ran at: 2026-04-22T18:43:13Z
 
 ## Per-card results
 
 ### Card `237127`
-- HTTP: `500`
-- Body: `{   "Message": "An error has occurred.",   "ExceptionMessage": "Object reference not set to an instance of an object.",   "ExceptionType": "System.NullReferenceException",   "StackTrace": "   at eCashWebAPIV1.Controllers.V1Controller.VB$StateMachine_66_PutCustomerInactivateCard.MoveNext() in C:\\devops-agent-01\\_work\\281\\s\\eCashWebAPIV1\\Controllers\\V1Controller.vb:line 2432\r\n--- End of `
+- HTTP: `200`
+- Body: `{   "id": 237127,   "company_id": 386,   "customer_id": 601488,   "card_type_id": 2,   "card_holder": "Harut Darakchyan",   "card_number": "",   "card_id": "",   "card_ref": null,   "is_eligible_for_disbursement": true,   "card_account_guid": "",   "card_guid": "",   "last_four_digits": "0295",   "product_id": 0,   "expire_month": 4,   "expire_year": 2031,   "ccv": "",   "security `
 
 ### Card `237129`
-- HTTP: `500`
-- Body: `{   "Message": "An error has occurred.",   "ExceptionMessage": "Object reference not set to an instance of an object.",   "ExceptionType": "System.NullReferenceException",   "StackTrace": "   at eCashWebAPIV1.Controllers.V1Controller.VB$StateMachine_66_PutCustomerInactivateCard.MoveNext() in C:\\devops-agent-01\\_work\\281\\s\\eCashWebAPIV1\\Controllers\\V1Controller.vb:line 2432\r\n--- End of `
+- HTTP: `200`
+- Body: `{   "id": 237129,   "company_id": 386,   "customer_id": 601488,   "card_type_id": 2,   "card_holder": "Harut Darakchyan",   "card_number": "",   "card_id": "",   "card_ref": null,   "is_eligible_for_disbursement": true,   "card_account_guid": "",   "card_guid": "",   "last_four_digits": "2217",   "product_id": 0,   "expire_month": 7,   "expire_year": 2028,   "ccv": "",   "security `
 
 ## Remaining cards after inactivation
 ```json
