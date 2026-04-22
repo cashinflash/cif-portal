@@ -1,13 +1,13 @@
 # IF endpoint diagnostic
 
-_Captured at: 2026-04-22T22:46:11Z_
+_Captured at: 2026-04-22T23:42:48Z_
 
 ## 1. Lambda existence + handler path
 
 - Exists: **YES**
 - Handler: `handlers.if_submit.lambda_handler`
 - Runtime: `python3.12`  Arch: `arm64`  State: `Active`
-- Last modified: `2026-04-22T22:16:58.000+0000`
+- Last modified: `2026-04-22T23:27:59.000+0000`
 - Env var keys: `IF_DDB_TABLE, IF_KMS_KEY_ID, IF_NOTIFY_EMAIL, IF_VIEW_SHARED_SECRET, IF_VIEW_URL_BASE, MFA_EMAIL_SENDER`
 
 ## 2. HttpApi routes matching /api/if/*
@@ -50,10 +50,10 @@ _Captured at: 2026-04-22T22:46:11Z_
 - Preflight response headers + body (if any):
 ```
 HTTP/2 404 
-date: Wed, 22 Apr 2026 22:46:15 GMT
+date: Wed, 22 Apr 2026 23:42:53 GMT
 content-type: application/json
 content-length: 23
-apigw-requestid: cPlkwj4PoAMEVIA=
+apigw-requestid: cPt3sgDxoAMEZ7w=
 
 ```
 
@@ -63,7 +63,7 @@ apigw-requestid: cPlkwj4PoAMEVIA=
 |                                 GetStages                                 |
 +--------------+------------------------------------------------------------+
 |  AutoDeploy  |  True                                                      |
-|  LastDeployed|  Successfully deployed stage with deployment ID 'o5p2on'   |
+|  LastDeployed|  Successfully deployed stage with deployment ID 'ddqb2u'   |
 |  Stage       |  dev                                                       |
 +--------------+------------------------------------------------------------+
 ```
@@ -86,3 +86,11 @@ aws: [ERROR]: An error occurred (BadRequestException) when calling the CreateDep
 {"error": "invalid_BorrowerFirstName"}
 ```
 - Preflight OPTIONS: `204`
+
+## 10. Current /api/if/list contents (metadata only)
+- HTTP: `200`
+```json
+0
+[]
+
+```
