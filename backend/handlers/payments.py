@@ -349,6 +349,7 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     name = (body.get("cardHolderName") or "").strip()
     pan = "".join(ch for ch in (body.get("cardNumber") or "") if ch.isdigit())
     ccv = "".join(ch for ch in (body.get("ccv") or "") if ch.isdigit())
+    zip_code = "".join(ch for ch in (body.get("zip") or "") if ch.isdigit())[:9]
     try:
         exp_month = int(body.get("expireMonth") or 0)
         exp_year = int(body.get("expireYear") or 0)
@@ -368,6 +369,8 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(400, {"error": "exp_invalid"})
     if not (3 <= len(ccv) <= 4):
         return _json_response(400, {"error": "ccv_invalid"})
+    if not (5 <= len(zip_code) <= 9):
+        return _json_response(400, {"error": "zip_invalid"})
 
     card_type = (body.get("cardType") or _detect_card_type(pan)).strip() or "Other"
     card_type_id = _vergent_card_type_id(card_type)
@@ -385,6 +388,12 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     # is_eligible_for_disbursement. Also send expire_month/year/ccv —
     # Vergent ignores fields it doesn't recognize and these are
     # documented for the tokenized variant.
+    # Vergent's PostCustomerCard accepts full card data and tokenizes
+    # via Repay internally — but only if we tell it which processor
+    # to use. Earlier submissions without card_processor_type landed
+    # with CardProcessor="None" (saved record, not chargeable, hidden
+    # in the admin UI). Sending processor type 1 + billing_zip_code
+    # matches what Vergent's own admin form submits.
     v1_body = {
         "id": 0,
         "company_id": VERGENT_COMPANY_ID,
@@ -398,6 +407,8 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         "expire_month": exp_month,
         "expire_year": exp_year,
         "ccv": ccv,
+        "billing_zip_code": zip_code,
+        "card_processor_type": 1,  # Repay on our tenant; confirmed in logs.
     }
 
     status, resp, raw = _v1_request("POST", "/V1/PostCustomerCard", body=v1_body)

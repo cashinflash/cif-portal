@@ -417,7 +417,7 @@
   }
 
   function clearAddCardForm() {
-    ['cardName', 'cardNumber', 'cardExp', 'cardCcv'].forEach(function (id) {
+    ['cardName', 'cardNumber', 'cardExp', 'cardCcv', 'cardZip'].forEach(function (id) {
       const el = qs('#' + id);
       if (el) el.value = '';
     });
@@ -529,6 +529,7 @@
     const pan = (qs('#cardNumber').value || '').replace(/\D/g, '');
     const expRaw = (qs('#cardExp').value || '').replace(/\D/g, '');
     const ccv = (qs('#cardCcv').value || '').replace(/\D/g, '');
+    const zip = (qs('#cardZip').value || '').trim();
 
     if (!name) return addCardFail('Please enter the cardholder name.');
     if (!(pan.length >= 13 && pan.length <= 19)) return addCardFail('Card number looks incomplete.');
@@ -542,6 +543,7 @@
     const endOfExpMonth = new Date(fullYear, mm, 0, 23, 59, 59);
     if (endOfExpMonth < now) return addCardFail('This card has already expired.');
     if (!(ccv.length >= 3 && ccv.length <= 4)) return addCardFail('CVV should be 3 or 4 digits.');
+    if (!/^\d{5}(-?\d{4})?$/.test(zip)) return addCardFail('Please enter a 5-digit ZIP code.');
 
     const sub = qs('#addCardSubmit');
     sub.disabled = true;
@@ -555,6 +557,7 @@
         expireMonth: mm,
         expireYear: fullYear,
         ccv: ccv,
+        zip: zip,
         cardType: detectBrand(pan),
       },
     }).then(function (res) {
