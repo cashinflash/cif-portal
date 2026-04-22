@@ -63,6 +63,9 @@ log.setLevel(logging.INFO)
 # returns the source-of-truth list at runtime; this is a fallback for
 # the most common four. Confirmed empirically — adjust if a different
 # id surfaces in CloudWatch.
+# Static-fallback brand→id guesses. Only used if GetCustomerCardTypes
+# fails; Vergent is the source of truth and we cache their mapping
+# module-globally at first use.
 _CARD_TYPE_NAMES = {
     1: "Visa",
     2: "MasterCard",
@@ -76,25 +79,78 @@ _BRAND_TO_TYPE_ID = {
     "Discover": 4,
 }
 
+# Per-container cache. Reset on cold start. {lower_brand_name: int_id}
+_card_types_by_name: Optional[Dict[str, int]] = None
+_card_types_by_id: Optional[Dict[int, str]] = None
+
+
+def _brand_key(s: str) -> str:
+    """Normalize a brand string for matching across Vergent's inconsistencies."""
+    s = (s or "").strip().lower()
+    # Collapse any whitespace and common variants.
+    s = s.replace("master card", "mastercard")
+    s = s.replace("american express", "amex")
+    s = s.replace(" ", "")
+    return s
+
+
+def _load_card_types() -> None:
+    """Populate _card_types_by_name from Vergent once per warm container."""
+    global _card_types_by_name, _card_types_by_id
+    if _card_types_by_name is not None:
+        return
+    status, body, _raw = _v1_request("GET", "/V1/GetCustomerCardTypes")
+    names: Dict[str, int] = {}
+    ids: Dict[int, str] = {}
+    if status == 200:
+        items = body if isinstance(body, list) else (body.get("CardTypes") if isinstance(body, dict) else None)
+        if isinstance(items, list):
+            for t in items:
+                if not isinstance(t, dict):
+                    continue
+                name = (t.get("name") or t.get("Name") or t.get("TypeName") or "").strip()
+                tid = t.get("id") or t.get("Id") or t.get("TypeId")
+                if name and tid is not None:
+                    try:
+                        tid_int = int(tid)
+                    except (TypeError, ValueError):
+                        continue
+                    names[_brand_key(name)] = tid_int
+                    ids[tid_int] = name
+    if not names:
+        log.warning("GetCustomerCardTypes yielded no usable mapping; falling back to static guesses. body=%s",
+                    str(body)[:300] if body else None)
+        names = {_brand_key(k): v for k, v in _BRAND_TO_TYPE_ID.items()}
+        ids = {v: k for k, v in _BRAND_TO_TYPE_ID.items()}
+    else:
+        log.info("GetCustomerCardTypes loaded: %s", ids)
+    _card_types_by_name = names
+    _card_types_by_id = ids
+
+
+def _vergent_card_type_id(brand: str) -> int:
+    """Translate our detected brand name → Vergent's numeric card_type_id."""
+    _load_card_types()
+    return (_card_types_by_name or {}).get(_brand_key(brand), 0)
+
 
 def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize Vergent v1's customer_card → UI shape.
-
-    v1 returns snake_case: id, company_id, customer_id, card_type_id,
-    card_holder, card_number (masked), card_id, card_ref. There's no
-    expiry/expired flag in the basic shape — those come back through
-    the tokenized variant if present.
-    """
+    """Normalize Vergent v1's customer_card → UI shape."""
     masked = (raw.get("card_number") or "")
     digits = [c for c in masked if c.isdigit()]
     last4 = "".join(digits[-4:]) if len(digits) >= 4 else ""
     type_id = raw.get("card_type_id") or 0
-    brand = _CARD_TYPE_NAMES.get(int(type_id) if isinstance(type_id, (int, str)) else 0, "Card")
+    try:
+        type_id_int = int(type_id)
+    except (TypeError, ValueError):
+        type_id_int = 0
+    # Prefer the live mapping from Vergent; fall back to our static table.
+    _load_card_types()
+    brand = (_card_types_by_id or {}).get(type_id_int) or _CARD_TYPE_NAMES.get(type_id_int, "Card")
     return {
         "id": raw.get("id"),
         "brand": brand,
         "last4": last4,
-        # v1 base shape doesn't carry exp / isExpired; surface what we have.
         "expMonth": raw.get("exp_month") or raw.get("expire_month"),
         "expYear": raw.get("exp_year") or raw.get("expire_year"),
         "isExpired": False,
@@ -269,7 +325,7 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(400, {"error": "ccv_invalid"})
 
     card_type = (body.get("cardType") or _detect_card_type(pan)).strip() or "Other"
-    card_type_id = _BRAND_TO_TYPE_ID.get(card_type, 0)
+    card_type_id = _vergent_card_type_id(card_type)
     last4 = pan[-4:]
 
     # Never log PAN or CCV. Custid + last4 + amount-ish metadata only.
