@@ -85,6 +85,31 @@ jobs:
           GROUP="/aws/lambda/$FN"
           echo "Group: $GROUP, Since: ${MINS} min, Filter: ${FILTER:-(none)}"
 
+          # AWS creates a Lambda's log group lazily on first invocation.
+          # If the group doesn't exist yet, don't treat it as a failure —
+          # just write a friendly "not invoked yet" report and exit 0.
+          if ! aws logs describe-log-groups --log-group-name-prefix "$GROUP" \
+               --query "logGroups[?logGroupName=='$GROUP'].logGroupName" \
+               --output text | grep -q "$GROUP"; then
+            mkdir -p debug
+            {
+              echo "# Lambda logs — $FN"
+              echo ""
+              echo "- Function: \`$FN\`"
+              echo "- Window: last ${MINS} minute(s)"
+              echo "- Captured at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo ""
+              echo "## Log group not found"
+              echo ""
+              echo "AWS hasn't created \`$GROUP\` yet — this happens for a"
+              echo "brand-new Lambda that has never been invoked. Trigger"
+              echo "an action that hits the function and re-run this"
+              echo "capture."
+            } > "debug/${SUFFIX}-logs.md"
+            echo "::notice::Log group $GROUP does not exist yet (Lambda not invoked). Exiting cleanly."
+            exit 0
+          fi
+
           if [ -n "$FILTER" ]; then
             aws logs filter-log-events \
               --log-group-name "$GROUP" \
