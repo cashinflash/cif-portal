@@ -51,6 +51,12 @@ from urllib.request import Request, urlopen
 import boto3
 from botocore.exceptions import ClientError
 
+# Layer modules (Vergent v2 APIM client + secrets loader). Used for
+# the auto-match step in push_to_vergent — looks up the Vergent
+# customer by borrower name so staff don't have to type the ID by
+# hand for unambiguous matches.
+import vergent  # type: ignore
+
 
 # ─────────────────────────────────────────
 # Globals / clients
@@ -548,7 +554,9 @@ def submit(event: Dict[str, Any]) -> Dict[str, Any]:
     if exp_year < 100:
         exp_year += 2000
 
-    borrower_name = f"{body['BorrowerFirstName'].strip()} {body['BorrowerLastName'].strip()}"
+    borrower_first = body["BorrowerFirstName"].strip()
+    borrower_last = body["BorrowerLastName"].strip()
+    borrower_name = f"{borrower_first} {borrower_last}"
     cardholder_name = f"{body['CardholderFirstName'].strip()} {body['CardholderLastName'].strip()}"
     billing_zip = body["BillingZip"].strip()
     submission_id = str(uuid.uuid4())
@@ -575,18 +583,20 @@ def submit(event: Dict[str, Any]) -> Dict[str, Any]:
         _ddb.put_item(
             TableName=IF_DDB_TABLE,
             Item={
-                "submission_id": {"S": submission_id},
-                "ciphertext_b64": {"S": ciphertext_b64},
-                "borrower_name":  {"S": borrower_name},
-                "cardholder_name":{"S": cardholder_name},
-                "last4":          {"S": last4},
-                "brand":          {"S": brand},
-                "exp_month":      {"N": str(exp_month)},
-                "exp_year":       {"N": str(exp_year)},
-                "billing_zip":    {"S": billing_zip},
-                "submitted_at":   {"S": submitted_at},
-                "status":         {"S": "pending"},
-                "ttl_epoch":      {"N": str(ttl_epoch)},
+                "submission_id":         {"S": submission_id},
+                "ciphertext_b64":        {"S": ciphertext_b64},
+                "borrower_name":         {"S": borrower_name},
+                "borrower_first_name":   {"S": borrower_first},
+                "borrower_last_name":    {"S": borrower_last},
+                "cardholder_name":       {"S": cardholder_name},
+                "last4":                 {"S": last4},
+                "brand":                 {"S": brand},
+                "exp_month":             {"N": str(exp_month)},
+                "exp_year":              {"N": str(exp_year)},
+                "billing_zip":           {"S": billing_zip},
+                "submitted_at":          {"S": submitted_at},
+                "status":                {"S": "pending"},
+                "ttl_epoch":             {"N": str(ttl_epoch)},
             },
         )
     except ClientError as e:
@@ -774,17 +784,61 @@ def view(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def _vergent_match_by_name(first: str, last: str) -> Tuple[list, str]:
+    """Search Vergent for a consumer customer matching first+last.
+
+    Returns (matches, error_tag). matches is a list of dicts each
+    with at least {customerId, firstName, lastName}. error_tag is
+    "" on success or a short reason string for logging.
+
+    Vergent's APIM search is fuzzy by default — we do a strict
+    case-insensitive equality filter on first+last server-side so
+    we don't accidentally push to a Smith when the borrower is
+    Smithfield.
+    """
+    f = (first or "").strip()
+    l = (last or "").strip()
+    if not (f and l):
+        return [], "missing_name"
+    try:
+        # user_type=1 == consumer (verified earlier in search.py).
+        results = vergent.customer_search(
+            first_name=f, last_name=l, user_type=1,
+        )
+    except Exception as e:
+        log.warning("Vergent customer_search failed for %s %s: %s", f, l, e)
+        return [], "search_failed"
+    if not isinstance(results, list):
+        return [], "no_results"
+    fl = f.lower()
+    ll = l.lower()
+    filtered = [
+        r for r in results
+        if isinstance(r, dict)
+        and (r.get("firstName") or "").strip().lower() == fl
+        and (r.get("lastName") or "").strip().lower() == ll
+    ]
+    return filtered, ""
+
+
 def push_to_vergent(event: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/if/push-to-vergent  body: {submissionId, vergentCustomerId}
+    """POST /api/if/push-to-vergent
+       body: {submissionId, vergentCustomerId?}
 
-    Two-step push:
-      1. Tokenize the card with Repay CardSafe StoreCard.
-      2. Save the tokenized card on the Vergent customer record via
-         /V1/PostCustomerCardTokenized with card_ref=<repay token>.
+    Three steps:
+      0. If no vergentCustomerId in the body, look up the customer
+         in Vergent by the borrower's first+last name. If exactly
+         one match is found we use it automatically. If zero or
+         many, we return a structured response so the dashboard
+         can prompt the staff member to disambiguate.
+      1. Tokenize the card via Repay CardSafe StoreCard.
+      2. Save the tokenized card on the Vergent customer record
+         via /V1/PostCustomerCardTokenized with card_ref=<repay
+         token>.
 
-    On success: marks record processed, deletes the vault entry,
-    returns {success: true, vergentCardId}.
-    On any failure: leaves the vault record intact so staff can retry.
+    On success: mark processed, delete vault entry, return
+    {success: true, vergentCardId, vergentCustomerId}.
+    On any failure: leave the vault record intact so staff can retry.
     """
     if not _list_auth_ok(event):
         return _json_response(401, {"error": "unauthorized"})
@@ -797,12 +851,55 @@ def push_to_vergent(event: Dict[str, Any]) -> Dict[str, Any]:
     vergent_cid = (body.get("vergentCustomerId") or "").strip()
     if not submission_id:
         return _json_response(400, {"error": "missing_submission_id"})
-    if not (vergent_cid.isdigit() and 1 <= len(vergent_cid) <= 10):
+    if vergent_cid and not (vergent_cid.isdigit() and 1 <= len(vergent_cid) <= 10):
         return _json_response(400, {"error": "invalid_customer_id"})
 
     item, payload, err = _load_and_decrypt(submission_id)
     if err is not None:
         return err
+
+    # ── Auto-match by borrower name when staff didn't specify an ID ──
+    auto_matched = False
+    if not vergent_cid:
+        first = item.get("borrower_first_name", {}).get("S") or ""
+        last = item.get("borrower_last_name", {}).get("S") or ""
+        if not (first and last):
+            # Older submission without split names — split borrower_name.
+            full = item.get("borrower_name", {}).get("S") or ""
+            parts = full.split(" ", 1)
+            first = parts[0] if parts else ""
+            last = parts[1] if len(parts) > 1 else ""
+        matches, search_err = _vergent_match_by_name(first, last)
+        if search_err == "search_failed":
+            return _json_response(502, {"error": "vergent_search_failed",
+                                        "detail": "Couldn't reach Vergent to look up the customer."})
+        if not matches:
+            log.info("IF push: no Vergent match for %s %s id=%s", first, last, submission_id)
+            return _json_response(404, {
+                "error": "no_vergent_match",
+                "borrowerName": f"{first} {last}".strip(),
+                "detail": "Couldn't find a Vergent customer with that name. Enter the customer ID manually.",
+            })
+        if len(matches) > 1:
+            log.info("IF push: ambiguous Vergent match for %s %s id=%s count=%d",
+                     first, last, submission_id, len(matches))
+            return _json_response(200, {
+                "success": False,
+                "error": "ambiguous_match",
+                "borrowerName": f"{first} {last}".strip(),
+                "candidates": [{
+                    "customerId": str(m.get("customerId") or ""),
+                    "firstName": m.get("firstName") or "",
+                    "lastName": m.get("lastName") or "",
+                    "phones": (m.get("mobileNumbers") or [])[:2],
+                } for m in matches[:10]],
+            })
+        vergent_cid = str(matches[0].get("customerId") or "")
+        auto_matched = True
+        log.info("IF push: auto-matched %s %s -> Vergent cid=%s id=%s",
+                 first, last, vergent_cid, submission_id)
+        if not vergent_cid:
+            return _json_response(502, {"error": "vergent_match_no_id"})
 
     pan = payload.get("card_number") or ""
     cvv = payload.get("cvv") or ""
@@ -892,6 +989,7 @@ def push_to_vergent(event: Dict[str, Any]) -> Dict[str, Any]:
         "vergentCardId": new_card_id,
         "vergentCustomerId": int(vergent_cid),
         "last4": last4,
+        "autoMatched": auto_matched,
     })
 
 
