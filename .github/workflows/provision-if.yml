@@ -151,7 +151,12 @@ jobs:
               IF_NOTIFY_EMAIL: $to,
               IF_VIEW_SHARED_SECRET: $vs,
               IF_VIEW_URL_BASE: $vu,
-              MFA_EMAIL_SENDER: $from
+              MFA_EMAIL_SENDER: $from,
+              REPAY_SECRET_ARN: "cif-portal/repay/credentials",
+              VERGENT_CREDS_SECRET: "cif-portal/vergent/credentials",
+              VERGENT_V1_BASE_URL: "https://shared.vergentlms.com/api/api",
+              VERGENT_COMPANY_ID: "386",
+              CARDSAFE_URL: "https://api.repayonline.com/ws/CardSafe.asmx/StoreCard"
             }}')
 
           if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
@@ -204,17 +209,33 @@ jobs:
           ACCT=$(aws sts get-caller-identity --query Account --output text)
           TABLE_ARN="arn:aws:dynamodb:$AWS_REGION:$ACCT:table/$TABLE"
 
+          # Build the list of Secrets Manager ARNs the Lambda needs
+          # to read at runtime: the view-secret (header auth) plus the
+          # Repay + Vergent credential bundles (so push-to-vergent can
+          # call CardSafe and v1 PostCustomerCardTokenized).
+          REPAY_ARN=$(aws secretsmanager describe-secret \
+            --secret-id cif-portal/repay/credentials \
+            --query ARN --output text 2>/dev/null || echo "")
+          VERGENT_ARN=$(aws secretsmanager describe-secret \
+            --secret-id cif-portal/vergent/credentials \
+            --query ARN --output text 2>/dev/null || echo "")
+          SECRET_LIST="[$(printf '"%s"' "$SECRET_ARN")"
+          [ -n "$REPAY_ARN" ] && [ "$REPAY_ARN" != "None" ] && SECRET_LIST="$SECRET_LIST,$(printf '"%s"' "$REPAY_ARN")"
+          [ -n "$VERGENT_ARN" ] && [ "$VERGENT_ARN" != "None" ] && SECRET_LIST="$SECRET_LIST,$(printf '"%s"' "$VERGENT_ARN")"
+          SECRET_LIST="$SECRET_LIST]"
+          # Need dynamodb:UpdateItem so view() and push-to-vergent
+          # can flip the status field without rewriting the row.
           POLICY=$(jq -n \
             --arg kms "$KMS_ARN" \
             --arg ddb "$TABLE_ARN" \
-            --arg secret "$SECRET_ARN" \
+            --argjson secrets "$SECRET_LIST" \
             '{
               Version: "2012-10-17",
               Statement: [
                 {Effect: "Allow", Action: ["kms:Encrypt","kms:Decrypt"], Resource: $kms},
-                {Effect: "Allow", Action: ["dynamodb:PutItem","dynamodb:GetItem","dynamodb:DeleteItem","dynamodb:Scan"], Resource: $ddb},
+                {Effect: "Allow", Action: ["dynamodb:PutItem","dynamodb:GetItem","dynamodb:UpdateItem","dynamodb:DeleteItem","dynamodb:Scan"], Resource: $ddb},
                 {Effect: "Allow", Action: ["ses:SendEmail","ses:SendRawEmail"], Resource: "*"},
-                {Effect: "Allow", Action: ["secretsmanager:GetSecretValue"], Resource: $secret}
+                {Effect: "Allow", Action: ["secretsmanager:GetSecretValue"], Resource: $secrets}
               ]
             }')
 
@@ -251,7 +272,18 @@ jobs:
           # /view authorizes via the X-View-Secret header check in
           # the Lambda (so curl -H 'X-View-Secret: $VALUE' works for
           # the dashboard without a JWT dance).
-          ROUTES=("POST /api/if/submit" "GET /api/if/list" "GET /api/if/view/{id}" "OPTIONS /api/if/submit" "OPTIONS /api/if/list" "OPTIONS /api/if/view/{id}")
+          ROUTES=(
+            "POST /api/if/submit"
+            "GET /api/if/list"
+            "GET /api/if/view/{id}"
+            "POST /api/if/push-to-vergent"
+            "POST /api/if/mark-processed"
+            "OPTIONS /api/if/submit"
+            "OPTIONS /api/if/list"
+            "OPTIONS /api/if/view/{id}"
+            "OPTIONS /api/if/push-to-vergent"
+            "OPTIONS /api/if/mark-processed"
+          )
           for RK in "${ROUTES[@]}"; do
             EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
               --query "Items[?RouteKey=='$RK'].RouteId | [0]" \

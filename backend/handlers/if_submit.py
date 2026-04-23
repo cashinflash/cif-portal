@@ -41,8 +41,12 @@ import os
 import re
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import boto3
 from botocore.exceptions import ClientError
@@ -57,6 +61,7 @@ log.setLevel(logging.INFO)
 _kms = boto3.client("kms")
 _ddb = boto3.client("dynamodb")
 _ses = boto3.client("ses")
+_secrets = boto3.client("secretsmanager")
 
 IF_KMS_KEY_ID = os.environ.get("IF_KMS_KEY_ID", "alias/cif-portal-if-vault")
 IF_DDB_TABLE = os.environ.get("IF_DDB_TABLE", "cif-portal-if-submissions-dev")
@@ -64,6 +69,19 @@ IF_NOTIFY_EMAIL = os.environ.get("IF_NOTIFY_EMAIL", "loans@cashinflash.com")
 IF_VIEW_SHARED_SECRET = os.environ.get("IF_VIEW_SHARED_SECRET", "")
 IF_VIEW_URL_BASE = os.environ.get("IF_VIEW_URL_BASE", "https://app.cashinflash.com/app?if=")
 EMAIL_SENDER = os.environ.get("MFA_EMAIL_SENDER", "no-reply@cashinflash.com")
+
+# Repay CardSafe (server-side card tokenization). Reused from
+# .github/workflows/store-repay-secrets.yml — Secrets Manager JSON has
+# gatewayApiUser, gatewaySecureToken, gatewayMerchantId.
+REPAY_SECRET_ARN = os.environ.get("REPAY_SECRET_ARN", "cif-portal/repay/credentials")
+CARDSAFE_URL = os.environ.get(
+    "CARDSAFE_URL", "https://api.repayonline.com/ws/CardSafe.asmx/StoreCard")
+
+# Vergent v1 (push the tokenized card to the customer record).
+VERGENT_CREDS_SECRET = os.environ.get("VERGENT_CREDS_SECRET", "cif-portal/vergent/credentials")
+V1_BASE = os.environ.get("VERGENT_V1_BASE_URL", "https://shared.vergentlms.com/api/api").rstrip("/")
+VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
+_V1_TOKEN_TTL = 60 * 60  # one hour
 
 # 72 hours — plenty of time for staff to process, then the record
 # self-deletes via DynamoDB TTL. Shorter than PCI's 12-month
@@ -198,6 +216,238 @@ def _decrypt(ciphertext_b64: str, submission_id: str) -> bytes:
         EncryptionContext={"submission_id": submission_id},
     )
     return resp["Plaintext"]
+
+
+# ─────────────────────────────────────────
+# Repay CardSafe (server-side card tokenization)
+# ─────────────────────────────────────────
+_repay_creds_cache: Optional[Dict[str, Any]] = None
+
+
+def _get_repay_creds() -> Optional[Dict[str, Any]]:
+    """Read Repay credentials JSON from Secrets Manager (cached per warm
+    container). Returns None on any error so callers can degrade
+    gracefully without leaking the underlying exception."""
+    global _repay_creds_cache
+    if _repay_creds_cache is not None:
+        return _repay_creds_cache
+    try:
+        resp = _secrets.get_secret_value(SecretId=REPAY_SECRET_ARN)
+        _repay_creds_cache = json.loads(resp["SecretString"])
+        return _repay_creds_cache
+    except Exception as e:
+        log.warning("Repay creds read failed (arn=%s): %s", REPAY_SECRET_ARN, e)
+        return None
+
+
+def _cardsafe_store(*, pan: str, exp_month: int, exp_year: int,
+                    cvv: str, name_on_card: str, zip_code: str,
+                    customer_key: str) -> Tuple[Optional[str], str]:
+    """Tokenize a card via Repay CardSafe StoreCard.
+
+    Returns (token, debug_info). Token is the CardSafe ID we pass to
+    Vergent as card_ref. On failure token is None and debug_info
+    contains a short diagnostic (status code or exception message)
+    suitable for logging — never includes PAN or CVV.
+
+    CardSafe is a SOAP/ASMX web service that also accepts plain
+    HTTP POST with form-encoded params. Using the latter so we don't
+    have to hand-roll a SOAP envelope.
+    """
+    creds = _get_repay_creds()
+    if not creds:
+        return None, "no_creds"
+    user = creds.get("gatewayApiUser") or ""
+    pwd = creds.get("gatewaySecureToken") or ""
+    if not (user and pwd):
+        return None, "creds_incomplete"
+
+    # CardSafe expects ExpDate as MMYY (4 digits, no slash).
+    exp_str = f"{exp_month:02d}{str(exp_year)[-2:]}"
+
+    form = urlencode({
+        "UserName": user,
+        "Password": pwd,
+        "TokenMode": "Default",
+        "CardNum": pan,
+        "ExpDate": exp_str,
+        "CustomerKey": str(customer_key or ""),
+        "NameOnCard": name_on_card or "",
+        "Street": "",
+        "Zip": zip_code or "",
+        "ExtData": "",
+    }).encode("utf-8")
+
+    req = Request(
+        CARDSAFE_URL,
+        data=form,
+        method="POST",
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/xml,application/xml",
+        },
+    )
+    try:
+        with urlopen(req, timeout=10) as r:
+            raw = r.read().decode("utf-8", errors="replace")
+            status = r.getcode()
+    except HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        log.warning("CardSafe StoreCard HTTP %s: %s", e.code, body[:300])
+        return None, f"http_{e.code}"
+    except URLError as e:
+        log.warning("CardSafe StoreCard URLError: %s", e)
+        return None, f"url_error:{e}"
+
+    log.info("CardSafe StoreCard status=%s len=%d preview=%s",
+             status, len(raw), raw[:200].replace("\n", " "))
+
+    # ASMX returns XML wrapped in a top-level <string xmlns="..."> when
+    # the operation returns a string, OR a structured response with
+    # nested elements. Walk the tree and look for token-shaped fields.
+    token = _extract_cardsafe_token(raw)
+    if not token:
+        log.warning("CardSafe StoreCard returned no token: %s", raw[:400].replace("\n", " "))
+        return None, "no_token"
+    return token, "ok"
+
+
+def _extract_cardsafe_token(raw: str) -> Optional[str]:
+    """Pull a token-looking field out of CardSafe's XML response.
+
+    Repay's docs show several possible response shapes; we look at
+    every element and return the first plausible token value. Heuristic:
+    any non-empty text in a field whose tag name suggests an id/token
+    and which is at least 6 chars and looks token-shaped.
+    """
+    if not raw or not raw.strip():
+        return None
+    # Some ASMX endpoints return raw XML (e.g. <string>...</string>);
+    # others return a full SOAP envelope. Try parsing both.
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return None
+
+    candidates = ("cardsafeid", "token", "cardtoken", "cardid",
+                  "cardsafe_id", "card_id", "result", "id")
+    for elem in root.iter():
+        tag = elem.tag.split("}", 1)[-1].lower() if "}" in elem.tag else elem.tag.lower()
+        if tag not in candidates:
+            continue
+        val = (elem.text or "").strip()
+        if not val:
+            continue
+        # If the response packs an inner XML doc inside <string>...
+        # try parsing once more.
+        if val.startswith("<"):
+            try:
+                inner = ET.fromstring(val)
+                for sub in inner.iter():
+                    sub_tag = sub.tag.split("}", 1)[-1].lower() if "}" in sub.tag else sub.tag.lower()
+                    if sub_tag in candidates and sub.text and sub.text.strip():
+                        cand = sub.text.strip()
+                        if _looks_like_token(cand):
+                            return cand
+            except ET.ParseError:
+                pass
+            continue
+        if _looks_like_token(val):
+            return val
+    return None
+
+
+def _looks_like_token(s: str) -> bool:
+    s = (s or "").strip()
+    if len(s) < 6:
+        return False
+    # CardSafe tokens look like alphanumeric / hex / GUID; reject
+    # things that are obviously plain words or status codes.
+    return bool(re.match(r"^[A-Za-z0-9\-]+$", s)) and s.lower() not in ("success", "ok", "true", "false")
+
+
+# ─────────────────────────────────────────
+# Vergent v1 (push the tokenized card to the customer record)
+# ─────────────────────────────────────────
+_vergent_creds_cache: Optional[Dict[str, Any]] = None
+_v1_token: Optional[str] = None
+_v1_token_exp: float = 0.0
+
+
+def _get_vergent_creds() -> Optional[Dict[str, Any]]:
+    global _vergent_creds_cache
+    if _vergent_creds_cache is not None:
+        return _vergent_creds_cache
+    try:
+        resp = _secrets.get_secret_value(SecretId=VERGENT_CREDS_SECRET)
+        _vergent_creds_cache = json.loads(resp["SecretString"])
+        return _vergent_creds_cache
+    except Exception as e:
+        log.warning("Vergent creds read failed (arn=%s): %s", VERGENT_CREDS_SECRET, e)
+        return None
+
+
+def _get_v1_token() -> Optional[str]:
+    global _v1_token, _v1_token_exp
+    if _v1_token and time.time() < _v1_token_exp:
+        return _v1_token
+    creds = _get_vergent_creds()
+    if not creds:
+        return None
+    body = json.dumps({
+        "LogonName": creds.get("logonName") or "",
+        "Password": creds.get("password") or "",
+    }).encode("utf-8")
+    req = Request(
+        f"{V1_BASE}/authenticate",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except (HTTPError, URLError, ValueError) as e:
+        log.warning("v1 authenticate failed: %s", e)
+        return None
+    tok = data.get("Token") or data.get("token")
+    if not tok:
+        log.warning("v1 authenticate returned no Token: %s", str(data)[:200])
+        return None
+    _v1_token = tok
+    _v1_token_exp = time.time() + _V1_TOKEN_TTL
+    return tok
+
+
+def _v1_request(method: str, path: str,
+                body: Optional[Dict[str, Any]] = None
+                ) -> Tuple[int, Optional[Any], str]:
+    """Generic Vergent v1 caller. Returns (status, parsed_body, raw)."""
+    tok = _get_v1_token()
+    if not tok:
+        return 0, None, "no_token"
+    url = f"{V1_BASE}{path}"
+    payload = json.dumps(body).encode("utf-8") if body is not None else None
+    headers = {"Token": tok, "Accept": "application/json"}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    req = Request(url, data=payload, method=method, headers=headers)
+    try:
+        with urlopen(req, timeout=15) as r:
+            raw = r.read().decode("utf-8", errors="replace")
+            status = r.getcode()
+    except HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        status = e.code
+    except URLError as e:
+        return 0, None, f"url_error:{e}"
+    parsed: Optional[Any] = None
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            parsed = None
+    return status, parsed, raw
 
 
 # ─────────────────────────────────────────
@@ -422,12 +672,73 @@ def list_submissions(event: Dict[str, Any]) -> Dict[str, Any]:
     return _json_response(200, {"submissions": items, "count": len(items)})
 
 
+def _load_and_decrypt(submission_id: str) -> Tuple[Optional[Dict[str, Any]],
+                                                   Optional[Dict[str, Any]],
+                                                   Optional[Dict[str, Any]]]:
+    """Fetch + decrypt one submission. Returns (item, payload, error_response).
+
+    On success: (item_dict, payload_dict, None).
+    On miss/failure: (None, None, json_response_dict ready to return).
+    """
+    try:
+        resp = _ddb.get_item(
+            TableName=IF_DDB_TABLE,
+            Key={"submission_id": {"S": submission_id}},
+        )
+    except ClientError as e:
+        log.exception("DDB get_item failed: %s", e)
+        return None, None, _json_response(502, {"error": "storage_failed"})
+
+    item = resp.get("Item")
+    if not item:
+        return None, None, _json_response(404, {"error": "not_found"})
+
+    ciphertext_b64 = item.get("ciphertext_b64", {}).get("S") or ""
+    try:
+        plaintext = _decrypt(ciphertext_b64, submission_id)
+    except ClientError as e:
+        log.exception("KMS decrypt failed: %s", e)
+        return None, None, _json_response(502, {"error": "decryption_failed"})
+    try:
+        payload = json.loads(plaintext)
+    except ValueError:
+        return None, None, _json_response(502, {"error": "decode_failed"})
+    return item, payload, None
+
+
+def _mark_status(submission_id: str, new_status: str) -> None:
+    """Best-effort status update; never raises."""
+    try:
+        _ddb.update_item(
+            TableName=IF_DDB_TABLE,
+            Key={"submission_id": {"S": submission_id}},
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":s": {"S": new_status}},
+        )
+    except ClientError as e:
+        log.warning("IF mark_status failed id=%s status=%s err=%s",
+                    submission_id, new_status, e)
+
+
+def _delete_record(submission_id: str) -> None:
+    try:
+        _ddb.delete_item(
+            TableName=IF_DDB_TABLE,
+            Key={"submission_id": {"S": submission_id}},
+        )
+    except ClientError as e:
+        log.warning("IF delete failed id=%s err=%s", submission_id, e)
+
+
 def view(event: Dict[str, Any]) -> Dict[str, Any]:
-    """GET /api/if/view/{id} — shared-secret auth'd, read-once.
+    """GET /api/if/view/{id} — shared-secret auth'd, reveal without delete.
 
     Staff dashboard calls this with `X-View-Secret: <secret>` header.
-    On success we return plaintext card details AND delete the
-    DynamoDB record so the same link can't be reused.
+    Marks the record as 'viewed' so we know it was opened, but does
+    NOT delete — so staff can come back and push to Vergent or mark
+    it processed manually. The vault record self-deletes via TTL
+    (72h) if no further action is taken.
     """
     if not _list_auth_ok(event):
         log.warning("IF view unauthorized call")
@@ -438,45 +749,15 @@ def view(event: Dict[str, Any]) -> Dict[str, Any]:
     if not submission_id:
         return _json_response(400, {"error": "missing_id"})
 
-    try:
-        resp = _ddb.get_item(
-            TableName=IF_DDB_TABLE,
-            Key={"submission_id": {"S": submission_id}},
-        )
-    except ClientError as e:
-        log.exception("DDB get_item failed: %s", e)
-        return _json_response(502, {"error": "storage_failed"})
+    item, payload, err = _load_and_decrypt(submission_id)
+    if err is not None:
+        return err
 
-    item = resp.get("Item")
-    if not item:
-        return _json_response(404, {"error": "not_found"})
+    _mark_status(submission_id, "viewed")
 
-    ciphertext_b64 = item.get("ciphertext_b64", {}).get("S") or ""
-    try:
-        plaintext = _decrypt(ciphertext_b64, submission_id)
-    except ClientError as e:
-        log.exception("KMS decrypt failed: %s", e)
-        return _json_response(502, {"error": "decryption_failed"})
-
-    try:
-        payload = json.loads(plaintext)
-    except ValueError:
-        return _json_response(502, {"error": "decode_failed"})
-
-    # Purge the record so this link can't be re-used. If the delete
-    # fails we still return the plaintext (better to serve the card
-    # once and log a cleanup failure than to 500 after decrypting).
-    try:
-        _ddb.delete_item(
-            TableName=IF_DDB_TABLE,
-            Key={"submission_id": {"S": submission_id}},
-        )
-    except ClientError as e:
-        log.error("IF view: delete-after-read failed id=%s err=%s",
-                  submission_id, e)
-
-    log.info("IF submission served id=%s brand=%s last4=%s (record deleted)",
-             submission_id, payload.get("card_type"), (payload.get("card_number") or "")[-4:])
+    log.info("IF submission viewed id=%s brand=%s last4=%s",
+             submission_id, payload.get("card_type"),
+             (payload.get("card_number") or "")[-4:])
 
     return _json_response(200, {
         "submissionId": submission_id,
@@ -489,7 +770,151 @@ def view(event: Dict[str, Any]) -> Dict[str, Any]:
         "cvv":            payload.get("cvv"),
         "billingZip":     payload.get("billing_zip"),
         "submittedAt":    item.get("submitted_at",    {}).get("S"),
+        "status":         "viewed",
     })
+
+
+def push_to_vergent(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/if/push-to-vergent  body: {submissionId, vergentCustomerId}
+
+    Two-step push:
+      1. Tokenize the card with Repay CardSafe StoreCard.
+      2. Save the tokenized card on the Vergent customer record via
+         /V1/PostCustomerCardTokenized with card_ref=<repay token>.
+
+    On success: marks record processed, deletes the vault entry,
+    returns {success: true, vergentCardId}.
+    On any failure: leaves the vault record intact so staff can retry.
+    """
+    if not _list_auth_ok(event):
+        return _json_response(401, {"error": "unauthorized"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+    submission_id = (body.get("submissionId") or "").strip()
+    vergent_cid = (body.get("vergentCustomerId") or "").strip()
+    if not submission_id:
+        return _json_response(400, {"error": "missing_submission_id"})
+    if not (vergent_cid.isdigit() and 1 <= len(vergent_cid) <= 10):
+        return _json_response(400, {"error": "invalid_customer_id"})
+
+    item, payload, err = _load_and_decrypt(submission_id)
+    if err is not None:
+        return err
+
+    pan = payload.get("card_number") or ""
+    cvv = payload.get("cvv") or ""
+    name = payload.get("cardholder_name") or item.get("cardholder_name", {}).get("S") or ""
+    zip_code = payload.get("billing_zip") or ""
+    last4 = pan[-4:] if pan else ""
+    try:
+        exp_month = int(payload.get("exp_month") or 0)
+        exp_year = int(payload.get("exp_year") or 0)
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "exp_invalid"})
+
+    log.info("IF push starting id=%s cid=%s last4=%s",
+             submission_id, vergent_cid, last4)
+
+    # Step 1 — Repay CardSafe.
+    token, info = _cardsafe_store(
+        pan=pan, exp_month=exp_month, exp_year=exp_year,
+        cvv=cvv, name_on_card=name, zip_code=zip_code,
+        customer_key=vergent_cid,
+    )
+    if not token:
+        log.warning("IF push: CardSafe failed id=%s info=%s", submission_id, info)
+        return _json_response(502, {"error": "tokenization_failed", "detail": info})
+
+    log.info("IF push: CardSafe ok id=%s last4=%s token_len=%d",
+             submission_id, last4, len(token))
+
+    # Step 2 — Vergent /V1/PostCustomerCardTokenized.
+    # Schema (snake_case, observed): id, company_id, customer_id,
+    # card_type_id, card_holder, card_number, last_four_digits,
+    # card_id, card_ref, expire_month, expire_year, ccv,
+    # billing_zip_code.
+    card_type = payload.get("card_type") or ""
+    card_type_id = {
+        "Visa": 2, "MasterCard": 1, "MASTERCARD": 1,
+        "Amex": 3, "AMEX": 3, "Discover": 4,
+    }.get(card_type, 0)
+    v1_body = {
+        "id": 0,
+        "company_id": VERGENT_COMPANY_ID,
+        "customer_id": int(vergent_cid),
+        "card_type_id": card_type_id,
+        "card_holder": name,
+        "card_number": pan,
+        "last_four_digits": last4,
+        "card_id": "",
+        "card_ref": token,
+        "is_eligible_for_disbursement": False,
+        "expire_month": exp_month,
+        "expire_year": exp_year,
+        "ccv": cvv,
+        "billing_zip_code": zip_code,
+    }
+    status, resp, raw = _v1_request("POST", "/V1/PostCustomerCardTokenized", body=v1_body)
+
+    if status not in (200, 201):
+        flat_raw = (raw or "").replace("\n", " ").replace("\r", " ")
+        log.warning("IF push: Vergent PostCustomerCardTokenized status=%s raw=%s",
+                    status, flat_raw[:1500])
+        return _json_response(502, {
+            "error": "vergent_save_failed",
+            "vergentStatus": status,
+            "detail": flat_raw[:300],
+        })
+
+    if isinstance(resp, dict) and resp.get("Errors"):
+        log.warning("IF push: Vergent returned errors id=%s errors=%s",
+                    submission_id, resp.get("Errors"))
+        return _json_response(200, {
+            "success": False,
+            "error": "card_declined",
+            "errors": resp.get("Errors"),
+        })
+
+    new_card_id = resp.get("id") if isinstance(resp, dict) else None
+    log.info("IF push success id=%s vergent_card_id=%s last4=%s",
+             submission_id, new_card_id, last4)
+
+    # Mark processed + purge the vault.
+    _mark_status(submission_id, "processed")
+    _delete_record(submission_id)
+
+    return _json_response(200, {
+        "success": True,
+        "submissionId": submission_id,
+        "vergentCardId": new_card_id,
+        "vergentCustomerId": int(vergent_cid),
+        "last4": last4,
+    })
+
+
+def mark_processed(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/if/mark-processed body: {submissionId}
+
+    For when staff entered the card into Vergent manually and wants
+    to drop the vault record without an automated push.
+    """
+    if not _list_auth_ok(event):
+        return _json_response(401, {"error": "unauthorized"})
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+    submission_id = (body.get("submissionId") or "").strip()
+    if not submission_id:
+        return _json_response(400, {"error": "missing_submission_id"})
+
+    _mark_status(submission_id, "processed")
+    _delete_record(submission_id)
+    log.info("IF submission marked processed (manual) id=%s", submission_id)
+    return _json_response(200, {"success": True, "submissionId": submission_id})
 
 
 # ─────────────────────────────────────────
@@ -510,6 +935,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return list_submissions(event)
         if method == "GET" and "/api/if/view/" in path:
             return view(event)
+        if method == "POST" and path.endswith("/api/if/push-to-vergent"):
+            return push_to_vergent(event)
+        if method == "POST" and path.endswith("/api/if/mark-processed"):
+            return mark_processed(event)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:
