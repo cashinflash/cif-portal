@@ -142,13 +142,30 @@ def _luhn_ok(digits: str) -> bool:
 
 
 def _validate(body: Dict[str, Any]) -> Tuple[bool, str]:
+    """Minimal structural checks — we accept whatever the customer types
+    and let staff sort out bad data on their end.
+
+    The *only* things that genuinely must hold for the record to be
+    usable:
+      • borrower + cardholder names are present (staff need a label),
+      • a card-number-shaped string is present (≥12 digits),
+      • CVV is present (≥3 digits),
+      • expiration has MM + YY (we don't gate on whether the date is
+        actually in the future — if it's expired, staff will reach out),
+      • billing ZIP is non-empty,
+      • the legal acknowledgment was checked.
+
+    Previous strict gates (Luhn, future-only exp, 5-/9-digit US ZIP
+    regex) caused the form to reject perfectly reasonable cards for
+    edge reasons — staff told us to stop blocking here.
+    """
     for k in ("BorrowerFirstName", "BorrowerLastName",
               "CardholderFirstName", "CardholderLastName"):
         v = (body.get(k) or "").strip()
         if not v or len(v) > 60:
             return False, f"invalid_{k}"
     pan = _digits(body.get("CardNumber"))
-    if not _luhn_ok(pan):
+    if len(pan) < 12 or len(pan) > 19:
         return False, "card_invalid"
     cvv = _digits(body.get("CVV"))
     if not (3 <= len(cvv) <= 4):
@@ -162,17 +179,9 @@ def _validate(body: Dict[str, Any]) -> Tuple[bool, str]:
         return False, "exp_invalid"
     if yy < 100:
         yy += 2000
-    if yy < 2024 or yy > 2099:
+    if yy < 2000 or yy > 2099:
         return False, "exp_invalid"
-    try:
-        last_day_of_exp = datetime(yy if mm < 12 else yy + 1,
-                                   mm + 1 if mm < 12 else 1, 1,
-                                   tzinfo=timezone.utc)
-    except ValueError:
-        return False, "exp_invalid"
-    if last_day_of_exp <= datetime.now(timezone.utc):
-        return False, "exp_invalid"
-    if not _ZIP_RE.match((body.get("BillingZip") or "").strip()):
+    if not (body.get("BillingZip") or "").strip():
         return False, "zip_invalid"
     if not body.get("Acknowledged"):
         return False, "ack_required"
