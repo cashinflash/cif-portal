@@ -160,12 +160,31 @@ jobs:
             }}')
 
           if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
-            echo "$FN exists — leaving code to deploy.yml, refreshing env vars only."
+            echo "$FN exists — leaving code to deploy.yml, refreshing env vars + layers."
             aws lambda wait function-updated --function-name "$FN"
+
+            # Sync layers from the loans-dev template so this Lambda
+            # always has the same shared layer as the rest of the
+            # portal (it needs `vergent` + `aws_secrets` for
+            # push_to_vergent auto-match). Without this, if the Lambda
+            # was created before `import vergent` was added to
+            # handlers/if_submit.py, the import fails at cold-start
+            # and every request returns 500.
+            LOANS_LAYERS=$(aws lambda get-function-configuration \
+              --function-name cif-portal-loans-dev \
+              --query '(Layers // `[]`) | [].Arn' --output text 2>/dev/null || echo "")
+
+            UPDATE_ARGS=(--function-name "$FN" --environment "$ENV_JSON")
+            if [ -n "$LOANS_LAYERS" ]; then
+              # shellcheck disable=SC2086
+              UPDATE_ARGS+=(--layers $LOANS_LAYERS)
+              echo "Attaching layers: $LOANS_LAYERS"
+            else
+              echo "No layers on loans-dev template — skipping layer sync"
+            fi
+
             aws lambda update-function-configuration \
-              --function-name "$FN" \
-              --environment "$ENV_JSON" \
-              --no-cli-pager >/dev/null
+              "${UPDATE_ARGS[@]}" --no-cli-pager >/dev/null
             aws lambda wait function-updated --function-name "$FN"
           else
             echo "$FN missing — creating from loans-dev template."
