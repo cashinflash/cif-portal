@@ -278,11 +278,13 @@ jobs:
             "GET /api/if/view/{id}"
             "POST /api/if/push-to-vergent"
             "POST /api/if/mark-processed"
+            "POST /api/if/delete"
             "OPTIONS /api/if/submit"
             "OPTIONS /api/if/list"
             "OPTIONS /api/if/view/{id}"
             "OPTIONS /api/if/push-to-vergent"
             "OPTIONS /api/if/mark-processed"
+            "OPTIONS /api/if/delete"
           )
           for RK in "${ROUTES[@]}"; do
             EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \

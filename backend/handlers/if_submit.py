@@ -89,10 +89,10 @@ V1_BASE = os.environ.get("VERGENT_V1_BASE_URL", "https://shared.vergentlms.com/a
 VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
 _V1_TOKEN_TTL = 60 * 60  # one hour
 
-# 72 hours — plenty of time for staff to process, then the record
-# self-deletes via DynamoDB TTL. Shorter than PCI's 12-month
-# retention cap for SAD (sensitive authentication data).
-TTL_SECONDS = 72 * 60 * 60
+# 30 days. Staff now manually delete records; TTL is the safety net
+# so vault records don't accumulate forever if a staff member
+# forgets or an application never gets resolved.
+TTL_SECONDS = 30 * 24 * 60 * 60
 
 CORS_HEADERS = {
     "Content-Type": "application/json",
@@ -558,6 +558,11 @@ def submit(event: Dict[str, Any]) -> Dict[str, Any]:
     borrower_last = body["BorrowerLastName"].strip()
     borrower_name = f"{borrower_first} {borrower_last}"
     cardholder_name = f"{body['CardholderFirstName'].strip()} {body['CardholderLastName'].strip()}"
+    # Optional link back to the cif-apply Firebase application that
+    # triggered this card submission. Passed by apply.cashinflash.com
+    # when the card step is filled in alongside an application. Stays
+    # empty for standalone /if submissions that staff texted out.
+    application_fb_id = (body.get("applicationFbId") or "").strip()[:128]
     billing_zip = body["BillingZip"].strip()
     submission_id = str(uuid.uuid4())
     submitted_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -579,32 +584,32 @@ def submit(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(502, {"error": "encryption_failed"})
 
     ttl_epoch = int(time.time()) + TTL_SECONDS
+    ddb_item: Dict[str, Any] = {
+        "submission_id":         {"S": submission_id},
+        "ciphertext_b64":        {"S": ciphertext_b64},
+        "borrower_name":         {"S": borrower_name},
+        "borrower_first_name":   {"S": borrower_first},
+        "borrower_last_name":    {"S": borrower_last},
+        "cardholder_name":       {"S": cardholder_name},
+        "last4":                 {"S": last4},
+        "brand":                 {"S": brand},
+        "exp_month":             {"N": str(exp_month)},
+        "exp_year":              {"N": str(exp_year)},
+        "billing_zip":           {"S": billing_zip},
+        "submitted_at":          {"S": submitted_at},
+        "status":                {"S": "pending"},
+        "ttl_epoch":             {"N": str(ttl_epoch)},
+    }
+    if application_fb_id:
+        ddb_item["application_fb_id"] = {"S": application_fb_id}
     try:
-        _ddb.put_item(
-            TableName=IF_DDB_TABLE,
-            Item={
-                "submission_id":         {"S": submission_id},
-                "ciphertext_b64":        {"S": ciphertext_b64},
-                "borrower_name":         {"S": borrower_name},
-                "borrower_first_name":   {"S": borrower_first},
-                "borrower_last_name":    {"S": borrower_last},
-                "cardholder_name":       {"S": cardholder_name},
-                "last4":                 {"S": last4},
-                "brand":                 {"S": brand},
-                "exp_month":             {"N": str(exp_month)},
-                "exp_year":              {"N": str(exp_year)},
-                "billing_zip":           {"S": billing_zip},
-                "submitted_at":          {"S": submitted_at},
-                "status":                {"S": "pending"},
-                "ttl_epoch":             {"N": str(ttl_epoch)},
-            },
-        )
+        _ddb.put_item(TableName=IF_DDB_TABLE, Item=ddb_item)
     except ClientError as e:
         log.exception("DDB put_item failed: %s", e)
         return _json_response(502, {"error": "storage_failed"})
 
-    log.info("IF submission stored id=%s brand=%s last4=%s",
-             submission_id, brand, last4)
+    log.info("IF submission stored id=%s brand=%s last4=%s app_fb_id=%s",
+             submission_id, brand, last4, application_fb_id or "-")
 
     _send_staff_notification(submission_id, {
         "borrower_name": borrower_name,
@@ -623,6 +628,7 @@ def submit(event: Dict[str, Any]) -> Dict[str, Any]:
         "submissionId": submission_id,
         "brand": brand,
         "last4": last4,
+        "applicationFbId": application_fb_id or None,
     })
 
 
@@ -655,7 +661,7 @@ def list_submissions(event: Dict[str, Any]) -> Dict[str, Any]:
             ProjectionExpression=(
                 "submission_id, borrower_name, cardholder_name, brand, "
                 "last4, exp_month, exp_year, billing_zip, submitted_at, "
-                "#s, ttl_epoch"
+                "#s, ttl_epoch, application_fb_id"
             ),
             ExpressionAttributeNames={"#s": "status"},
         ):
@@ -672,6 +678,7 @@ def list_submissions(event: Dict[str, Any]) -> Dict[str, Any]:
                     "submittedAt":     it.get("submitted_at",    {}).get("S"),
                     "status":          it.get("status",          {}).get("S"),
                     "ttlEpoch":        int(it.get("ttl_epoch",   {}).get("N") or 0) or None,
+                    "applicationFbId": it.get("application_fb_id", {}).get("S") or None,
                 })
     except ClientError as e:
         log.exception("DDB scan failed: %s", e)
@@ -780,6 +787,7 @@ def view(event: Dict[str, Any]) -> Dict[str, Any]:
         "cvv":            payload.get("cvv"),
         "billingZip":     payload.get("billing_zip"),
         "submittedAt":    item.get("submitted_at",    {}).get("S"),
+        "applicationFbId": item.get("application_fb_id", {}).get("S") or None,
         "status":         "viewed",
     })
 
@@ -979,9 +987,10 @@ def push_to_vergent(event: Dict[str, Any]) -> Dict[str, Any]:
     log.info("IF push success id=%s vergent_card_id=%s last4=%s",
              submission_id, new_card_id, last4)
 
-    # Mark processed + purge the vault.
+    # Mark processed — do NOT auto-delete. Staff decides when to
+    # purge the vault entry via POST /api/if/delete. The 30-day TTL
+    # is the only safety net.
     _mark_status(submission_id, "processed")
-    _delete_record(submission_id)
 
     return _json_response(200, {
         "success": True,
@@ -1010,8 +1019,29 @@ def mark_processed(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(400, {"error": "missing_submission_id"})
 
     _mark_status(submission_id, "processed")
-    _delete_record(submission_id)
     log.info("IF submission marked processed (manual) id=%s", submission_id)
+    return _json_response(200, {"success": True, "submissionId": submission_id})
+
+
+def delete_submission(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/if/delete  body: {submissionId}
+
+    Manual purge. Staff hits this from the dashboard when they're
+    done with a submission (or want to clear one they created by
+    mistake). No other endpoint deletes anymore — everything else
+    just updates `status` and lets the record stay visible.
+    """
+    if not _list_auth_ok(event):
+        return _json_response(401, {"error": "unauthorized"})
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+    submission_id = (body.get("submissionId") or "").strip()
+    if not submission_id:
+        return _json_response(400, {"error": "missing_submission_id"})
+    _delete_record(submission_id)
+    log.info("IF submission deleted (manual) id=%s", submission_id)
     return _json_response(200, {"success": True, "submissionId": submission_id})
 
 
@@ -1037,6 +1067,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return push_to_vergent(event)
         if method == "POST" and path.endswith("/api/if/mark-processed"):
             return mark_processed(event)
+        if method == "POST" and path.endswith("/api/if/delete"):
+            return delete_submission(event)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:
