@@ -215,8 +215,10 @@ def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
         "isExpired": False,
         "isActive": bool(raw.get("is_active")),
         "isExisting": bool(raw.get("is_existing")),
+        "status": raw.get("status") or "",
         "processor": processor,
         "cardRef": raw.get("card_ref") or raw.get("cardRef") or "",
+        "cardGuid": raw.get("card_guid") or raw.get("card_account_guid") or "",
     }
 
 
@@ -652,29 +654,22 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
     log.info("GetCustomerCards cid=%s count=%s cards=%s", cid, len(summary), summary)
 
     shaped = [_shape_card_v1(c) for c in body if isinstance(c, dict)]
-    # Show any card the customer can actually pay with. Vergent
-    # admin-added cards always have is_active=true. We previously
-    # also required a non-empty `processor` field to weed out
-    # "zombie" records left by earlier failed self-service saves —
-    # but that filter was too aggressive: Vergent's response field
-    # naming is inconsistent (CardProcessor / cardProcessor /
-    # card_processor_type) and freshly-added cards sometimes come
-    # back without any processor field set at all. We now keep
-    # cards that are active AND have either a non-empty processor
-    # OR a non-empty card_ref (a Repay token, which alone is
-    # sufficient proof the card is chargeable).
+    # Show any card the customer plausibly has on file. Old over-
+    # aggressive filter ("isActive AND processor!='None'") excluded
+    # legitimately-added cards that hadn't been activated yet OR
+    # whose processor field was empty due to Vergent field-naming
+    # inconsistency. Now we just require last4 to exist (so the
+    # customer recognizes the card) and let Vergent's actual charge
+    # API reject non-chargeable cards at payment time. Empty
+    # records (no last4, no token, no anything) get filtered.
     def _is_usable(c: Dict[str, Any]) -> bool:
-        if not c.get("isActive"):
-            return False
-        proc = (c.get("processor") or "").strip()
-        if proc and proc != "None":
+        if c.get("last4"):
             return True
         if (c.get("cardRef") or "").strip():
             return True
-        # Last fallback: if Vergent gave us last4 + expiry, trust it
-        # (admin-added cards from agents fall here when no processor
-        # field is populated by Vergent's admin form).
-        return bool(c.get("last4")) and bool(c.get("expMonth")) and bool(c.get("expYear"))
+        if (c.get("cardGuid") or "").strip():
+            return True
+        return False
 
     active = [c for c in shaped if _is_usable(c)]
     resp: Dict[str, Any] = {"cards": active, "expiredCards": []}
@@ -688,12 +683,16 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
             outcomes.append({
                 "id": s.get("id"),
                 "isActive": s.get("isActive"),
+                "isExisting": s.get("isExisting"),
+                "status": s.get("status"),
                 "processor": s.get("processor"),
                 "hasCardRef": bool(s.get("cardRef")),
+                "hasCardGuid": bool(s.get("cardGuid")),
                 "last4": s.get("last4"),
                 "kept": _is_usable(s),
             })
         resp["debug"] = {
+            "queriedCustomerId": cid,
             "vergentRawCount": len(body),
             "firstRecordKeys": first_keys,
             "filterOutcomes": outcomes,
