@@ -340,7 +340,7 @@
   color: #fff;
 }
 .dash-loan-amount {
-  font-size: clamp(3.5rem, 9vw, 5.75rem);
+  font-size: clamp(2.75rem, 7vw, 4.25rem);
   font-weight: 800;
   letter-spacing: -.035em;
   color: var(--cif-navy);
