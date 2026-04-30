@@ -1099,7 +1099,11 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
 # OmniaPay / Add-card config endpoint
 # ─────────────────────────────────────────
 def get_payment_config(event: Dict[str, Any]) -> Dict[str, Any]:
-    """GET /api/payment-config — return the OmniaPay iframe URL for Add Card.
+    """GET /api/my-payment-config — return the OmniaPay iframe URL for Add Card.
+
+    Path uses /api/my-* prefix to match the existing CloudFront
+    behavior pattern; otherwise CloudFront falls through to S3 and
+    returns 403 XML.
 
     Creates a fresh OmniaPay iframe session per request so the GUID is
     short-lived and tied to this customer. The frontend embeds the
@@ -1161,7 +1165,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_loan_summary(event)
         if path.endswith("/my-payment") and method == "POST":
             return post_payment(event)
-        if path.endswith("/payment-config") and method == "GET":
+        if path.endswith("/my-payment-config") and method == "GET":
             return get_payment_config(event)
 
         return _json_response(404, {"error": "not_found", "path": path})

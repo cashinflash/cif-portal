@@ -115,7 +115,7 @@ jobs:
             "GET /api/my-banks"
             "GET /api/my-payment/loan-summary"
             "POST /api/my-payment"
-            "GET /api/payment-config"
+            "GET /api/my-payment-config"
           )
           for RK in "${ROUTES[@]}"; do
             EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
@@ -253,5 +253,5 @@ jobs:
             echo "  - GET /api/my-banks"
             echo "  - GET /api/my-payment/loan-summary"
             echo "  - POST /api/my-payment"
-            echo "  - GET /api/payment-config"
+            echo "  - GET /api/my-payment-config"
           } >> "$GITHUB_STEP_SUMMARY"
