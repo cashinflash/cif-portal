@@ -610,16 +610,29 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
     Token header. v1's customerId-in-querystring auth model means we
     can use our service token without needing AuthenticateCognito
     (which is broken for our tenant).
+
+    Pass ?debug=1 to get back the raw Vergent count, the raw first
+    record's keys (no PII values), and which cards survived filtering.
+    Used for diagnosing "card was added in admin but not visible in
+    portal" cases — strip the debug fields before showing a real
+    customer.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
+    debug = ((event.get("queryStringParameters") or {}).get("debug") == "1")
     if not cid:
         return _json_response(200, {"cards": [], "expiredCards": []})
 
     status, body, raw = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
     if status != 200 or not isinstance(body, list):
         log.warning("GetCustomerCards status=%s raw=%s", status, (raw or "")[:300])
-        return _json_response(200, {"cards": [], "expiredCards": [], "error": "upstream_unavailable"})
+        resp = {"cards": [], "expiredCards": [], "error": "upstream_unavailable"}
+        if debug:
+            resp["debug"] = {
+                "vergentStatus": status,
+                "vergentRaw": (raw or "")[:600],
+            }
+        return _json_response(200, resp)
 
     # Log full list so we can compare against the Vergent admin UI and
     # see whether our PostCustomerCard outputs are actually persisted.
@@ -664,7 +677,28 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
         return bool(c.get("last4")) and bool(c.get("expMonth")) and bool(c.get("expYear"))
 
     active = [c for c in shaped if _is_usable(c)]
-    return _json_response(200, {"cards": active, "expiredCards": []})
+    resp: Dict[str, Any] = {"cards": active, "expiredCards": []}
+    if debug:
+        # Raw key list for the first record only (no values — avoids
+        # leaking last4/exp/etc into a debug dump). Plus per-card
+        # filter outcome so we can see why a card was excluded.
+        first_keys = sorted(body[0].keys()) if body and isinstance(body[0], dict) else []
+        outcomes = []
+        for s in shaped:
+            outcomes.append({
+                "id": s.get("id"),
+                "isActive": s.get("isActive"),
+                "processor": s.get("processor"),
+                "hasCardRef": bool(s.get("cardRef")),
+                "last4": s.get("last4"),
+                "kept": _is_usable(s),
+            })
+        resp["debug"] = {
+            "vergentRawCount": len(body),
+            "firstRecordKeys": first_keys,
+            "filterOutcomes": outcomes,
+        }
+    return _json_response(200, resp)
 
 
 def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
