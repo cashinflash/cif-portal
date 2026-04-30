@@ -1371,35 +1371,14 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         # ── Fallback path: v1 PostCustomerLoanPayment ──
-        # Pre-flight: bail early if the card has no payment-processor
-        # link. Without a card_ref / card_account_guid / card_guid,
-        # Vergent's PostCustomerLoanPayment crashes with a server-side
-        # NullReferenceException when it tries to forward to Repay.
-        # Surface a friendlier error to the customer instead of a 500.
-        has_token = (
-            (card.get("card_ref") or "").strip()
-            or (card.get("card_account_guid") or "").strip()
-            or (card.get("card_guid") or "").strip()
-        )
-        proc = (card.get("CardProcessor") or card.get("card_processor_type") or "").strip()
-        proc_set = bool(proc) and proc != "None"
-        if not has_token and not proc_set:
-            log.warning(
-                "payment preflight: card not chargeable cid=%s card_id=%s "
-                "card_ref=%r card_guid=%r processor=%r",
-                cid, card_id,
-                card.get("card_ref"), card.get("card_guid"),
-                card.get("CardProcessor"),
-            )
-            return _json_response(400, {
-                "success": False,
-                "error": "card_not_chargeable",
-                "message": (
-                    "This card needs to be set up before it can be charged. "
-                    "Please contact us at (747) 270-7121 so we can resolve this."
-                ),
-                "v2Trail": v2_trail,
-            })
+        # No pre-flight tokenization check here: v1 GetCustomerCards
+        # doesn't expose card_ref/CardProcessor/card_guid in its
+        # response (those fields are internal to Vergent's charge
+        # flow). A card returned with all of those empty can still be
+        # chargeable — confirmed empirically when Vergent admin
+        # successfully charged the same card our portal had been
+        # blocking. Trust v1 to either charge the card or return a
+        # real upstream error that we surface via upstreamBody.
         method_obj = {"Type": "Card", "CardId": int(card_id)}
     elif pay_method == "bank":
         bank_id = body.get("bankId")
