@@ -654,16 +654,22 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
     log.info("GetCustomerCards cid=%s count=%s cards=%s", cid, len(summary), summary)
 
     shaped = [_shape_card_v1(c) for c in body if isinstance(c, dict)]
-    # Show any card the customer plausibly has on file. Old over-
-    # aggressive filter ("isActive AND processor!='None'") excluded
-    # legitimately-added cards that hadn't been activated yet OR
-    # whose processor field was empty due to Vergent field-naming
-    # inconsistency. Now we just require last4 to exist (so the
-    # customer recognizes the card) and let Vergent's actual charge
-    # API reject non-chargeable cards at payment time. Empty
-    # records (no last4, no token, no anything) get filtered.
+    # Vergent's GetCustomerCards returns *every* customer_card row,
+    # including ghost records from earlier failed add-card attempts
+    # (the same last4 may appear several times — only the newest
+    # row with status==1 is the "current" record visible in Vergent
+    # admin). The admin UI filters to status==1 and so do we.
+    #
+    # Fallbacks accept cards that pre-date the status field but
+    # have other proof they're chargeable (a Repay token, an
+    # OmniaPay GUID, or a non-empty processor string). last4 alone
+    # is NOT enough — a row with only last4 is almost certainly a
+    # ghost from a failed earlier save attempt.
     def _is_usable(c: Dict[str, Any]) -> bool:
-        if c.get("last4"):
+        if c.get("status") == 1:
+            return True
+        proc = (c.get("processor") or "").strip()
+        if proc and proc != "None":
             return True
         if (c.get("cardRef") or "").strip():
             return True
