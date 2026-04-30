@@ -14,7 +14,7 @@ verified, so MFA cannot be bypassed by hitting Cognito directly.
 | DynamoDB `cif-portal-mfa-sessions-dev` | PK=`sessionId`; TTL on `expiresAt`; rows expire 5 min after creation |
 | HttpApi routes (no JWT) | `POST /api/auth/login`, `POST /api/auth/send-code`, `POST /api/auth/verify-code` |
 | App client `cif-portal-spa-dev` | Now allows `ALLOW_ADMIN_USER_PASSWORD_AUTH` (in addition to existing flows) |
-| SES sender | `lhdcapital@gmail.com` (verified in dev — see ticket below for prod) |
+| SES sender | `no-reply@cashinflash.com` (hardcoded in `auth_mfa.py`; uses the DKIM-verified `cashinflash.com` domain) |
 | SNS SMS | Transactional, sender id `CashFlash` (sandbox limits — see ticket) |
 
 ## Environment
@@ -24,18 +24,31 @@ verified, so MFA cannot be bypassed by hitting Cognito directly.
 COGNITO_USER_POOL_ID = us-east-1_U508xOs95
 COGNITO_APP_CLIENT_ID = 1mddi61n19hftaldt9t3r622b
 MFA_SESSION_TABLE     = cif-portal-mfa-sessions-dev
-MFA_EMAIL_SENDER      = lhdcapital@gmail.com   # update once a brand sender is verified
 MFA_CODE_TTL_SECS     = 300
 ```
 
+Sender is hardcoded in `auth_mfa.py` (`EMAIL_SENDER = "no-reply@cashinflash.com"`).
+The `MFA_EMAIL_SENDER` env var is no longer read; if it's still set on the
+deployed Lambda from a previous deploy, it's a harmless no-op and can be
+deleted at leisure.
+
 ## Tweaks for testing today
 
-1. **Verify your email in SES.** I already triggered a verification email
-   to `lhdcapital@gmail.com` — check your inbox and click the AWS link
-   before testing. Until that's done, SES rejects the send and the
-   "Sending code…" UI will fail.
+1. **Verify your test customer's email in SES.** While SES is still in
+   sandbox, every recipient must be on the verified-identities list.
+   Run `aws ses verify-email-identity --email-address <test-customer-email>`
+   (or the equivalent in the SES console: Verified identities → Create
+   identity → Email address) and click the AWS verification link in
+   that inbox before testing. The DKIM-verified sender domain
+   (`cashinflash.com`) is already done — only the recipient needs this.
 2. **Sign in normally.** Email + password works, then a channel picker
-   appears. Pick "Email" to receive the code at `lhdcapital@gmail.com`.
+   appears. Pick "Email" to receive the code at the customer's
+   on-file address.
+   - If `/send-code` returns 502 with `delivery_failed_email`, the
+     response body now includes `sesCode` + `sesMessage` (open
+     DevTools → Network → response). That tells you whether it's the
+     sandbox (recipient unverified), a sender-verification regression,
+     or SES-account-paused (high bounce rate).
 3. **SMS will NOT work today** — SNS sandbox restricts sends to verified
    numbers and the account has a $1/month spend cap. The picker still
    shows SMS as an option, but `/send-code` returns `delivery_failed`

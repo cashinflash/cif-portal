@@ -26,7 +26,7 @@ Environment:
   COGNITO_USER_POOL_ID       us-east-1_U508xOs95
   COGNITO_APP_CLIENT_ID      1mddi61n19hftaldt9t3r622b
   MFA_SESSION_TABLE          cif-portal-mfa-sessions-dev
-  MFA_EMAIL_SENDER           verified SES sender
+  (MFA_EMAIL_SENDER removed — sender is hardcoded to no-reply@cashinflash.com)
   MFA_CODE_TTL_SECS          300
   VERGENT_V1_BASE_URL        https://shared.vergentlms.com/api/api
   VERGENT_APIM_BASE_URL      https://prod.apim.vergentlms.com/external/shared
@@ -62,13 +62,11 @@ log.setLevel(logging.INFO)
 USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 APP_CLIENT_ID = os.environ["COGNITO_APP_CLIENT_ID"]
 TABLE = os.environ.get("MFA_SESSION_TABLE", "cif-portal-mfa-sessions-dev")
-# SES requires a verified identity as the Source. Our DKIM-verified
-# domain is cashinflash.com so any address at that domain works —
-# "no-reply@" is the conventional choice for transactional mail. The
-# previous default (lhdcapital@gmail.com) was unverified which is why
-# email codes never landed. Override with MFA_EMAIL_SENDER if you
-# want support@ / loans@ / noreply@ instead.
-EMAIL_SENDER = os.environ.get("MFA_EMAIL_SENDER", "no-reply@cashinflash.com")
+# Hardcoded to the DKIM-verified domain (cashinflash.com). The env-var
+# override existed historically but only ever held a stale, unverified
+# Gmail address that broke email-MFA delivery — removing it makes the
+# stale Lambda env var a no-op.
+EMAIL_SENDER = "no-reply@cashinflash.com"
 CODE_TTL = int(os.environ.get("MFA_CODE_TTL_SECS", "300"))
 MAX_ATTEMPTS = 3
 
@@ -397,7 +395,7 @@ def _delete_session(session_id: str) -> None:
 # ─────────────────────────────────────────
 # Senders
 # ─────────────────────────────────────────
-def _send_email(to: str, code: str) -> bool:
+def _send_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]:
     body_text = (
         f"Cash in Flash — Sign-in code\n\n"
         f"Your sign-in code is: {code}\n\n"
@@ -451,22 +449,24 @@ def _send_email(to: str, code: str) -> bool:
                 },
             },
         )
-        return True
+        return True, None, None
     except ClientError as e:
         err = e.response.get("Error", {}) if hasattr(e, "response") else {}
+        ses_code = err.get("Code")
+        ses_msg = err.get("Message")
         log.error(
             "SES send_email failed: Source=%s to=%s code=%s type=%s msg=%s",
             EMAIL_SENDER,
             to,
-            err.get("Code"),
+            ses_code,
             err.get("Type"),
-            err.get("Message"),
+            ses_msg,
         )
-        return False
+        return False, ses_code, ses_msg
     except Exception as e:
         log.exception("SES send_email unexpected failure Source=%s to=%s: %s",
                       EMAIL_SENDER, to, e)
-        return False
+        return False, type(e).__name__, str(e)
 
 
 # ─────────────────────────────────────────
@@ -535,8 +535,14 @@ def _send_code(event: Dict[str, Any]) -> Dict[str, Any]:
     if channel == "email":
         code = _new_code()
         _arm_our_code(session_id, _hash_code(code), channel="email")
-        if not _send_email(s["email"], code):
-            return _resp(502, {"error": "delivery_failed_email"})
+        ok, ses_code, ses_msg = _send_email(s["email"], code)
+        if not ok:
+            body: Dict[str, Any] = {"error": "delivery_failed_email"}
+            if ses_code:
+                body["sesCode"] = ses_code
+            if ses_msg:
+                body["sesMessage"] = ses_msg
+            return _resp(502, body)
         return _resp(200, {"ok": True, "channel": "email", "expiresInSec": CODE_TTL})
 
     # channel == sms — Twilio Verify generates, delivers, and validates the
