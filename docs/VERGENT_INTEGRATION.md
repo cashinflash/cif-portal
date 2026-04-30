@@ -50,7 +50,7 @@ flips switch (1) it starts returning real data without a code change.
   endpoint we've tested.
 
 ### `GET /api/CustomerPortal/Customer/SearchByEmail/{email}`
-Returns the customer's `mobileProfileId` (e.g. `lhdcapital@gmail.com` →
+Returns the customer's `mobileProfileId` (e.g. `customer@example.com` →
 `6007`). Used to confirm portal-account existence pre-login.
 
 ### `POST /api/CustomerPortal/Customer/Search`
