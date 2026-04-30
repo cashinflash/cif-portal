@@ -150,10 +150,31 @@
     if (!root) return;
     root.innerHTML = '';
     if (!state.banks.length) {
-      const p = document.createElement('p');
-      p.className = 'pay-empty';
-      p.textContent = 'No bank account on file. Visit any Cash in Flash location to add one.';
-      root.appendChild(p);
+      const wrap = document.createElement('div');
+      wrap.className = 'pay-empty-card';
+      wrap.innerHTML =
+        '<div class="pay-empty-icon" aria-hidden="true">' +
+        '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<rect x="3" y="10" width="18" height="11" rx="1"/><path d="M12 3l9 6H3l9-6z"/>' +
+        '</svg></div>' +
+        '<h3>Add a bank account to get started</h3>' +
+        '<p>For your security, bank accounts can only be added in person. Visit any Cash in Flash location and we’ll set it up in minutes.</p>' +
+        '<div class="pay-empty-actions">' +
+        '<a href="tel:+17472707121" class="btn-apply">Call (747) 270-7121</a>' +
+        '<button type="button" class="btn-login" id="payRefreshBanks">Just added one — check again</button>' +
+        '</div>';
+      root.appendChild(wrap);
+      const refreshBtn = qs('#payRefreshBanks');
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', function () {
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = 'Checking…';
+          loadBanks().catch(function () {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = 'Just added one — check again';
+          });
+        });
+      }
       return;
     }
     state.banks.forEach(function (bank, idx) {
@@ -190,13 +211,48 @@
     const root = qs('#payCardList');
     if (!root) return;
     root.innerHTML = '';
+    // Toggle the permanent "Adding a new debit card" secure-panel:
+    // hide it when we're showing the rich empty-state below, since
+    // the empty-state's CTA already covers "call us to add one".
+    const securePanel = root.parentElement
+      ? root.parentElement.querySelector('.pay-secure-panel')
+      : null;
     if (!state.cards.length) {
-      const p = document.createElement('p');
-      p.className = 'pay-empty';
-      p.textContent = 'No saved cards on your account. Call (747) 270-7121 or visit a store to add one.';
-      root.appendChild(p);
+      if (securePanel) securePanel.hidden = true;
+      const wrap = document.createElement('div');
+      wrap.className = 'pay-empty-card';
+      wrap.innerHTML =
+        '<div class="pay-empty-icon" aria-hidden="true">' +
+        '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>' +
+        '</svg></div>' +
+        '<h3>Add a card to get started</h3>' +
+        '<p>For your security, cards can only be added by a Cash in Flash agent. Call us and we’ll have one on your account in minutes.</p>' +
+        '<div class="pay-empty-actions">' +
+        '<a href="tel:+17472707121" class="btn-apply">Call (747) 270-7121</a>' +
+        '<button type="button" class="btn-login" id="payRefreshCards">Just added one — check again</button>' +
+        '</div>';
+      root.appendChild(wrap);
+      const refreshBtn = qs('#payRefreshCards');
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', function () {
+          refreshBtn.disabled = true;
+          refreshBtn.textContent = 'Checking…';
+          loadCards()
+            .then(function () {
+              // If still empty, renderCards re-rendered the empty
+              // state with a fresh button (so this stale handle is
+              // gone). If non-empty, the picker rendered.
+            })
+            .catch(function () {
+              refreshBtn.disabled = false;
+              refreshBtn.textContent = 'Just added one — check again';
+            });
+        });
+      }
       return;
     }
+    if (securePanel) securePanel.hidden = false;
     state.cards.forEach(function (card, idx) {
       const opt = document.createElement('label');
       opt.className = 'pay-card-option';

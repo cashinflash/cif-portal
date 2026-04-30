@@ -1004,6 +1004,66 @@
   padding: 12px 0;
 }
 
+/* Rich empty-state for "no cards on file" / "no bank on file" —
+   shown when the customer has no payment methods saved and needs
+   to call/visit to add one. Replaces the small-grey-paragraph
+   .pay-empty above for the cards/banks lists specifically. */
+.pay-empty-card {
+  background: var(--cif-green-soft);
+  border: 1px solid rgba(14,135,65,.18);
+  border-radius: var(--cif-radius-card);
+  padding: 28px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+.pay-empty-icon {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--cif-green);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 4px;
+  box-shadow: 0 1px 2px rgba(14,135,65,.10);
+}
+.pay-empty-card h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -.01em;
+  color: var(--cif-navy);
+}
+.pay-empty-card p {
+  margin: 0;
+  color: var(--cif-muted);
+  font-size: .92rem;
+  line-height: 1.5;
+  max-width: 460px;
+}
+.pay-empty-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 8px;
+}
+.pay-empty-actions .btn-apply,
+.pay-empty-actions .btn-login {
+  flex: 0 0 auto;
+}
+@media (max-width: 480px) {
+  .pay-empty-card { padding: 24px 18px; }
+  .pay-empty-actions { flex-direction: column; width: 100%; }
+  .pay-empty-actions .btn-apply,
+  .pay-empty-actions .btn-login {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* Receipt */
 .pay-receipt { text-align: center; padding: 36px 28px; }
 .pay-receipt-icon {
