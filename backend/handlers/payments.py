@@ -419,7 +419,10 @@ def _v2_credit_card_payment(loan_id: int,
     omits `cardId`, but Vergent's actual endpoint rejects requests
     without it ("cardId must be a non-default value"). Confirmed
     empirically against our tenant — adjust here if Vergent updates
-    their schema.
+    their schema. Field naming convention is also undocumented; we
+    send the cardId in every plausible location (camelCase + Pascal
+    in body, plus URL query-string) so whichever location Vergent's
+    model binder reads from gets a non-default value.
 
     Returns (status, parsed_body, raw_text). On 200, parsed_body is
     expected to be `{ success: true, scheduleDate: "..." }`.
@@ -429,13 +432,23 @@ def _v2_credit_card_payment(loan_id: int,
         return 0, None, ""
     creds = _get_creds()
     api_key = creds.get("xApiKey", "") if creds else ""
-    url = f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
+    cid_int = int(card_id)
+    url = (
+        f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
+        f"?cardId={cid_int}&CardId={cid_int}"
+    )
     body = {
         "loanId": int(loan_id),
+        "LoanId": int(loan_id),
         "paymentId": int(payment_id),
+        "PaymentId": int(payment_id),
         "amountDue": float(amount),
+        "AmountDue": float(amount),
         "isInRescindPeriod": False,
-        "cardId": int(card_id),
+        "IsInRescindPeriod": False,
+        "cardId": cid_int,
+        "CardId": cid_int,
+        "card_id": cid_int,
     }
     h = {
         "Content-Type": "application/json",
