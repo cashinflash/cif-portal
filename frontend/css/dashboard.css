@@ -1050,6 +1050,13 @@
   justify-content: center;
   margin-top: 8px;
 }
+.pay-empty-hint {
+  display: block;
+  margin-top: 12px;
+  color: var(--cif-subtle);
+  font-size: .8rem;
+  font-style: italic;
+}
 .pay-empty-actions .btn-apply,
 .pay-empty-actions .btn-login {
   flex: 0 0 auto;

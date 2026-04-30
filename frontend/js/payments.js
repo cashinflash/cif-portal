@@ -161,20 +161,9 @@
         '<p>For your security, bank accounts can only be added in person. Visit any Cash in Flash location and we’ll set it up in minutes.</p>' +
         '<div class="pay-empty-actions">' +
         '<a href="tel:+17472707121" class="btn-apply">Call (747) 270-7121</a>' +
-        '<button type="button" class="btn-login" id="payRefreshBanks">Just added one — check again</button>' +
-        '</div>';
+        '</div>' +
+        '<small class="pay-empty-hint">New bank accounts appear here automatically as soon as we save them.</small>';
       root.appendChild(wrap);
-      const refreshBtn = qs('#payRefreshBanks');
-      if (refreshBtn) {
-        refreshBtn.addEventListener('click', function () {
-          refreshBtn.disabled = true;
-          refreshBtn.textContent = 'Checking…';
-          loadBanks().catch(function () {
-            refreshBtn.disabled = false;
-            refreshBtn.textContent = 'Just added one — check again';
-          });
-        });
-      }
       return;
     }
     state.banks.forEach(function (bank, idx) {
@@ -230,26 +219,9 @@
         '<p>For your security, cards can only be added by a Cash in Flash agent. Call us and we’ll have one on your account in minutes.</p>' +
         '<div class="pay-empty-actions">' +
         '<a href="tel:+17472707121" class="btn-apply">Call (747) 270-7121</a>' +
-        '<button type="button" class="btn-login" id="payRefreshCards">Just added one — check again</button>' +
-        '</div>';
+        '</div>' +
+        '<small class="pay-empty-hint">New cards appear here automatically as soon as your agent saves them.</small>';
       root.appendChild(wrap);
-      const refreshBtn = qs('#payRefreshCards');
-      if (refreshBtn) {
-        refreshBtn.addEventListener('click', function () {
-          refreshBtn.disabled = true;
-          refreshBtn.textContent = 'Checking…';
-          loadCards()
-            .then(function () {
-              // If still empty, renderCards re-rendered the empty
-              // state with a fresh button (so this stale handle is
-              // gone). If non-empty, the picker rendered.
-            })
-            .catch(function () {
-              refreshBtn.disabled = false;
-              refreshBtn.textContent = 'Just added one — check again';
-            });
-        });
-      }
       return;
     }
     if (securePanel) securePanel.hidden = false;
@@ -441,16 +413,91 @@
     wireTabs();
   }
 
-  // Self-service Add Card UI removed for PCI SAQ A compliance — no
-  // PAN ever traverses our infrastructure. Re-introduce a Repay
-  // Hosted Fields iframe here once integration docs arrive; pair it
-  // with re-enabling POST /api/my-cards on the backend (currently
-  // returns 410).
+  // ---------- Auto-refresh of payment methods ----------
+  // No "click to refresh" button — that's bad UX for a customer
+  // who just got off the phone with us. Instead, silently refetch
+  // /api/my-cards + /api/my-banks at moments where a new payment
+  // method is most likely to have just been added by an agent:
+  //
+  //   1. The browser tab regains focus (visibility change). The
+  //      customer was probably on the phone or in a tab with
+  //      Vergent's admin UI; coming back here means they expect
+  //      to see the new card.
+  //   2. A short delay (~3s) after initial page load — catches
+  //      the case where the agent saved the card seconds before
+  //      the customer hit the page.
+  //   3. While the empty-state is showing AND the tab is
+  //      foreground, gentle polling every 12s. We stop polling
+  //      as soon as a card appears (or the customer leaves the
+  //      tab). 12s is slow enough to be invisible, fast enough
+  //      to feel "instant" while a customer waits on the phone.
+  //
+  // All refreshes are silent — no spinner, no flash, no UI churn
+  // unless the underlying state actually changes.
+
+  let pollTimer = null;
+
+  function refreshMethods() {
+    return Promise.all([
+      loadCards().catch(function () {}),
+      loadBanks().catch(function () {}),
+    ]).then(function () {
+      // updateBtn() is wired inside initForm via a listener on
+      // the lists. Re-running initForm is unnecessary; the
+      // re-rendered radios will fire change events when selected
+      // and the existing payBtn watcher will react.
+    });
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(function () {
+      // Only poll while still empty AND tab is visible. Once a
+      // card shows up (or the user leaves the tab), stop.
+      const empty = state.cards.length === 0 && state.banks.length === 0;
+      if (!empty || document.hidden) {
+        stopPolling();
+        return;
+      }
+      refreshMethods();
+    }, 12000);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      stopPolling();
+      return;
+    }
+    // Tab just became visible — refetch immediately, then resume
+    // gentle polling if still empty.
+    refreshMethods().then(function () {
+      const empty = state.cards.length === 0 && state.banks.length === 0;
+      if (empty) startPolling();
+    });
+  });
+
   // ---------- Boot ----------
   document.addEventListener('DOMContentLoaded', function () {
     wireButtons();
     Promise.all([loadLoan(), loadCards(), loadBanks()])
-      .then(function () { initForm(); })
+      .then(function () {
+        initForm();
+        // Fire one extra refetch a few seconds after first load —
+        // catches the "agent saved card seconds before customer
+        // hit refresh" case.
+        setTimeout(function () { refreshMethods(); }, 3000);
+        // If still empty, start gentle polling so newly-added
+        // cards surface within ~12s while the customer waits.
+        const empty = state.cards.length === 0 && state.banks.length === 0;
+        if (empty && !document.hidden) startPolling();
+      })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
         const formCard = qs('#payFormCard');

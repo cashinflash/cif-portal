@@ -196,6 +196,16 @@ def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
     # Prefer the live mapping from Vergent; fall back to our static table.
     _load_card_types()
     brand = (_card_types_by_id or {}).get(type_id_int) or _CARD_TYPE_NAMES.get(type_id_int, "Card")
+    # Vergent's processor field name is inconsistent across endpoints —
+    # the same value can come back as CardProcessor (Pascal),
+    # cardProcessor (camel), or card_processor_type (snake). Take the
+    # first non-empty one.
+    processor = (
+        raw.get("CardProcessor")
+        or raw.get("cardProcessor")
+        or raw.get("card_processor_type")
+        or ""
+    )
     return {
         "id": raw.get("id"),
         "brand": brand,
@@ -205,8 +215,8 @@ def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
         "isExpired": False,
         "isActive": bool(raw.get("is_active")),
         "isExisting": bool(raw.get("is_existing")),
-        "processor": raw.get("CardProcessor") or "",
-        "cardRef": raw.get("card_ref") or "",
+        "processor": processor,
+        "cardRef": raw.get("card_ref") or raw.get("cardRef") or "",
     }
 
 
@@ -629,13 +639,31 @@ def get_my_cards(event: Dict[str, Any]) -> Dict[str, Any]:
     log.info("GetCustomerCards cid=%s count=%s cards=%s", cid, len(summary), summary)
 
     shaped = [_shape_card_v1(c) for c in body if isinstance(c, dict)]
-    # Hide broken/inactive records from the customer — anything that
-    # Vergent wouldn't let us charge anyway. Keeps the portal clean
-    # when earlier failed saves leave zombie records on the account.
-    active = [
-        c for c in shaped
-        if c.get("isActive") and c.get("processor") and c.get("processor") != "None"
-    ]
+    # Show any card the customer can actually pay with. Vergent
+    # admin-added cards always have is_active=true. We previously
+    # also required a non-empty `processor` field to weed out
+    # "zombie" records left by earlier failed self-service saves —
+    # but that filter was too aggressive: Vergent's response field
+    # naming is inconsistent (CardProcessor / cardProcessor /
+    # card_processor_type) and freshly-added cards sometimes come
+    # back without any processor field set at all. We now keep
+    # cards that are active AND have either a non-empty processor
+    # OR a non-empty card_ref (a Repay token, which alone is
+    # sufficient proof the card is chargeable).
+    def _is_usable(c: Dict[str, Any]) -> bool:
+        if not c.get("isActive"):
+            return False
+        proc = (c.get("processor") or "").strip()
+        if proc and proc != "None":
+            return True
+        if (c.get("cardRef") or "").strip():
+            return True
+        # Last fallback: if Vergent gave us last4 + expiry, trust it
+        # (admin-added cards from agents fall here when no processor
+        # field is populated by Vergent's admin form).
+        return bool(c.get("last4")) and bool(c.get("expMonth")) and bool(c.get("expYear"))
+
+    active = [c for c in shaped if _is_usable(c)]
     return _json_response(200, {"cards": active, "expiredCards": []})
 
 
