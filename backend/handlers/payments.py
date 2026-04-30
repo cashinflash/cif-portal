@@ -408,7 +408,8 @@ def _get_next_payment_id(loan_id: int,
 def _v2_credit_card_payment(loan_id: int,
                             payment_id: int,
                             amount: float,
-                            card_id: int) -> tuple:
+                            card_id: int,
+                            customer_id: Optional[int] = None) -> tuple:
     """POST /api/CustomerPortal/Loans/Payments/CreditCardPayment.
 
     Uses the service APIM token (same as _apim_call) — Vergent's
@@ -450,6 +451,9 @@ def _v2_credit_card_payment(loan_id: int,
         "CardId": cid_int,
         "card_id": cid_int,
     }
+    if customer_id is not None:
+        body["customerId"] = int(customer_id)
+        body["CustomerId"] = int(customer_id)
     h = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
@@ -1330,6 +1334,7 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         v2_trail: list = []
         v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
             hdr_id, 0, round(amount_num, 2), int(card_id),
+            customer_id=int(cid) if cid else None,
         )
         v2_trail.append({
             "step": "charge", "paymentId": 0, "cardId": int(card_id),
