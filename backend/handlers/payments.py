@@ -58,6 +58,18 @@ REPAY_SECRET_ARN = os.environ.get("REPAY_SECRET_ARN",
 REPAY_GATEWAY_BASE = os.environ.get("REPAY_GATEWAY_BASE",
                                     "https://api.repayonline.com/rgapi/v1.0")
 
+# OmniaPay (Vergent-owned) — used for the customer-self-service Add Card
+# flow via embedded iframe. Server-to-server: Lambda calls this API to
+# create an iframe session, gets back a 32-char hex GUID, and the
+# frontend embeds https://iframe.omniapay.com/{guid}?refererUrls=... so
+# the customer's PAN/CVV never traverses our infrastructure (PCI SAQ A).
+OMNIAPAY_SECRET_ARN = os.environ.get("OMNIAPAY_SECRET_ARN",
+                                     "cif-portal/omniapay/credentials")
+OMNIAPAY_API_BASE = os.environ.get("OMNIAPAY_API_BASE",
+                                   "https://api.omniapay.com")
+OMNIAPAY_IFRAME_BASE = os.environ.get("OMNIAPAY_IFRAME_BASE",
+                                      "https://iframe.omniapay.com")
+
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
@@ -381,6 +393,186 @@ def _v1_request(method: str, path: str, *,
         if tok2:
             status, parsed, raw = _http(url, method, body=body, headers={"Token": tok2})
     return status, parsed, raw
+
+
+# ─────────────────────────────────────────
+# OmniaPay — iframe session creation for customer-self-service Add Card
+# ─────────────────────────────────────────
+_omniapay_creds_cache: Optional[Dict[str, str]] = None
+# Once a probe finds a working endpoint + auth + body shape, lock to it
+# so warm invocations skip the dance.
+_omniapay_session_path: Optional[str] = None
+_omniapay_session_auth_header: Optional[str] = None
+_omniapay_session_body_shape: Optional[str] = None
+
+
+def _get_omniapay_creds() -> Optional[Dict[str, str]]:
+    """Fetch OmniaPay credentials from Secrets Manager, cached per container.
+
+    Expected shape (set manually via AWS Console at
+    cif-portal/omniapay/credentials):
+      apiKey:  Vergent-issued OmniaPay API key
+      apiUrl:  https://api.omniapay.com (override via env if needed)
+    """
+    global _omniapay_creds_cache
+    if _omniapay_creds_cache:
+        return _omniapay_creds_cache
+    try:
+        resp = _secrets.get_secret_value(SecretId=OMNIAPAY_SECRET_ARN)
+        _omniapay_creds_cache = json.loads(resp["SecretString"])
+        return _omniapay_creds_cache
+    except Exception as e:
+        log.warning("omniapay secret read failed arn=%s err=%s",
+                    OMNIAPAY_SECRET_ARN, e)
+        return None
+
+
+def _extract_session_guid(body: Any) -> Optional[str]:
+    """Pull the iframe-session GUID out of OmniaPay's response.
+
+    Try the common keys; OmniaPay's exact response shape isn't
+    documented for us yet so we accept multiple plausible names.
+    """
+    if not isinstance(body, dict):
+        return None
+    for key in ("guid", "sessionId", "session_id", "iframeId",
+                "iframe_id", "id", "token", "key", "uuid"):
+        val = body.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    # Sometimes wrapped: {data: {...}}, {result: {...}}, {session: {...}}
+    for container in ("data", "result", "session", "iframe"):
+        inner = body.get(container)
+        if isinstance(inner, dict):
+            guid = _extract_session_guid(inner)
+            if guid:
+                return guid
+    return None
+
+
+def _create_omniapay_session(customer_id: str,
+                             referer_url: str) -> Optional[Dict[str, Any]]:
+    """Create an OmniaPay iframe session and return iframe URL + GUID.
+
+    Probes a small set of likely endpoint paths + auth header schemes +
+    body shapes until one returns a 2xx with a parseable GUID. Locks to
+    the winning combo for warm invocations. Logs every probe attempt so
+    we can iterate based on what OmniaPay actually accepts.
+
+    Returns {"iframeUrl": "...", "guid": "..."} on success, or None.
+    """
+    global _omniapay_session_path
+    global _omniapay_session_auth_header
+    global _omniapay_session_body_shape
+
+    creds = _get_omniapay_creds()
+    if not creds:
+        return None
+    api_key = creds.get("apiKey") or ""
+    api_url = (creds.get("apiUrl") or OMNIAPAY_API_BASE).rstrip("/")
+    if not api_key:
+        log.warning("omniapay creds missing apiKey; skipping session creation")
+        return None
+
+    # Candidate POST paths — most likely first.
+    paths = [
+        "/cardtokens",
+        "/sessions",
+        "/v1/cardtokens",
+        "/v1/sessions",
+        "/iframe/sessions",
+        "/cardtokens/sessions",
+    ]
+    # Candidate auth headers.
+    auth_variants = [
+        ("Authorization", f"Bearer {api_key}"),
+        ("X-API-Key", api_key),
+        ("apikey", api_key),
+        ("X-Auth-Token", api_key),
+    ]
+    # Candidate body shapes. refererUrls matches what we saw on
+    # iframe.omniapay.com/{guid}?refererUrls=...
+    body_variants = {
+        "minimal": {"refererUrls": referer_url},
+        "with_customer": {
+            "customerId": customer_id,
+            "refererUrls": referer_url,
+        },
+        "snake": {
+            "customer_id": customer_id,
+            "referer_urls": referer_url,
+        },
+        "merchant": {
+            "merchantId": creds.get("merchantId") or "",
+            "customerId": customer_id,
+            "refererUrls": referer_url,
+        },
+    }
+
+    # Build the candidate list. If we already locked one, try it first.
+    candidates = []
+    if (_omniapay_session_path and _omniapay_session_auth_header
+            and _omniapay_session_body_shape):
+        candidates.append((
+            _omniapay_session_path,
+            _omniapay_session_auth_header,
+            _omniapay_session_body_shape,
+        ))
+    for p in paths:
+        for ah_name, ah_val in auth_variants:
+            for bn in body_variants.keys():
+                key = (p, ah_name, bn)
+                already = (
+                    _omniapay_session_path == p
+                    and _omniapay_session_auth_header == ah_name
+                    and _omniapay_session_body_shape == bn
+                )
+                if not already:
+                    candidates.append((p, ah_name, bn))
+
+    for path, auth_header_name, body_name in candidates:
+        url = f"{api_url}{path}"
+        body = body_variants[body_name]
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            auth_header_name: (
+                f"Bearer {api_key}" if auth_header_name == "Authorization"
+                else api_key
+            ),
+        }
+        status, parsed, raw = _http(url, "POST", body=body, headers=headers)
+        log.info(
+            "omniapay probe url=%s auth=%s body=%s status=%s parsed_keys=%s raw_head=%r",
+            url,
+            auth_header_name,
+            body_name,
+            status,
+            list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__,
+            (raw or "")[:200].replace("\n", " "),
+        )
+        if status not in (200, 201):
+            continue
+        guid = _extract_session_guid(parsed)
+        if not guid:
+            log.warning("omniapay 2xx but no parseable guid: %r", (raw or "")[:300])
+            continue
+
+        # Lock the winning combo.
+        _omniapay_session_path = path
+        _omniapay_session_auth_header = auth_header_name
+        _omniapay_session_body_shape = body_name
+
+        iframe_url = (
+            f"{OMNIAPAY_IFRAME_BASE.rstrip('/')}/{guid}"
+            f"?refererUrls={referer_url}"
+        )
+        log.info("omniapay session created guid=%s path=%s body=%s",
+                 guid, path, body_name)
+        return {"iframeUrl": iframe_url, "guid": guid}
+
+    log.warning("omniapay session creation: no candidate combo worked")
+    return None
 
 
 # ─────────────────────────────────────────
@@ -904,6 +1096,50 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# OmniaPay / Add-card config endpoint
+# ─────────────────────────────────────────
+def get_payment_config(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/payment-config — return the OmniaPay iframe URL for Add Card.
+
+    Creates a fresh OmniaPay iframe session per request so the GUID is
+    short-lived and tied to this customer. The frontend embeds the
+    returned iframeUrl directly; the customer enters card data inside
+    the iframe (PAN never traverses our infrastructure).
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+
+    # The referer URL has to match what OmniaPay's iframe expects for
+    # X-Frame-Options / postMessage origin checks. We accept it from
+    # the request's Origin header to handle dev (CloudFront) and prod
+    # (portal.cashinflash.com) without redeploys.
+    headers = (event.get("headers") or {})
+    origin = (
+        headers.get("origin")
+        or headers.get("Origin")
+        or "https://d1zucrj1ouu3c.cloudfront.net"
+    )
+
+    session = _create_omniapay_session(customer_id=str(cid),
+                                       referer_url=origin)
+    if not session:
+        return _json_response(502, {
+            "error": "omniapay_session_failed",
+            "message": (
+                "Could not create OmniaPay iframe session. "
+                "Check CloudWatch logs for the probe trail."
+            ),
+        })
+
+    return _json_response(200, {
+        "iframeUrl": session["iframeUrl"],
+        "iframeBase": OMNIAPAY_IFRAME_BASE,
+    })
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -925,6 +1161,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_loan_summary(event)
         if path.endswith("/my-payment") and method == "POST":
             return post_payment(event)
+        if path.endswith("/payment-config") and method == "GET":
+            return get_payment_config(event)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:

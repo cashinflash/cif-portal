@@ -115,6 +115,7 @@ jobs:
             "GET /api/my-banks"
             "GET /api/my-payment/loan-summary"
             "POST /api/my-payment"
+            "GET /api/payment-config"
           )
           for RK in "${ROUTES[@]}"; do
             EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
@@ -154,44 +155,90 @@ jobs:
             echo "Added invoke permission."
           fi
 
-      - name: Grant Repay secret read to payments Lambda and set env
+      - name: Grant Repay + OmniaPay secret reads to payments Lambda and set env
         run: |
           set -e
           REPAY_ARN=$(aws secretsmanager describe-secret \
             --secret-id cif-portal/repay/credentials \
             --query ARN --output text 2>/dev/null || echo "")
+          OMNIAPAY_ARN=$(aws secretsmanager describe-secret \
+            --secret-id cif-portal/omniapay/credentials \
+            --query ARN --output text 2>/dev/null || echo "")
+
+          # Repay grant — required for the legacy server-side
+          # tokenization path (currently disabled but creds are kept).
           if [ -z "$REPAY_ARN" ] || [ "$REPAY_ARN" = "None" ]; then
             echo "::warning::Repay secret not yet created. Dispatch store-repay-secrets.yml, then re-run this workflow."
+          else
+            echo "Repay secret ARN: $REPAY_ARN"
+          fi
+
+          # OmniaPay grant — required for the active customer-self-service
+          # Add Card flow (creates iframe sessions via api.omniapay.com).
+          if [ -z "$OMNIAPAY_ARN" ] || [ "$OMNIAPAY_ARN" = "None" ]; then
+            echo "::warning::OmniaPay secret not yet created. Store cif-portal/omniapay/credentials in AWS Secrets Manager, then re-run this workflow."
+          else
+            echo "OmniaPay secret ARN: $OMNIAPAY_ARN"
+          fi
+
+          if [ -z "$REPAY_ARN$OMNIAPAY_ARN" ] || \
+             { [ "$REPAY_ARN" = "None" ] && [ "$OMNIAPAY_ARN" = "None" ]; }; then
+            echo "::warning::No payment-vendor secrets present yet — skipping IAM grant."
             exit 0
           fi
-          echo "Repay secret ARN: $REPAY_ARN"
 
           ROLE_ARN=$(aws lambda get-function-configuration \
             --function-name "$FN" --query 'Role' --output text)
           ROLE_NAME=$(echo "$ROLE_ARN" | awk -F/ '{print $NF}')
           echo "Lambda role: $ROLE_NAME"
 
+          # Build the Resource list: only include ARNs that exist.
+          RESOURCE_LIST="["
+          SEP=""
+          if [ -n "$REPAY_ARN" ] && [ "$REPAY_ARN" != "None" ]; then
+            RESOURCE_LIST="$RESOURCE_LIST$SEP\"$REPAY_ARN\""
+            SEP=","
+          fi
+          if [ -n "$OMNIAPAY_ARN" ] && [ "$OMNIAPAY_ARN" != "None" ]; then
+            RESOURCE_LIST="$RESOURCE_LIST$SEP\"$OMNIAPAY_ARN\""
+            SEP=","
+          fi
+          RESOURCE_LIST="$RESOURCE_LIST]"
+
           aws iam put-role-policy \
             --role-name "$ROLE_NAME" \
-            --policy-name payments-read-repay-secret \
-            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"$REPAY_ARN\"}]}"
-          echo "IAM policy payments-read-repay-secret attached."
+            --policy-name payments-read-vendor-secrets \
+            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":$RESOURCE_LIST}]}"
+          echo "IAM policy payments-read-vendor-secrets attached."
 
-          # Set REPAY_SECRET_ARN on the Lambda so the handler knows
-          # which secret to read. Preserve any existing env vars.
+          # Drop the older single-secret policy if present (cleanup).
+          aws iam delete-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name payments-read-repay-secret \
+            --no-cli-pager 2>/dev/null || true
+
+          # Set REPAY_SECRET_ARN + OMNIAPAY_SECRET_ARN on the Lambda so
+          # the handler knows which secrets to read. Preserve any
+          # existing env vars.
           EXISTING_ENV=$(aws lambda get-function-configuration \
             --function-name "$FN" \
             --query 'Environment.Variables' --output json 2>/dev/null)
           if [ "$EXISTING_ENV" = "null" ] || [ -z "$EXISTING_ENV" ]; then
             EXISTING_ENV='{}'
           fi
-          NEW_ENV=$(echo "$EXISTING_ENV" | jq --arg v "$REPAY_ARN" '. + {REPAY_SECRET_ARN: $v}')
+          NEW_ENV="$EXISTING_ENV"
+          if [ -n "$REPAY_ARN" ] && [ "$REPAY_ARN" != "None" ]; then
+            NEW_ENV=$(echo "$NEW_ENV" | jq --arg v "$REPAY_ARN" '. + {REPAY_SECRET_ARN: $v}')
+          fi
+          if [ -n "$OMNIAPAY_ARN" ] && [ "$OMNIAPAY_ARN" != "None" ]; then
+            NEW_ENV=$(echo "$NEW_ENV" | jq --arg v "$OMNIAPAY_ARN" '. + {OMNIAPAY_SECRET_ARN: $v}')
+          fi
           aws lambda update-function-configuration \
             --function-name "$FN" \
             --environment "{\"Variables\": $NEW_ENV}" \
             --no-cli-pager >/dev/null
           aws lambda wait function-updated --function-name "$FN"
-          echo "REPAY_SECRET_ARN set on $FN."
+          echo "Lambda env vars updated."
 
       - name: Summary
         if: always()
@@ -202,6 +249,9 @@ jobs:
             echo "- Lambda: $FN"
             echo "- Routes:"
             echo "  - GET /api/my-cards"
+            echo "  - POST /api/my-cards"
+            echo "  - GET /api/my-banks"
             echo "  - GET /api/my-payment/loan-summary"
             echo "  - POST /api/my-payment"
+            echo "  - GET /api/payment-config"
           } >> "$GITHUB_STEP_SUMMARY"
