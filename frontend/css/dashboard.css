@@ -17,6 +17,7 @@
   --cif-green-dark: #0C7137;
   --cif-green-soft: rgba(14,135,65,.08);
   --cif-navy: #1a1a2e;
+  --cif-navy-soft: rgba(26,26,46,.06);
   --cif-ink: #1a1a2e;
   --cif-muted: #555;
   --cif-subtle: #888;
@@ -24,9 +25,11 @@
   --cif-bg: #fff;
   --cif-bg-tint: #f7f9fb;
   --cif-yellow: #FFDD00;
+  --cif-yellow-soft: rgba(255,221,0,.14);
   --cif-danger: #c83030;
-  --cif-radius-card: 12px;
+  --cif-radius-card: 20px;
   --cif-radius-pill: 50px;
+  --cif-shadow-soft: 0 1px 2px rgba(0,0,0,.04);
   --cif-shadow-sm: 0 1px 4px rgba(0,0,0,.06);
   --cif-shadow-md: 0 8px 24px rgba(14,135,65,.08);
   --cif-shadow-lg: 0 16px 48px rgba(14,135,65,.10);
@@ -212,9 +215,10 @@
   margin-bottom: 10px;
 }
 .dash-title {
-  font-size: clamp(1.8rem, 4.2vw, 2.6rem);
-  font-weight: 700;
-  line-height: 1.15;
+  font-size: clamp(2rem, 4.5vw, 2.85rem);
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1.1;
   margin: 0 0 10px;
   color: var(--cif-navy);
 }
@@ -255,7 +259,7 @@
   padding-bottom: 64px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 36px;
 }
 
 /* ---------- CARD BASE ---------- */
@@ -264,7 +268,7 @@
   border-radius: var(--cif-radius-card);
   border: 1px solid var(--cif-hairline);
   box-shadow: var(--cif-shadow-md);
-  padding: 28px;
+  padding: 32px;
   position: relative;
 }
 .dash-card-head {
@@ -272,11 +276,12 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 .dash-card-head h2 {
-  font-size: 1.15rem;
-  font-weight: 700;
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -.01em;
   margin: 0;
   color: var(--cif-navy);
 }
@@ -289,12 +294,28 @@
 
 /* ---------- ACTIVE LOAN CARD ---------- */
 .dash-loan-card {
-  padding: 32px 32px 28px;
-  background:
-    linear-gradient(180deg, #fff 0%, #fafdfb 100%);
-  border-top: 4px solid var(--cif-green);
+  padding: 0;
+  background: #fff;
   box-shadow: var(--cif-shadow-lg);
+  overflow: hidden;
 }
+.dash-loan-card .dash-card-skeleton { padding: 32px; }
+.dash-loan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 32px;
+  background: linear-gradient(135deg, var(--cif-green) 0%, #0a6b34 100%);
+  color: #fff;
+}
+.dash-loan-header-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dash-loan-body-content { padding: 32px; }
 .dash-loan-eyebrow {
   display: flex;
   align-items: center;
@@ -306,35 +327,47 @@
   color: var(--cif-green);
   margin-bottom: 12px;
 }
+.dash-loan-header .dash-loan-eyebrow {
+  color: #fff;
+  margin-bottom: 0;
+}
+.dash-loan-header .dash-loan-eyebrow-id {
+  background: rgba(255,255,255,.18);
+  color: #fff;
+}
+.dash-loan-header .dash-pill {
+  background: rgba(255,255,255,.18);
+  color: #fff;
+}
 .dash-loan-amount {
-  font-size: clamp(2.4rem, 5.8vw, 3.2rem);
+  font-size: clamp(3.5rem, 9vw, 5.75rem);
   font-weight: 800;
-  letter-spacing: -.025em;
+  letter-spacing: -.035em;
   color: var(--cif-navy);
   line-height: 1;
-  margin: 0 0 4px;
+  margin: 0 0 8px;
   font-variant-numeric: tabular-nums;
 }
 .dash-loan-amount small {
-  font-size: .38em;
-  vertical-align: super;
+  font-size: .32em;
+  vertical-align: .6em;
   color: var(--cif-muted);
   font-weight: 600;
   margin-right: 4px;
 }
 .dash-loan-caption {
   color: var(--cif-muted);
-  font-size: .92rem;
-  margin-bottom: 24px;
+  font-size: .95rem;
+  margin-bottom: 28px;
 }
 .dash-loan-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 20px;
-  padding: 20px 0;
-  border-top: 1px dashed var(--cif-hairline);
-  border-bottom: 1px dashed var(--cif-hairline);
-  margin-bottom: 20px;
+  padding: 24px 0;
+  border-top: 1px solid var(--cif-hairline);
+  border-bottom: 1px solid var(--cif-hairline);
+  margin-bottom: 24px;
 }
 .dash-loan-stat-label {
   font-size: .72rem;
@@ -345,8 +378,9 @@
   margin-bottom: 6px;
 }
 .dash-loan-stat-value {
-  font-size: 1.1rem;
-  font-weight: 700;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -.01em;
   color: var(--cif-navy);
   font-variant-numeric: tabular-nums;
 }
@@ -380,6 +414,15 @@
 .dash-pill--past-due { background: rgba(200,48,48,.1); color: var(--cif-danger); }
 .dash-pill--autopay { background: rgba(14,135,65,.1); color: var(--cif-green-dark); }
 .dash-pill--closed { background: rgba(107,114,128,.12); color: #4b5563; }
+
+@keyframes dashPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .55; transform: scale(.85); }
+}
+.dash-pill--ok::before { animation: dashPulse 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .dash-pill--ok::before { animation: none; }
+}
 
 .dash-loan-eyebrow-id {
   font-size: .72rem;
@@ -1047,7 +1090,7 @@
 }
 
 /* Empty state (no active loan) */
-.dash-loan-empty { text-align: center; padding: 16px 0 8px; }
+.dash-loan-empty { text-align: center; padding: 48px 32px; }
 .dash-loan-empty-icon {
   width: 56px; height: 56px;
   margin: 0 auto 16px;
@@ -1068,12 +1111,12 @@
 .dash-action {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
+  gap: 16px;
+  padding: 22px;
   background: #fff;
   border: 1px solid var(--cif-hairline);
   border-radius: var(--cif-radius-card);
-  box-shadow: var(--cif-shadow-sm);
+  box-shadow: var(--cif-shadow-soft);
   transition: transform .15s, box-shadow .2s, border-color .2s;
 }
 .dash-action:hover {
@@ -1082,24 +1125,37 @@
   border-color: rgba(14,135,65,.25);
 }
 .dash-action-icon {
-  flex: 0 0 44px;
-  width: 44px; height: 44px;
-  border-radius: 12px;
+  flex: 0 0 56px;
+  width: 56px; height: 56px;
+  border-radius: 16px;
   background: var(--cif-green-soft);
   color: var(--cif-green);
   display: flex; align-items: center; justify-content: center;
 }
+/* Varied tinted icon backgrounds — Brigit-style data-has-personality */
+.dash-action:nth-child(1) .dash-action-icon {
+  background: var(--cif-green-soft);
+  color: var(--cif-green);
+}
+.dash-action:nth-child(2) .dash-action-icon {
+  background: var(--cif-navy-soft);
+  color: var(--cif-navy);
+}
+.dash-action:nth-child(3) .dash-action-icon {
+  background: var(--cif-yellow-soft);
+  color: #8a6d00;
+}
 .dash-action-label { display: flex; flex-direction: column; }
 .dash-action-label strong {
-  font-size: .98rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--cif-navy);
   line-height: 1.2;
 }
 .dash-action-label small {
-  font-size: .82rem;
+  font-size: .85rem;
   color: var(--cif-muted);
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 /* ---------- RECENT ACTIVITY ---------- */
@@ -1293,10 +1349,12 @@ body.has-sidebar .site-header { display: none; }
   .header-inner { height: 64px; }
 
   .dash-hero { padding: 40px 0 56px; }
-  .dash-main { margin-top: -40px; padding-bottom: 40px; gap: 16px; }
-  .dash-card { padding: 22px; }
-  .dash-loan-card { padding: 24px 20px; }
-  .dash-loan-stats { grid-template-columns: repeat(2, 1fr); gap: 14px; padding: 16px 0; }
+  .dash-main { margin-top: -40px; padding-bottom: 40px; gap: 24px; }
+  .dash-card { padding: 24px; }
+  .dash-loan-card { padding: 0; }
+  .dash-loan-header { padding: 14px 20px; }
+  .dash-loan-body-content { padding: 24px 20px; }
+  .dash-loan-stats { grid-template-columns: repeat(2, 1fr); gap: 14px; padding: 18px 0; }
   .dash-loan-cta-row { flex-direction: column; align-items: stretch; }
   .dash-loan-cta-row .btn-apply,
   .dash-loan-cta-row .btn-login { width: 100%; justify-content: center; }
@@ -1309,7 +1367,7 @@ body.has-sidebar .site-header { display: none; }
 
   /* Profile card tightens up */
   .dash-profile-body { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .dash-profile-avatar { width: 56px; height: 56px; }
+  .dash-profile-avatar { width: 56px; height: 56px; font-size: 1.4rem; }
 
   /* My loans list */
   .dash-loanlist-row { gap: 12px; padding: 12px 0; }
@@ -1318,11 +1376,13 @@ body.has-sidebar .site-header { display: none; }
 
 @media (max-width: 480px) {
   .container { padding: 0 16px; }
-  .dash-loan-amount { font-size: 2rem; }
-  .dash-loan-card { padding: 20px 16px; }
-  .dash-card { padding: 18px 16px; }
+  .dash-loan-card { padding: 0; }
+  .dash-loan-header { padding: 12px 16px; }
+  .dash-loan-body-content { padding: 22px 16px; }
+  .dash-loan-empty { padding: 32px 16px; }
+  .dash-card { padding: 20px 16px; }
   .dash-loan-eyebrow { flex-wrap: wrap; gap: 6px; }
-  .dash-loan-stat-value { font-size: .95rem; }
+  .dash-loan-stat-value { font-size: 1.05rem; }
   .dash-loan-progress-labels { font-size: .75rem; }
   .dash-hero-blob { opacity: .5; }
   .dash-loanlist-top { gap: 8px; }
@@ -1352,15 +1412,17 @@ body.has-sidebar .site-header { display: none; }
   width: 88px;
   height: 88px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #0E8741, #0a8f3f);
+  background: linear-gradient(135deg, #0E8741 0%, #15a04f 60%, #0a6b34 100%);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.85rem;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: .04em;
-  box-shadow: 0 8px 18px rgba(14,135,65,.18);
+  box-shadow:
+    0 8px 18px rgba(14,135,65,.22),
+    inset 0 1px 0 rgba(255,255,255,.18);
   user-select: none;
 }
 .dash-profile-name {
