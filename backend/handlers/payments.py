@@ -1133,13 +1133,24 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     status, charge, raw = _v1_request("POST", "/V1/PostCustomerLoanPayment", body=charge_body)
 
     if status not in (200, 201):
-        log.warning("payment upstream status=%s raw=%s", status, (raw or "")[:300])
-        return _json_response(502, {"error": "upstream_unavailable"})
+        log.warning("payment upstream status=%s raw=%s", status, (raw or "")[:600])
+        # Surface the upstream Vergent status + body in the 502 so we
+        # can diagnose without CloudWatch round-trips. Strip from the
+        # response once the charge flow is verified working.
+        return _json_response(502, {
+            "error": "upstream_unavailable",
+            "upstreamStatus": status,
+            "upstreamBody": (raw or "")[:400],
+        })
 
     if isinstance(charge, dict) and charge.get("Errors"):
         log.warning("payment declined cid=%s loan_id=%s errors=%s",
                     cid, loan_id, charge.get("Errors"))
-        return _json_response(200, {"success": False, "error": "card_declined"})
+        return _json_response(200, {
+            "success": False,
+            "error": "card_declined",
+            "upstreamErrors": charge.get("Errors"),
+        })
 
     # Re-fetch the loan so we can tell the UI the new balance.
     refreshed = _fetch_active_loan(cid)
