@@ -315,18 +315,25 @@ def _get_customer_v2_token(event: Dict[str, Any],
     return None
 
 
-def _get_next_payment_id(customer_token: str, loan_id: int,
+def _get_next_payment_id(loan_id: int,
                          trail: Optional[list] = None) -> Optional[int]:
     """Fetch the next scheduled payment's id for a loan via v2.
 
-    `source` query param is undocumented for our tenant — probe a few
-    common values until one returns a parseable schedule.
+    Uses the service APIM token (same as _apim_call) since the
+    customer-JWT path through AuthenticateCognito is broken for our
+    tenant. `source` query param is undocumented; probe a few common
+    values until one returns a parseable schedule.
     """
+    tok = _get_apim_token()
+    if not tok:
+        if trail is not None:
+            trail.append({"step": "schedule", "status": 0, "note": "no_apim_token"})
+        return None
     creds = _get_creds()
     api_key = creds.get("xApiKey", "") if creds else ""
     h = {
         "x-api-key": api_key,
-        "Authorization": f"Bearer {customer_token}",
+        "Authorization": f"Bearer {tok}",
     }
     probe_results = []
     for source in ("loan", "Loan", "1", "customer", "Customer"):
@@ -398,15 +405,22 @@ def _get_next_payment_id(customer_token: str, loan_id: int,
     return None
 
 
-def _v2_credit_card_payment(customer_token: str,
-                            loan_id: int,
+def _v2_credit_card_payment(loan_id: int,
                             payment_id: int,
                             amount: float) -> tuple:
     """POST /api/CustomerPortal/Loans/Payments/CreditCardPayment.
 
+    Uses the service APIM token (same as _apim_call) — Vergent's
+    customer-JWT auth (AuthenticateCognito) is broken for our tenant
+    so we use the service-token route. Vergent looks up the loan's
+    default funding method from loanId in the body.
+
     Returns (status, parsed_body, raw_text). On 200, parsed_body is
     expected to be `{ success: true, scheduleDate: "..." }`.
     """
+    tok = _get_apim_token()
+    if not tok:
+        return 0, None, ""
     creds = _get_creds()
     api_key = creds.get("xApiKey", "") if creds else ""
     url = f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
@@ -419,7 +433,7 @@ def _v2_credit_card_payment(customer_token: str,
     h = {
         "Content-Type": "application/json",
         "x-api-key": api_key,
-        "Authorization": f"Bearer {customer_token}",
+        "Authorization": f"Bearer {tok}",
     }
     return _http(url, "POST", body=body, headers=h)
 
@@ -1287,60 +1301,53 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         # Uses the loan's default funding method — no cardId in the
         # body — which sidesteps v1 PostCustomerLoanPayment's
         # NullReferenceException when a card record lacks a Repay
-        # token. Three-step flow: AuthenticateCognito (exchange the
-        # customer's Cognito JWT for a Vergent v2 token) → fetch
-        # next paymentId from the loan's payment schedule →
-        # POST CreditCardPayment.
+        # token. Two-step flow with our service APIM token (Vergent's
+        # customer-JWT path via AuthenticateCognito is broken for our
+        # tenant): fetch next paymentId from the loan's payment
+        # schedule → POST CreditCardPayment.
         v2_trail: list = []
-        customer_token = _get_customer_v2_token(event, trail=v2_trail)
-        if customer_token:
-            payment_id = _get_next_payment_id(customer_token, hdr_id,
-                                              trail=v2_trail)
-            if payment_id:
-                v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
-                    customer_token, hdr_id, payment_id, round(amount_num, 2),
+        payment_id = _get_next_payment_id(hdr_id, trail=v2_trail)
+        if payment_id:
+            v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
+                hdr_id, payment_id, round(amount_num, 2),
+            )
+            v2_trail.append({
+                "step": "charge", "status": v2_status,
+                "rawHead": (v2_raw or "")[:200],
+            })
+            if v2_status in (200, 201):
+                refreshed = _fetch_active_loan(cid)
+                new_balance = (
+                    refreshed.get("balance") if refreshed else None
                 )
-                v2_trail.append({
-                    "step": "charge", "status": v2_status,
-                    "rawHead": (v2_raw or "")[:200],
+                confirmation = (
+                    v2_parsed.get("scheduleDate")
+                    if isinstance(v2_parsed, dict) else None
+                ) or now_iso
+                log.info(
+                    "v2 payment success cid=%s loan_id=%s amount=%s "
+                    "last4=%s confirmation=%s",
+                    cid, loan_id, amount_num, last4, confirmation,
+                )
+                return _json_response(200, {
+                    "success": True,
+                    "confirmationId": str(confirmation),
+                    "transactionId": None,
+                    "amount": round(amount_num, 2),
+                    "last4": last4,
+                    "paymentMethod": "card",
+                    "newBalance": new_balance,
+                    "via": "v2",
                 })
-                if v2_status in (200, 201):
-                    refreshed = _fetch_active_loan(cid)
-                    new_balance = (
-                        refreshed.get("balance") if refreshed else None
-                    )
-                    confirmation = (
-                        v2_parsed.get("scheduleDate")
-                        if isinstance(v2_parsed, dict) else None
-                    ) or now_iso
-                    log.info(
-                        "v2 payment success cid=%s loan_id=%s amount=%s "
-                        "last4=%s confirmation=%s",
-                        cid, loan_id, amount_num, last4, confirmation,
-                    )
-                    return _json_response(200, {
-                        "success": True,
-                        "confirmationId": str(confirmation),
-                        "transactionId": None,
-                        "amount": round(amount_num, 2),
-                        "last4": last4,
-                        "paymentMethod": "card",
-                        "newBalance": new_balance,
-                        "via": "v2",
-                    })
-                log.warning(
-                    "v2 CreditCardPayment failed status=%s raw=%s "
-                    "— falling back to v1",
-                    v2_status, (v2_raw or "")[:300],
-                )
-            else:
-                log.warning(
-                    "v2 PaymentSchedule did not yield a paymentId for "
-                    "loan=%s — falling back to v1", hdr_id,
-                )
+            log.warning(
+                "v2 CreditCardPayment failed status=%s raw=%s "
+                "— falling back to v1",
+                v2_status, (v2_raw or "")[:300],
+            )
         else:
             log.warning(
-                "v2 customer-token exchange failed — falling back to v1"
+                "v2 PaymentSchedule did not yield a paymentId for "
+                "loan=%s — falling back to v1", hdr_id,
             )
 
         # ── Fallback path: v1 PostCustomerLoanPayment ──
