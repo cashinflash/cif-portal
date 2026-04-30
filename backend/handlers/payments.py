@@ -241,6 +241,148 @@ def _apim_call(method: str, path: str, *,
 
 
 # ─────────────────────────────────────────
+# Vergent v2 CustomerPortal — customer-context auth + payment
+# ─────────────────────────────────────────
+# v2 CreditCardPayment uses the loan's default funding method
+# (no cardId in the request) — sidesteps v1 PostCustomerLoanPayment's
+# server-side NullReferenceException when a card record lacks a
+# Repay token. Auth is a v2 customer session token obtained by
+# exchanging the customer's Cognito JWT via AuthenticateCognito.
+
+def _get_customer_v2_token(event: Dict[str, Any]) -> Optional[str]:
+    """Exchange the request's Cognito JWT for a Vergent v2 customer token.
+
+    The customer's Cognito ID token is in the request's Authorization
+    header (already validated by API Gateway's Cognito authorizer).
+    Send it to v2 AuthenticateCognito to get back a Vergent customer
+    session token usable for v2 CustomerPortal endpoints.
+
+    Returns the token string, or None if the exchange fails.
+    """
+    headers = event.get("headers") or {}
+    # Normalize header name (HTTP API can deliver lowercase or
+    # mixed-case depending on client).
+    auth_header = ""
+    for k in ("authorization", "Authorization"):
+        if k in headers and headers[k]:
+            auth_header = headers[k]
+            break
+    jwt = auth_header.replace("Bearer ", "").replace("bearer ", "").strip()
+    if not jwt:
+        log.warning("v2 token exchange: no Authorization header on request")
+        return None
+
+    creds = _get_creds()
+    if not creds:
+        log.warning("v2 token exchange: vergent creds not loaded")
+        return None
+    api_key = creds.get("xApiKey", "")
+
+    url = f"{APIM_BASE}/api/CustomerPortal/AuthenticateCognito"
+    body = {"jwt": jwt}
+    h = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+    }
+    status, parsed, raw = _http(url, "POST", body=body, headers=h)
+    if status != 200 or not isinstance(parsed, dict):
+        log.warning("v2 AuthenticateCognito failed: status=%s raw=%s",
+                    status, (raw or "")[:300])
+        return None
+    tok = parsed.get("token")
+    if isinstance(tok, str) and tok.strip():
+        log.info("v2 AuthenticateCognito ok: token_len=%d", len(tok))
+        return tok.strip()
+    log.warning("v2 AuthenticateCognito returned no token: %r", parsed)
+    return None
+
+
+def _get_next_payment_id(customer_token: str, loan_id: int) -> Optional[int]:
+    """Fetch the next scheduled payment's id for a loan via v2.
+
+    `source` query param is undocumented for our tenant — probe a few
+    common values until one returns a parseable schedule.
+    """
+    creds = _get_creds()
+    api_key = creds.get("xApiKey", "") if creds else ""
+    h = {
+        "x-api-key": api_key,
+        "Authorization": f"Bearer {customer_token}",
+    }
+    for source in ("loan", "Loan", "1", "customer", "Customer"):
+        url = (
+            f"{APIM_BASE}/api/CustomerPortal/Loans/{loan_id}/"
+            f"Source/{source}/PaymentSchedule"
+        )
+        status, parsed, raw = _http(url, "GET", headers=h)
+        log.info("v2 PaymentSchedule probe loan=%s source=%s status=%s",
+                 loan_id, source, status)
+        if status != 200:
+            continue
+
+        def _scan(items):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                pid = (
+                    item.get("id") or item.get("Id")
+                    or item.get("paymentId") or item.get("PaymentId")
+                )
+                if pid:
+                    try:
+                        return int(pid)
+                    except (TypeError, ValueError):
+                        continue
+            return None
+
+        if isinstance(parsed, list):
+            pid = _scan(parsed)
+            if pid:
+                log.info("v2 PaymentSchedule found paymentId=%s via %s",
+                         pid, source)
+                return pid
+        elif isinstance(parsed, dict):
+            for key in ("payments", "Payments", "schedule", "Schedule",
+                        "items", "Items", "data", "Data"):
+                inner = parsed.get(key)
+                if isinstance(inner, list):
+                    pid = _scan(inner)
+                    if pid:
+                        log.info("v2 PaymentSchedule found paymentId=%s "
+                                 "via %s.%s", pid, source, key)
+                        return pid
+    log.warning("v2 PaymentSchedule: no paymentId found across all "
+                "probed sources for loan=%s", loan_id)
+    return None
+
+
+def _v2_credit_card_payment(customer_token: str,
+                            loan_id: int,
+                            payment_id: int,
+                            amount: float) -> tuple:
+    """POST /api/CustomerPortal/Loans/Payments/CreditCardPayment.
+
+    Returns (status, parsed_body, raw_text). On 200, parsed_body is
+    expected to be `{ success: true, scheduleDate: "..." }`.
+    """
+    creds = _get_creds()
+    api_key = creds.get("xApiKey", "") if creds else ""
+    url = f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
+    body = {
+        "loanId": int(loan_id),
+        "paymentId": int(payment_id),
+        "amountDue": float(amount),
+        "isInRescindPeriod": False,
+    }
+    h = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "Authorization": f"Bearer {customer_token}",
+    }
+    return _http(url, "POST", body=body, headers=h)
+
+
+# ─────────────────────────────────────────
 # Repay RGAPI (card tokenization)
 # ─────────────────────────────────────────
 _repay_creds_cache: Optional[Dict[str, str]] = None
@@ -1097,6 +1239,63 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         )
         if not card:
             return _json_response(403, {"error": "card_not_yours"})
+        last4 = "".join(ch for ch in (card.get("card_number") or "") if ch.isdigit())[-4:]
+
+        # ── Primary path: v2 CustomerPortal/CreditCardPayment ──
+        # Uses the loan's default funding method — no cardId in the
+        # body — which sidesteps v1 PostCustomerLoanPayment's
+        # NullReferenceException when a card record lacks a Repay
+        # token. Three-step flow: AuthenticateCognito (exchange the
+        # customer's Cognito JWT for a Vergent v2 token) → fetch
+        # next paymentId from the loan's payment schedule →
+        # POST CreditCardPayment.
+        customer_token = _get_customer_v2_token(event)
+        if customer_token:
+            payment_id = _get_next_payment_id(customer_token, hdr_id)
+            if payment_id:
+                v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
+                    customer_token, hdr_id, payment_id, round(amount_num, 2),
+                )
+                if v2_status in (200, 201):
+                    refreshed = _fetch_active_loan(cid)
+                    new_balance = (
+                        refreshed.get("balance") if refreshed else None
+                    )
+                    confirmation = (
+                        v2_parsed.get("scheduleDate")
+                        if isinstance(v2_parsed, dict) else None
+                    ) or now_iso
+                    log.info(
+                        "v2 payment success cid=%s loan_id=%s amount=%s "
+                        "last4=%s confirmation=%s",
+                        cid, loan_id, amount_num, last4, confirmation,
+                    )
+                    return _json_response(200, {
+                        "success": True,
+                        "confirmationId": str(confirmation),
+                        "transactionId": None,
+                        "amount": round(amount_num, 2),
+                        "last4": last4,
+                        "paymentMethod": "card",
+                        "newBalance": new_balance,
+                        "via": "v2",
+                    })
+                log.warning(
+                    "v2 CreditCardPayment failed status=%s raw=%s "
+                    "— falling back to v1",
+                    v2_status, (v2_raw or "")[:300],
+                )
+            else:
+                log.warning(
+                    "v2 PaymentSchedule did not yield a paymentId for "
+                    "loan=%s — falling back to v1", hdr_id,
+                )
+        else:
+            log.warning(
+                "v2 customer-token exchange failed — falling back to v1"
+            )
+
+        # ── Fallback path: v1 PostCustomerLoanPayment ──
         # Pre-flight: bail early if the card has no payment-processor
         # link. Without a card_ref / card_account_guid / card_guid,
         # Vergent's PostCustomerLoanPayment crashes with a server-side
@@ -1125,7 +1324,6 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
                     "Please contact us at (747) 270-7121 so we can resolve this."
                 ),
             })
-        last4 = "".join(ch for ch in (card.get("card_number") or "") if ch.isdigit())[-4:]
         method_obj = {"Type": "Card", "CardId": int(card_id)}
     elif pay_method == "bank":
         bank_id = body.get("bankId")
