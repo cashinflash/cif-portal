@@ -249,7 +249,8 @@ def _apim_call(method: str, path: str, *,
 # Repay token. Auth is a v2 customer session token obtained by
 # exchanging the customer's Cognito JWT via AuthenticateCognito.
 
-def _get_customer_v2_token(event: Dict[str, Any]) -> Optional[str]:
+def _get_customer_v2_token(event: Dict[str, Any],
+                           trail: Optional[list] = None) -> Optional[str]:
     """Exchange the request's Cognito JWT for a Vergent v2 customer token.
 
     The customer's Cognito ID token is in the request's Authorization
@@ -257,11 +258,14 @@ def _get_customer_v2_token(event: Dict[str, Any]) -> Optional[str]:
     Send it to v2 AuthenticateCognito to get back a Vergent customer
     session token usable for v2 CustomerPortal endpoints.
 
-    Returns the token string, or None if the exchange fails.
+    Returns the token string, or None if the exchange fails. If
+    `trail` is provided, append a step-result dict for diagnosis.
     """
+    def _record(step_outcome: Dict[str, Any]) -> None:
+        if trail is not None:
+            trail.append(step_outcome)
+
     headers = event.get("headers") or {}
-    # Normalize header name (HTTP API can deliver lowercase or
-    # mixed-case depending on client).
     auth_header = ""
     for k in ("authorization", "Authorization"):
         if k in headers and headers[k]:
@@ -270,11 +274,13 @@ def _get_customer_v2_token(event: Dict[str, Any]) -> Optional[str]:
     jwt = auth_header.replace("Bearer ", "").replace("bearer ", "").strip()
     if not jwt:
         log.warning("v2 token exchange: no Authorization header on request")
+        _record({"step": "auth", "status": 0, "note": "no_auth_header"})
         return None
 
     creds = _get_creds()
     if not creds:
         log.warning("v2 token exchange: vergent creds not loaded")
+        _record({"step": "auth", "status": 0, "note": "no_creds"})
         return None
     api_key = creds.get("xApiKey", "")
 
@@ -288,16 +294,29 @@ def _get_customer_v2_token(event: Dict[str, Any]) -> Optional[str]:
     if status != 200 or not isinstance(parsed, dict):
         log.warning("v2 AuthenticateCognito failed: status=%s raw=%s",
                     status, (raw or "")[:300])
+        _record({
+            "step": "auth",
+            "status": status,
+            "rawHead": (raw or "")[:200],
+        })
         return None
     tok = parsed.get("token")
     if isinstance(tok, str) and tok.strip():
         log.info("v2 AuthenticateCognito ok: token_len=%d", len(tok))
+        _record({
+            "step": "auth", "status": 200, "tokenLen": len(tok.strip()),
+        })
         return tok.strip()
     log.warning("v2 AuthenticateCognito returned no token: %r", parsed)
+    _record({
+        "step": "auth", "status": 200, "note": "no_token_in_response",
+        "responseKeys": sorted(parsed.keys()),
+    })
     return None
 
 
-def _get_next_payment_id(customer_token: str, loan_id: int) -> Optional[int]:
+def _get_next_payment_id(customer_token: str, loan_id: int,
+                         trail: Optional[list] = None) -> Optional[int]:
     """Fetch the next scheduled payment's id for a loan via v2.
 
     `source` query param is undocumented for our tenant — probe a few
@@ -309,6 +328,7 @@ def _get_next_payment_id(customer_token: str, loan_id: int) -> Optional[int]:
         "x-api-key": api_key,
         "Authorization": f"Bearer {customer_token}",
     }
+    probe_results = []
     for source in ("loan", "Loan", "1", "customer", "Customer"):
         url = (
             f"{APIM_BASE}/api/CustomerPortal/Loans/{loan_id}/"
@@ -317,6 +337,11 @@ def _get_next_payment_id(customer_token: str, loan_id: int) -> Optional[int]:
         status, parsed, raw = _http(url, "GET", headers=h)
         log.info("v2 PaymentSchedule probe loan=%s source=%s status=%s",
                  loan_id, source, status)
+        probe_results.append({
+            "source": source,
+            "status": status,
+            "rawHead": (raw or "")[:120],
+        })
         if status != 200:
             continue
 
@@ -340,6 +365,12 @@ def _get_next_payment_id(customer_token: str, loan_id: int) -> Optional[int]:
             if pid:
                 log.info("v2 PaymentSchedule found paymentId=%s via %s",
                          pid, source)
+                if trail is not None:
+                    trail.append({
+                        "step": "schedule", "status": 200,
+                        "source": source, "paymentId": pid,
+                        "probes": probe_results,
+                    })
                 return pid
         elif isinstance(parsed, dict):
             for key in ("payments", "Payments", "schedule", "Schedule",
@@ -350,9 +381,20 @@ def _get_next_payment_id(customer_token: str, loan_id: int) -> Optional[int]:
                     if pid:
                         log.info("v2 PaymentSchedule found paymentId=%s "
                                  "via %s.%s", pid, source, key)
+                        if trail is not None:
+                            trail.append({
+                                "step": "schedule", "status": 200,
+                                "source": source, "paymentId": pid,
+                                "wrapKey": key, "probes": probe_results,
+                            })
                         return pid
     log.warning("v2 PaymentSchedule: no paymentId found across all "
                 "probed sources for loan=%s", loan_id)
+    if trail is not None:
+        trail.append({
+            "step": "schedule", "status": 0, "note": "no_paymentId",
+            "probes": probe_results,
+        })
     return None
 
 
@@ -1249,13 +1291,19 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         # customer's Cognito JWT for a Vergent v2 token) → fetch
         # next paymentId from the loan's payment schedule →
         # POST CreditCardPayment.
-        customer_token = _get_customer_v2_token(event)
+        v2_trail: list = []
+        customer_token = _get_customer_v2_token(event, trail=v2_trail)
         if customer_token:
-            payment_id = _get_next_payment_id(customer_token, hdr_id)
+            payment_id = _get_next_payment_id(customer_token, hdr_id,
+                                              trail=v2_trail)
             if payment_id:
                 v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
                     customer_token, hdr_id, payment_id, round(amount_num, 2),
                 )
+                v2_trail.append({
+                    "step": "charge", "status": v2_status,
+                    "rawHead": (v2_raw or "")[:200],
+                })
                 if v2_status in (200, 201):
                     refreshed = _fetch_active_loan(cid)
                     new_balance = (
@@ -1323,6 +1371,7 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
                     "This card needs to be set up before it can be charged. "
                     "Please contact us at (747) 270-7121 so we can resolve this."
                 ),
+                "v2Trail": v2_trail,
             })
         method_obj = {"Type": "Card", "CardId": int(card_id)}
     elif pay_method == "bank":
