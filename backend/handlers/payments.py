@@ -1399,17 +1399,27 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     else:
         return _json_response(400, {"error": "method_invalid"})
 
+    # Ensure the v1 service token has been fetched so loans._v1_user_id
+    # is populated (it's set when /api/authenticate responds). Without
+    # UserId in the PaymentInfo body, Vergent's v1 controller crashes
+    # at line 3413 with NullReferenceException — confirmed empirically
+    # against admin-charged cards that nonetheless fail our charge.
+    _get_v1_token()
+    from handlers import loans as _loans
+    user_id = _loans._v1_user_id or 0
+
     charge_body = {
         "CompanyId": VERGENT_COMPANY_ID,
         "StoreId": int(store_id) if store_id else 0,
+        "UserId": int(user_id),
         "HeaderId": hdr_id,
         "PaymentDate": now_iso,
         "PaymentAmount": round(amount_num, 2),
         "PaymentMethod": method_obj,
     }
 
-    log.info("payment attempt cid=%s method=%s loan_id=%s last4=%s amount=%s",
-             cid, pay_method, loan_id, last4, amount_num)
+    log.info("payment attempt cid=%s user_id=%s method=%s loan_id=%s last4=%s amount=%s",
+             cid, user_id, pay_method, loan_id, last4, amount_num)
 
     status, charge, raw = _v1_request("POST", "/V1/PostCustomerLoanPayment", body=charge_body)
 
