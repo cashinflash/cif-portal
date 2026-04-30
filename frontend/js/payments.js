@@ -382,6 +382,7 @@
       card_declined: 'Card was declined. Try a different card or call (747) 270-7121.',
       card_expired: 'That card has expired. Add a new one at a store.',
       card_not_yours: "We couldn't find that card on your account.",
+      card_not_chargeable: 'This card needs to be set up before it can be charged. Please call us at (747) 270-7121 so we can fix it.',
       amount_invalid: 'Amount must be greater than $0 and no more than your balance.',
       loan_not_yours: "We couldn't post this payment to your loan. Call (747) 270-7121.",
       upstream_unavailable: "Our payment system is temporarily unavailable. Please try again in a minute.",

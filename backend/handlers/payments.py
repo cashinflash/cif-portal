@@ -1097,6 +1097,34 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         )
         if not card:
             return _json_response(403, {"error": "card_not_yours"})
+        # Pre-flight: bail early if the card has no payment-processor
+        # link. Without a card_ref / card_account_guid / card_guid,
+        # Vergent's PostCustomerLoanPayment crashes with a server-side
+        # NullReferenceException when it tries to forward to Repay.
+        # Surface a friendlier error to the customer instead of a 500.
+        has_token = (
+            (card.get("card_ref") or "").strip()
+            or (card.get("card_account_guid") or "").strip()
+            or (card.get("card_guid") or "").strip()
+        )
+        proc = (card.get("CardProcessor") or card.get("card_processor_type") or "").strip()
+        proc_set = bool(proc) and proc != "None"
+        if not has_token and not proc_set:
+            log.warning(
+                "payment preflight: card not chargeable cid=%s card_id=%s "
+                "card_ref=%r card_guid=%r processor=%r",
+                cid, card_id,
+                card.get("card_ref"), card.get("card_guid"),
+                card.get("CardProcessor"),
+            )
+            return _json_response(400, {
+                "success": False,
+                "error": "card_not_chargeable",
+                "message": (
+                    "This card needs to be set up before it can be charged. "
+                    "Please contact us at (747) 270-7121 so we can resolve this."
+                ),
+            })
         last4 = "".join(ch for ch in (card.get("card_number") or "") if ch.isdigit())[-4:]
         method_obj = {"Type": "Card", "CardId": int(card_id)}
     elif pay_method == "bank":
