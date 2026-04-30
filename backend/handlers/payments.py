@@ -1301,19 +1301,35 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         # Uses the loan's default funding method — no cardId in the
         # body — which sidesteps v1 PostCustomerLoanPayment's
         # NullReferenceException when a card record lacks a Repay
-        # token. Two-step flow with our service APIM token (Vergent's
-        # customer-JWT path via AuthenticateCognito is broken for our
-        # tenant): fetch next paymentId from the loan's payment
-        # schedule → POST CreditCardPayment.
+        # token. Service APIM auth (customer-JWT path is broken
+        # for our tenant per docs/CLAUDE.md).
+        #
+        # paymentId strategy: probe a few candidate values until one
+        # returns a 2xx. Swagger example shows paymentId=0 as the
+        # default; PaymentSchedule lookup returned 500 "Sequence
+        # contains no elements" for our test loan (likely no future
+        # scheduled installments), so we try 0 first. Fall back to
+        # the schedule lookup, then try 1 as a last resort.
         v2_trail: list = []
-        payment_id = _get_next_payment_id(hdr_id, trail=v2_trail)
-        if payment_id:
+        candidate_payment_ids: list = []
+        # Always try 0 first — Vergent swagger default + treats it
+        # as "ad-hoc payment, not tied to a scheduled installment".
+        candidate_payment_ids.append(("zero", 0))
+        # Then try a real paymentId from the schedule, if available.
+        sched_pid = _get_next_payment_id(hdr_id, trail=v2_trail)
+        if sched_pid:
+            candidate_payment_ids.append(("schedule", int(sched_pid)))
+        # Last resort.
+        candidate_payment_ids.append(("one", 1))
+
+        v2_succeeded = False
+        for label, pid in candidate_payment_ids:
             v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
-                hdr_id, payment_id, round(amount_num, 2),
+                hdr_id, pid, round(amount_num, 2),
             )
             v2_trail.append({
-                "step": "charge", "status": v2_status,
-                "rawHead": (v2_raw or "")[:200],
+                "step": "charge", "paymentIdLabel": label, "paymentId": pid,
+                "status": v2_status, "rawHead": (v2_raw or "")[:200],
             })
             if v2_status in (200, 201):
                 refreshed = _fetch_active_loan(cid)
@@ -1326,9 +1342,11 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
                 ) or now_iso
                 log.info(
                     "v2 payment success cid=%s loan_id=%s amount=%s "
-                    "last4=%s confirmation=%s",
+                    "last4=%s confirmation=%s paymentIdLabel=%s pid=%s",
                     cid, loan_id, amount_num, last4, confirmation,
+                    label, pid,
                 )
+                v2_succeeded = True
                 return _json_response(200, {
                     "success": True,
                     "confirmationId": str(confirmation),
@@ -1340,14 +1358,13 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
                     "via": "v2",
                 })
             log.warning(
-                "v2 CreditCardPayment failed status=%s raw=%s "
-                "— falling back to v1",
-                v2_status, (v2_raw or "")[:300],
+                "v2 CreditCardPayment failed label=%s pid=%s status=%s raw=%s",
+                label, pid, v2_status, (v2_raw or "")[:300],
             )
-        else:
+        if not v2_succeeded:
             log.warning(
-                "v2 PaymentSchedule did not yield a paymentId for "
-                "loan=%s — falling back to v1", hdr_id,
+                "v2 CreditCardPayment exhausted all candidates "
+                "— falling back to v1 for loan=%s", hdr_id,
             )
 
         # ── Fallback path: v1 PostCustomerLoanPayment ──
