@@ -407,13 +407,19 @@ def _get_next_payment_id(loan_id: int,
 
 def _v2_credit_card_payment(loan_id: int,
                             payment_id: int,
-                            amount: float) -> tuple:
+                            amount: float,
+                            card_id: int) -> tuple:
     """POST /api/CustomerPortal/Loans/Payments/CreditCardPayment.
 
     Uses the service APIM token (same as _apim_call) — Vergent's
     customer-JWT auth (AuthenticateCognito) is broken for our tenant
-    so we use the service-token route. Vergent looks up the loan's
-    default funding method from loanId in the body.
+    so we use the service-token route.
+
+    NOTE: the published swagger schema for CreditCardPaymentRequestModel
+    omits `cardId`, but Vergent's actual endpoint rejects requests
+    without it ("cardId must be a non-default value"). Confirmed
+    empirically against our tenant — adjust here if Vergent updates
+    their schema.
 
     Returns (status, parsed_body, raw_text). On 200, parsed_body is
     expected to be `{ success: true, scheduleDate: "..." }`.
@@ -429,6 +435,7 @@ def _v2_credit_card_payment(loan_id: int,
         "paymentId": int(payment_id),
         "amountDue": float(amount),
         "isInRescindPeriod": False,
+        "cardId": int(card_id),
     }
     h = {
         "Content-Type": "application/json",
@@ -1298,74 +1305,52 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         last4 = "".join(ch for ch in (card.get("card_number") or "") if ch.isdigit())[-4:]
 
         # ── Primary path: v2 CustomerPortal/CreditCardPayment ──
-        # Uses the loan's default funding method — no cardId in the
-        # body — which sidesteps v1 PostCustomerLoanPayment's
-        # NullReferenceException when a card record lacks a Repay
-        # token. Service APIM auth (customer-JWT path is broken
-        # for our tenant per docs/CLAUDE.md).
-        #
-        # paymentId strategy: probe a few candidate values until one
-        # returns a 2xx. Swagger example shows paymentId=0 as the
-        # default; PaymentSchedule lookup returned 500 "Sequence
-        # contains no elements" for our test loan (likely no future
-        # scheduled installments), so we try 0 first. Fall back to
-        # the schedule lookup, then try 1 as a last resort.
+        # Service APIM auth (customer-JWT path via AuthenticateCognito
+        # is broken for our tenant per docs/CLAUDE.md). Vergent's
+        # published swagger schema for the request body omits
+        # `cardId`, but the endpoint actually requires it (confirmed
+        # empirically by an "ArgumentException: cardId must be a
+        # non-default value" 400 response when we omitted it).
+        # paymentId=0 is accepted for ad-hoc (non-scheduled-installment)
+        # payments — confirmed by the same error path passing the
+        # paymentId check before the cardId check.
         v2_trail: list = []
-        candidate_payment_ids: list = []
-        # Always try 0 first — Vergent swagger default + treats it
-        # as "ad-hoc payment, not tied to a scheduled installment".
-        candidate_payment_ids.append(("zero", 0))
-        # Then try a real paymentId from the schedule, if available.
-        sched_pid = _get_next_payment_id(hdr_id, trail=v2_trail)
-        if sched_pid:
-            candidate_payment_ids.append(("schedule", int(sched_pid)))
-        # Last resort.
-        candidate_payment_ids.append(("one", 1))
-
-        v2_succeeded = False
-        for label, pid in candidate_payment_ids:
-            v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
-                hdr_id, pid, round(amount_num, 2),
+        v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
+            hdr_id, 0, round(amount_num, 2), int(card_id),
+        )
+        v2_trail.append({
+            "step": "charge", "paymentId": 0, "cardId": int(card_id),
+            "status": v2_status, "rawHead": (v2_raw or "")[:200],
+        })
+        if v2_status in (200, 201):
+            refreshed = _fetch_active_loan(cid)
+            new_balance = (
+                refreshed.get("balance") if refreshed else None
             )
-            v2_trail.append({
-                "step": "charge", "paymentIdLabel": label, "paymentId": pid,
-                "status": v2_status, "rawHead": (v2_raw or "")[:200],
+            confirmation = (
+                v2_parsed.get("scheduleDate")
+                if isinstance(v2_parsed, dict) else None
+            ) or now_iso
+            log.info(
+                "v2 payment success cid=%s loan_id=%s amount=%s "
+                "last4=%s confirmation=%s",
+                cid, loan_id, amount_num, last4, confirmation,
+            )
+            return _json_response(200, {
+                "success": True,
+                "confirmationId": str(confirmation),
+                "transactionId": None,
+                "amount": round(amount_num, 2),
+                "last4": last4,
+                "paymentMethod": "card",
+                "newBalance": new_balance,
+                "via": "v2",
             })
-            if v2_status in (200, 201):
-                refreshed = _fetch_active_loan(cid)
-                new_balance = (
-                    refreshed.get("balance") if refreshed else None
-                )
-                confirmation = (
-                    v2_parsed.get("scheduleDate")
-                    if isinstance(v2_parsed, dict) else None
-                ) or now_iso
-                log.info(
-                    "v2 payment success cid=%s loan_id=%s amount=%s "
-                    "last4=%s confirmation=%s paymentIdLabel=%s pid=%s",
-                    cid, loan_id, amount_num, last4, confirmation,
-                    label, pid,
-                )
-                v2_succeeded = True
-                return _json_response(200, {
-                    "success": True,
-                    "confirmationId": str(confirmation),
-                    "transactionId": None,
-                    "amount": round(amount_num, 2),
-                    "last4": last4,
-                    "paymentMethod": "card",
-                    "newBalance": new_balance,
-                    "via": "v2",
-                })
-            log.warning(
-                "v2 CreditCardPayment failed label=%s pid=%s status=%s raw=%s",
-                label, pid, v2_status, (v2_raw or "")[:300],
-            )
-        if not v2_succeeded:
-            log.warning(
-                "v2 CreditCardPayment exhausted all candidates "
-                "— falling back to v1 for loan=%s", hdr_id,
-            )
+        log.warning(
+            "v2 CreditCardPayment failed status=%s raw=%s "
+            "— falling back to v1",
+            v2_status, (v2_raw or "")[:300],
+        )
 
         # ── Fallback path: v1 PostCustomerLoanPayment ──
         # Pre-flight: bail early if the card has no payment-processor
