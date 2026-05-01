@@ -383,6 +383,13 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
                  hdr.get("hdr_id"),
                  sorted(hdr.keys()) if isinstance(hdr, dict) else None,
                  sorted(detail.keys()) if isinstance(detail, dict) else None)
+        # Status probe — figure out which Vergent field carries the
+        # admin-UI "Paid Off" vs "Deleted" distinction so we can
+        # tighten _is_visible_loan precisely.
+        log.info("loan-status probe hdr_id=%s isOutstanding=%s statusId=%s "
+                 "Status=%r SubStatus=%r",
+                 hdr.get("hdr_id"), is_outstanding, status_id,
+                 hdr.get("Status"), hdr.get("SubStatus"))
 
     return {
         "id": hdr.get("hdr_id"),
@@ -390,6 +397,8 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "loanClass": hdr.get("LoanModelName") or hdr.get("LoanTypeName", "").split(".")[-1] or None,
         "status": "Current" if is_outstanding else (hdr.get("SubStatus") or "Closed"),
         "statusId": status_id,
+        "subStatus": hdr.get("SubStatus"),
+        "rawStatus": hdr.get("Status"),
         "isOutstanding": is_outstanding,
         "principal": loan_amount,
         "balance": payoff if payoff is not None else amount_due,
@@ -419,17 +428,29 @@ def _is_visible_loan(loan: Dict[str, Any]) -> bool:
 
     Vergent stores loans that were never real (status "Deleted",
     cancelled application records, etc.) alongside actual paid-off and
-    outstanding loans. Customers should only see:
-      - outstanding (current) loans
-      - paid-off loans
-    Everything else (Deleted, Cancelled, etc.) is hidden everywhere —
-    history page, dashboard list, activity, documents.
+    outstanding loans. We want to hide ONLY those — anything else
+    (outstanding, paid off, charged off, closed) is real loan history.
+
+    Vergent stores the disqualifying status in different fields
+    depending on loan type / age, so we check each. Anything containing
+    "delet", "cancel", or "void" anywhere in any status field gets
+    hidden.
     """
     if loan.get("isOutstanding"):
         return True
-    status = (loan.get("status") or "").strip().lower()
-    # "Paid Off", "Paid In Full", "Paid" — match anything containing "paid".
-    return "paid" in status
+    blocked_terms = ("delet", "cancel", "void")
+    candidates = (
+        loan.get("status"),
+        loan.get("subStatus"),
+        loan.get("rawStatus"),
+    )
+    for raw in candidates:
+        if not raw:
+            continue
+        s = str(raw).strip().lower()
+        if any(term in s for term in blocked_terms):
+            return False
+    return True
 
 
 def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
