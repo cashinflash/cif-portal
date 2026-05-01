@@ -395,7 +395,11 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "id": hdr.get("hdr_id"),
         "publicId": detail.get("PublicLoanId") or hdr.get("PublicLoanId"),
         "loanClass": hdr.get("LoanModelName") or hdr.get("LoanTypeName", "").split(".")[-1] or None,
-        "status": "Current" if is_outstanding else (hdr.get("SubStatus") or "Closed"),
+        "status": (
+            "Current" if is_outstanding
+            else (hdr.get("SubStatus")
+                  or ("Paid Off" if status_id in (3,) else "Closed"))
+        ),
         "statusId": status_id,
         "subStatus": hdr.get("SubStatus"),
         "rawStatus": hdr.get("Status"),
@@ -423,34 +427,49 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# Vergent v1 statusId values we treat as "real, paid-off" loan history
+# that the customer should see. Discovered empirically via the DevTools
+# probe on Harut's account 2026-05-01:
+#   statusId 3  -> Paid Off    (the 1 loan he actually paid off)
+#   statusId 10 -> Deleted     (the 2 ghost application records)
+# Vergent's text status fields (Status, SubStatus) are NULL for these
+# records so the only reliable distinguishing field is statusId.
+# Add additional paid-off variants here as we encounter them (e.g. if
+# Vergent uses a separate code for "Paid In Full" or "Settled").
+_PAID_OFF_STATUS_IDS = {3}
+
+
 def _is_visible_loan(loan: Dict[str, Any]) -> bool:
     """Filter Vergent's raw loan list down to what a customer should see.
 
-    Vergent stores loans that were never real (status "Deleted",
-    cancelled application records, etc.) alongside actual paid-off and
-    outstanding loans. We want to hide ONLY those — anything else
-    (outstanding, paid off, charged off, closed) is real loan history.
-
-    Vergent stores the disqualifying status in different fields
-    depending on loan type / age, so we check each. Anything containing
-    "delet", "cancel", or "void" anywhere in any status field gets
-    hidden.
+    Customers should see:
+      - outstanding (current) loans
+      - paid-off loans (Vergent statusId in _PAID_OFF_STATUS_IDS)
+      - any loan with explicit "paid" text in a status field
+        (forward-compat fallback for records where Vergent fills
+        in Status/SubStatus instead of leaving them null)
+    Everything else (Deleted, Cancelled, ghost application records,
+    etc.) is hidden everywhere — history page, dashboard list,
+    activity, documents.
     """
     if loan.get("isOutstanding"):
         return True
-    blocked_terms = ("delet", "cancel", "void")
-    candidates = (
-        loan.get("status"),
-        loan.get("subStatus"),
-        loan.get("rawStatus"),
-    )
+
+    sid = loan.get("statusId")
+    try:
+        if int(sid) in _PAID_OFF_STATUS_IDS:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    # Forward-compat: if any status text field explicitly says "paid",
+    # show the loan even if its statusId isn't in our known set.
+    candidates = (loan.get("status"), loan.get("subStatus"), loan.get("rawStatus"))
     for raw in candidates:
-        if not raw:
-            continue
-        s = str(raw).strip().lower()
-        if any(term in s for term in blocked_terms):
-            return False
-    return True
+        if raw and "paid" in str(raw).strip().lower():
+            return True
+
+    return False
 
 
 def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
