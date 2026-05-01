@@ -1,5 +1,5 @@
 """
-Server-side MFA login flow (email via SES, SMS via Vergent).
+Server-side MFA login flow (email via SES, SMS via Telnyx Verify).
 
 Routes (no JWT auth — these ARE the auth endpoints):
   POST /api/auth/login        {email, password}
@@ -8,10 +8,10 @@ Routes (no JWT auth — these ARE the auth endpoints):
 
 Delivery channels:
   email  -> SES SendEmail with a 6-digit code we generate ourselves
-  sms    -> Vergent POST /api/Communication/RequestPinByText
-            (Vergent generates + delivers; we verify via /VerifyPin)
-  This sidesteps SNS sandbox and reuses the SMS pipeline Vergent already
-  uses to text customers about payment reminders etc.
+  sms    -> Telnyx Verify (start + check). Telnyx generates the code and
+            texts it from our toll-free number; we just record that the
+            session is in a verify state so /verify-code routes the
+            submitted code back to Telnyx for validation.
 
 Session state (DynamoDB, 5-min TTL):
   - For our own code (email): we store sha256(code) in `codeHash` and
@@ -53,8 +53,7 @@ from typing import Any, Dict, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
-from handlers import twilio_sms     # raw Messages API (kept for future non-OTP sends)
-from handlers import twilio_verify  # Verify (turnkey OTP) — current SMS channel
+from handlers import telnyx_verify  # Verify (turnkey OTP) — current SMS channel
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -254,8 +253,8 @@ def _get_vergent_phone(customer_id: str) -> Optional[str]:
 
 
 # (Vergent SMS helpers removed — Communication/RequestPinByText returned
-# SKIP for every combination we tried. SMS now goes through Twilio, see
-# handlers/twilio_sms.py.)
+# SKIP for every combination we tried. SMS now goes through Telnyx Verify,
+# see handlers/telnyx_verify.py.)
 
 
 # ─────────────────────────────────────────
@@ -361,8 +360,8 @@ def _arm_our_code(session_id: str, code_hash: str, channel: str) -> None:
 
 
 def _arm_verify_sms(session_id: str) -> None:
-    """Mark the session as 'Twilio Verify is now tracking this phone'. No
-    code hash on our side — Twilio stores + validates the code."""
+    """Mark the session as 'Telnyx Verify is now tracking this phone'. No
+    code hash on our side — Telnyx stores + validates the code."""
     now = int(time.time())
     ddb.update_item(
         TableName=TABLE, Key={"sessionId": {"S": session_id}},
@@ -506,8 +505,8 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     channels = [{"key": "email", "label": "Email", "target": _mask_email(email)}]
-    # SMS delivery goes through Twilio using the Vergent-on-file phone.
-    # We surface the SMS option whenever we have a phone — if Twilio creds
+    # SMS delivery goes through Telnyx Verify using the Vergent-on-file phone.
+    # We surface the SMS option whenever we have a phone — if Telnyx creds
     # aren't yet configured, /send-code returns a clean delivery_failed_sms
     # rather than hiding the option entirely.
     if phone_digits:
@@ -545,15 +544,15 @@ def _send_code(event: Dict[str, Any]) -> Dict[str, Any]:
             return _resp(502, body)
         return _resp(200, {"ok": True, "channel": "email", "expiresInSec": CODE_TTL})
 
-    # channel == sms — Twilio Verify generates, delivers, and validates the
+    # channel == sms — Telnyx Verify generates, delivers, and validates the
     # code. We don't store the code; we just mark the session so /verify-code
-    # knows to route the submitted code to Verify's /VerificationCheck.
+    # knows to route the submitted code back to Telnyx for validation.
     phone = s.get("phone")
     if not phone:
         return _resp(400, {"error": "no_phone_on_file"})
-    ok, detail = twilio_verify.start_sms(to=phone)
+    ok, detail = telnyx_verify.start_sms(to=phone)
     if not ok:
-        log.warning("twilio verify start failed: %s", detail)
+        log.warning("telnyx verify start failed: %s", detail)
         return _resp(502, {"error": "delivery_failed_sms", "detail": detail})
     _arm_verify_sms(session_id)
     return _resp(200, {"ok": True, "channel": "sms", "expiresInSec": CODE_TTL})
@@ -575,7 +574,7 @@ def _verify_code(event: Dict[str, Any]) -> Dict[str, Any]:
         ok = hmac.compare_digest(_hash_code(code), s.get("codeHash") or "")
     elif mode == "verify_sms":
         phone = s.get("phone") or ""
-        approved, status_str = twilio_verify.check(phone, code)
+        approved, status_str = telnyx_verify.check(phone, code)
         if status_str == "expired":
             _delete_session(session_id)
             return _resp(401, {"error": "code_expired"})

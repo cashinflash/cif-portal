@@ -60,7 +60,7 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED"
           echo "loans=$(echo "$CHANGED"     | grep -qE '^backend/handlers/loans\.py$'                          && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          echo "auth_mfa=$(echo "$CHANGED"  | grep -qE '^backend/handlers/(auth_mfa|twilio_verify|twilio_sms)\.py$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "auth_mfa=$(echo "$CHANGED"  | grep -qE '^backend/handlers/(auth_mfa|telnyx_verify|twilio_verify|twilio_sms)\.py$' && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "search=$(echo "$CHANGED"    | grep -qE '^backend/handlers/search\.py$'                          && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "pre_signup=$(echo "$CHANGED"| grep -qE '^backend/handlers/pre_signup\.py$'                      && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "payments=$(echo "$CHANGED"  | grep -qE '^backend/handlers/payments\.py$'                          && echo true || echo false)" >> "$GITHUB_OUTPUT"

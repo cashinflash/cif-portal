@@ -1,0 +1,130 @@
+name: Provision Telnyx MFA
+
+# One-shot / re-runnable provisioning for the Telnyx Verify integration
+# used by the auth-mfa Lambda. Idempotent: run it whenever you rotate
+# the API key or change the Verify Profile, and it'll just update the
+# secret + Lambda env in place.
+#
+# Steps:
+#  1. Store/refresh apiKey + verifyProfileId + fromNumber in
+#     AWS Secrets Manager at cif-portal/telnyx/credentials.
+#  2. Add an IAM policy on the auth-mfa Lambda role granting
+#     secretsmanager:GetSecretValue on that secret.
+#  3. Set TELNYX_SECRET_ARN on the Lambda's environment (preserving
+#     other env vars).
+#
+# Inputs are masked in logs via ::add-mask::, but they do briefly
+# travel through the workflow_dispatch URL (visible in the GitHub
+# Actions audit log). For rotations after first setup, prefer
+# updating the secret directly via the AWS console.
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_key:
+        description: Telnyx API key (starts with KEY...)
+        required: true
+      verify_profile_id:
+        description: Telnyx Verify Profile ID (UUID)
+        required: true
+      from_number:
+        description: Toll-free number in +1XXXXXXXXXX format (informational; Telnyx picks via Verify Profile)
+        required: true
+        default: "+18889999859"
+
+env:
+  AWS_REGION: us-east-1
+  SECRET_NAME: cif-portal/telnyx/credentials
+  FN: cif-portal-auth-mfa-dev
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Mask sensitive inputs
+        env:
+          AK: ${{ github.event.inputs.api_key }}
+          VP: ${{ github.event.inputs.verify_profile_id }}
+        run: |
+          echo "::add-mask::$AK"
+          echo "::add-mask::$VP"
+
+      - name: Store/refresh secret
+        env:
+          AK: ${{ github.event.inputs.api_key }}
+          VP: ${{ github.event.inputs.verify_profile_id }}
+          FROM: ${{ github.event.inputs.from_number }}
+        run: |
+          set -e
+          PAYLOAD=$(jq -n \
+            --arg ak "$AK" \
+            --arg vp "$VP" \
+            --arg fr "$FROM" \
+            '{apiKey: $ak, verifyProfileId: $vp, fromNumber: $fr}')
+
+          if aws secretsmanager describe-secret --secret-id "$SECRET_NAME" >/dev/null 2>&1; then
+            aws secretsmanager put-secret-value \
+              --secret-id "$SECRET_NAME" \
+              --secret-string "$PAYLOAD" >/dev/null
+            echo "Updated existing secret $SECRET_NAME"
+          else
+            aws secretsmanager create-secret \
+              --name "$SECRET_NAME" \
+              --description "Telnyx Verify credentials for the cif-portal auth-mfa Lambda" \
+              --secret-string "$PAYLOAD" >/dev/null
+            echo "Created secret $SECRET_NAME"
+          fi
+
+      - name: Grant secret read to auth-mfa Lambda role
+        run: |
+          set -e
+          ARN=$(aws secretsmanager describe-secret \
+            --secret-id "$SECRET_NAME" --query ARN --output text)
+          echo "Secret ARN: $ARN"
+
+          ROLE_ARN=$(aws lambda get-function-configuration \
+            --function-name "$FN" --query 'Role' --output text)
+          ROLE_NAME=$(echo "$ROLE_ARN" | awk -F/ '{print $NF}')
+          echo "Lambda role: $ROLE_NAME"
+
+          aws iam put-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name auth-mfa-read-telnyx-secret \
+            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"$ARN\"}]}"
+          echo "IAM policy auth-mfa-read-telnyx-secret attached to $ROLE_NAME."
+
+          # Set TELNYX_SECRET_ARN on the Lambda env (preserving existing vars).
+          EXISTING_ENV=$(aws lambda get-function-configuration \
+            --function-name "$FN" \
+            --query 'Environment.Variables' --output json 2>/dev/null)
+          if [ "$EXISTING_ENV" = "null" ] || [ -z "$EXISTING_ENV" ]; then
+            EXISTING_ENV='{}'
+          fi
+          NEW_ENV=$(echo "$EXISTING_ENV" | jq --arg v "$ARN" '. + {TELNYX_SECRET_ARN: $v}')
+          aws lambda update-function-configuration \
+            --function-name "$FN" \
+            --environment "{\"Variables\": $NEW_ENV}" \
+            --no-cli-pager >/dev/null
+          aws lambda wait function-updated --function-name "$FN"
+          echo "Lambda env updated with TELNYX_SECRET_ARN."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Telnyx MFA provisioning"
+            echo ""
+            echo "- Secret: \`$SECRET_NAME\`"
+            echo "- Lambda: \`$FN\`"
+            echo "- IAM policy: \`auth-mfa-read-telnyx-secret\`"
+            echo "- Env var set: \`TELNYX_SECRET_ARN\`"
+            echo ""
+            echo "Next: push any change to \`backend/handlers/telnyx_verify.py\` or \`auth_mfa.py\` to deploy the code, then test SMS login at the portal."
+          } >> "$GITHUB_STEP_SUMMARY"
