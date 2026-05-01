@@ -22,6 +22,11 @@
 import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 
+// Re-deploy 2026-05-01: replaces placeholder code created by
+// provision-doc-pdf.yml with the real handler now that the function
+// exists in AWS. (This comment also serves as the path-filter trigger
+// for deploy-doc-pdf.yml on backend/doc_pdf/**.)
+
 // Reuse the browser across warm invocations — Chromium startup is the
 // slowest part of a render, so amortising it pays off when the Lambda
 // is hit twice in close succession.
