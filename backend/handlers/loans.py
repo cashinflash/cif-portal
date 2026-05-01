@@ -414,13 +414,33 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _is_visible_loan(loan: Dict[str, Any]) -> bool:
+    """Filter Vergent's raw loan list down to what a customer should see.
+
+    Vergent stores loans that were never real (status "Deleted",
+    cancelled application records, etc.) alongside actual paid-off and
+    outstanding loans. Customers should only see:
+      - outstanding (current) loans
+      - paid-off loans
+    Everything else (Deleted, Cancelled, etc.) is hidden everywhere —
+    history page, dashboard list, activity, documents.
+    """
+    if loan.get("isOutstanding"):
+        return True
+    status = (loan.get("status") or "").strip().lower()
+    # "Paid Off", "Paid In Full", "Paid" — match anything containing "paid".
+    return "paid" in status
+
+
 def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
-    """Fetch every loan for a customer (open + closed/paid-off).
+    """Fetch every visible loan for a customer (outstanding + paid-off).
 
     v1's plain `/V1/{cid}/loans` returns open loans only by default. We
     try the broadest endpoint first and fall back, logging which path
     Vergent actually serves so we can simplify later if a tier proves
-    redundant. Returns an empty list if every attempt fails.
+    redundant. Returns an empty list if every attempt fails. Hides
+    loans that were never real (Deleted, Cancelled, etc.) via
+    `_is_visible_loan`.
     """
     candidates = (
         f"/V1/{cid}/loans/all",
@@ -430,8 +450,10 @@ def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
     for path in candidates:
         status, body = _v1_get(path)
         if status == 200 and isinstance(body, list):
-            log.info("v1 loans served by %s count=%s", path, len(body))
-            return [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
+            shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
+            visible = [l for l in shaped if _is_visible_loan(l)]
+            log.info("v1 loans served by %s raw=%d visible=%d", path, len(shaped), len(visible))
+            return visible
         log.info("v1 loans %s status=%s", path, status)
     return []
 
@@ -498,9 +520,13 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     if not shaped:
         return _json_response(200, {"loan": None, "loanCount": 0, "allLoans": []})
 
-    # Pick the first outstanding loan; fall back to most recent by origination date.
+    # The "active loan" card on the dashboard should show only a current
+    # (outstanding) loan. If the customer has none — even if they have
+    # paid-off loans in their history — return loan=null so the dashboard
+    # renders its empty state. The full history (paid-off + outstanding)
+    # is still surfaced via allLoans for the My Loans list and page.
     outstanding = [l for l in shaped if l.get("isOutstanding")]
-    active = outstanding[0] if outstanding else (shaped[0] if shaped else None)
+    active = outstanding[0] if outstanding else None
     return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
 
 
