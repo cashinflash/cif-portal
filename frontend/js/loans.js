@@ -92,6 +92,8 @@
     var year = qs('#footerYear');
     if (year) year.textContent = String(new Date().getFullYear());
 
+    initDocModal();
+
     var params = new URLSearchParams(window.location.search);
     var loanIdParam = params.get('id');
     if (loanIdParam) {
@@ -370,28 +372,43 @@
       meta.appendChild(title);
       meta.appendChild(sub);
 
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'dash-doc-view';
-      btn.textContent = 'View';
-      btn.addEventListener('click', function (e) {
+      var actions = document.createElement('div');
+      actions.className = 'dash-doc-actions';
+
+      var viewBtn = document.createElement('button');
+      viewBtn.type = 'button';
+      viewBtn.className = 'dash-doc-view';
+      viewBtn.textContent = 'View';
+      viewBtn.addEventListener('click', function (e) {
         e.stopPropagation();
-        openDocument(doc, btn);
+        openDocInModal(doc, viewBtn);
       });
 
-      // Whole row is clickable as a fallback if the button is hidden
-      // by any CSS quirk. Clicking anywhere on the row opens the doc.
-      row.addEventListener('click', function () { openDocument(doc, btn); });
+      var dlBtn = document.createElement('button');
+      dlBtn.type = 'button';
+      dlBtn.className = 'dash-doc-download';
+      dlBtn.textContent = 'Download';
+      dlBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        downloadDocument(doc, dlBtn);
+      });
+
+      actions.appendChild(viewBtn);
+      actions.appendChild(dlBtn);
+
+      // Row click = default action (View). Buttons stopPropagation so
+      // nothing fires twice.
+      row.addEventListener('click', function () { openDocInModal(doc, viewBtn); });
       row.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          openDocument(doc, btn);
+          openDocInModal(doc, viewBtn);
         }
       });
 
       row.appendChild(icon);
       row.appendChild(meta);
-      row.appendChild(btn);
+      row.appendChild(actions);
       list.appendChild(row);
     });
     root.appendChild(list);
@@ -404,11 +421,11 @@
       '<p class="dash-loanlist-empty">We couldn’t load documents right now. Please refresh, or call us at <a href="tel:+17472707121">(747) 270-7121</a>.</p>';
   }
 
-  function openDocument(doc, btn) {
-    var orig = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Opening…';
-    fetch(DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download', {
+  // ---------- DOCUMENT VIEWER (MODAL) + DOWNLOAD ----------
+  var _activeBlobUrl = null;  // currently-displayed modal blob — revoked on close
+
+  function fetchDocBlob(doc) {
+    return fetch(DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download', {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': '*/*' },
       credentials: 'omit'
     }).then(function (res) {
@@ -417,33 +434,111 @@
         window.location.replace(LOGIN_URL);
         throw new Error('unauthorized');
       }
-      if (!res.ok) {
-        throw new Error('http ' + res.status);
-      }
+      if (!res.ok) throw new Error('http ' + res.status);
       return res.blob();
-    }).then(function (blob) {
+    });
+  }
+
+  function openDocInModal(doc, btn) {
+    var orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+    fetchDocBlob(doc).then(function (blob) {
+      // Release any previous blob URL still attached to the modal.
+      if (_activeBlobUrl) { URL.revokeObjectURL(_activeBlobUrl); _activeBlobUrl = null; }
       var url = URL.createObjectURL(blob);
-      var w = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!w) {
-        // Pop-up blocked — fall back to a one-shot anchor click.
-        var a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.download = doc.fileName || ('document-' + doc.id + '.pdf');
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+      _activeBlobUrl = url;
+
+      setText(qs('#docModalTitle'), doc.displayName || doc.fileName || 'Document');
+      var dl = qs('#docModalDownload');
+      if (dl) {
+        dl.href = url;
+        dl.download = doc.fileName || ('document-' + doc.id + '.html');
       }
-      // Revoke the blob URL after a delay so the new tab has time to load.
-      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
-      btn.disabled = false;
-      btn.textContent = orig;
+
+      var loading = qs('#docModalLoading');
+      var frame = qs('#docModalFrame');
+      if (loading) loading.hidden = false;
+      if (frame) {
+        frame.hidden = true;
+        frame.onload = function () {
+          if (loading) loading.hidden = true;
+          frame.hidden = false;
+        };
+        frame.src = url;
+      }
+
+      qs('#docModal').hidden = false;
+      document.body.style.overflow = 'hidden';
+
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
     }).catch(function (err) {
       if (err && err.message === 'unauthorized') return;
-      btn.disabled = false;
-      btn.textContent = orig;
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
       alert('Sorry — we couldn’t open that document right now. Please try again, or call (747) 270-7121.');
+    });
+  }
+
+  function closeDocModal() {
+    var modal = qs('#docModal');
+    if (!modal || modal.hidden) return;
+    var frame = qs('#docModalFrame');
+    if (frame) {
+      frame.src = 'about:blank';
+      frame.hidden = true;
+      frame.onload = null;
+    }
+    var loading = qs('#docModalLoading');
+    if (loading) loading.hidden = false;
+    var dl = qs('#docModalDownload');
+    if (dl) { dl.removeAttribute('href'); dl.removeAttribute('download'); }
+    if (_activeBlobUrl) {
+      // Slight delay so the iframe finishes releasing the URL.
+      var u = _activeBlobUrl;
+      _activeBlobUrl = null;
+      setTimeout(function () { URL.revokeObjectURL(u); }, 500);
+    }
+    modal.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  function initDocModal() {
+    var modal = qs('#docModal');
+    if (!modal) return;
+    // Close-control clicks (backdrop, X, anything with data-action="doc-close").
+    modal.addEventListener('click', function (e) {
+      var t = e.target;
+      while (t && t !== modal) {
+        if (t.getAttribute && t.getAttribute('data-action') === 'doc-close') {
+          closeDocModal();
+          return;
+        }
+        t = t.parentNode;
+      }
+    });
+    // ESC key.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !modal.hidden) closeDocModal();
+    });
+  }
+
+  function downloadDocument(doc, btn) {
+    var orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Downloading…'; }
+    fetchDocBlob(doc).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = doc.fileName || ('document-' + doc.id + '.html');
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }).catch(function (err) {
+      if (err && err.message === 'unauthorized') return;
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+      alert('Sorry — we couldn’t download that document right now. Please try again, or call (747) 270-7121.');
     });
   }
 

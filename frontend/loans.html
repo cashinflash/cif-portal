@@ -133,6 +133,28 @@
     </section>
   </main>
 
+  <div class="dash-doc-modal" id="docModal" hidden>
+    <button type="button" class="dash-doc-modal-backdrop" data-action="doc-close" aria-label="Close document"></button>
+    <div class="dash-doc-modal-card" role="dialog" aria-modal="true" aria-labelledby="docModalTitle">
+      <header class="dash-doc-modal-head">
+        <h3 id="docModalTitle">Document</h3>
+        <div class="dash-doc-modal-actions">
+          <a id="docModalDownload" class="btn-login" href="#" download>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download
+          </a>
+          <button type="button" class="dash-doc-modal-close" data-action="doc-close" aria-label="Close">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="dash-doc-modal-body">
+        <p class="dash-loading" id="docModalLoading">Loading document…</p>
+        <iframe id="docModalFrame" title="Document" hidden></iframe>
+      </div>
+    </div>
+  </div>
+
   <footer class="dash-footer">
     <div class="container dash-footer-inner">
       <p>&copy; <span id="footerYear"></span> Cash in Flash. Licensed by the California Department of Financial Protection and Innovation.</p>

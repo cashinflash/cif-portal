@@ -781,26 +781,174 @@
   color: var(--cif-subtle);
   font-size: .8rem;
 }
-.dash-doc-view {
+.dash-doc-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dash-doc-view,
+.dash-doc-download {
   display: inline-flex;
   align-items: center;
   padding: 8px 16px;
   border-radius: 999px;
-  background: #0E8741;
-  border: 0;
-  color: #fff;
   font-family: inherit;
   font-size: .88rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background .15s ease, transform .15s ease;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+  white-space: nowrap;
+}
+.dash-doc-view {
+  background: #0E8741;
+  border: 1px solid #0E8741;
+  color: #fff;
 }
 .dash-doc-view:hover:not(:disabled) {
   background: #0a6d34;
+  border-color: #0a6d34;
 }
-.dash-doc-view:disabled {
+.dash-doc-download {
+  background: #fff;
+  border: 1px solid #0E8741;
+  color: #0E8741;
+}
+.dash-doc-download:hover:not(:disabled) {
+  background: rgba(14,135,65,.08);
+}
+.dash-doc-view:disabled,
+.dash-doc-download:disabled {
   opacity: .6;
   cursor: progress;
+}
+
+/* Mobile: stack the two buttons under the doc title at narrow widths
+   so they don't squeeze the row or overflow. */
+@media (max-width: 640px) {
+  .dash-doc-row {
+    grid-template-columns: 36px 1fr;
+    grid-auto-rows: auto;
+  }
+  .dash-doc-actions {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+  }
+  .dash-doc-view,
+  .dash-doc-download {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* ---------- DOCUMENT VIEWER MODAL ---------- */
+.dash-doc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dash-doc-modal[hidden] { display: none; }
+.dash-doc-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, .55);
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  /* Reset button defaults */
+  font-family: inherit;
+  color: transparent;
+}
+.dash-doc-modal-card {
+  position: relative;
+  z-index: 1;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, .35);
+  width: min(1100px, calc(100vw - 32px));
+  height: min(900px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dash-doc-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--cif-hairline);
+  background: #fff;
+  flex-shrink: 0;
+}
+.dash-doc-modal-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--cif-navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.dash-doc-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dash-doc-modal-actions .btn-login {
+  padding: 8px 14px;
+  font-size: .88rem;
+}
+.dash-doc-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--cif-navy);
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.dash-doc-modal-close:hover {
+  background: rgba(15,23,42,.06);
+}
+.dash-doc-modal-body {
+  flex: 1;
+  position: relative;
+  background: #f7f7f5;
+  overflow: hidden;
+}
+.dash-doc-modal-body .dash-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+}
+#docModalFrame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+@media (max-width: 640px) {
+  .dash-doc-modal-card {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
+  .dash-doc-modal-head { padding: 12px 14px; }
+  .dash-doc-modal-actions .btn-login { padding: 8px 12px; font-size: .82rem; }
 }
 
 /* ---------- PAYMENTS PAGE ---------- */
