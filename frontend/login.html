@@ -151,7 +151,7 @@
 
     <!-- Step 3: code entry -->
     <div id="mfaCodeStep" style="display:none;">
-      <p class="page-sub" id="mfaCodeIntro">Enter the 6-digit code we sent.</p>
+      <p class="page-sub" id="mfaCodeIntro">Enter the verification code we sent.</p>
       <form id="mfaCodeForm">
         <div class="form-field">
           <label>Verification code</label>
@@ -297,7 +297,7 @@ function moveToCodeEntry(channel) {
   codeIntro.textContent =
     channel === 'email'
       ? 'We sent a 6-digit code to ' + target + '. Enter it below.'
-      : 'We texted a 6-digit code to ' + target + '. Enter it below.';
+      : 'We texted a 5-digit code to ' + target + '. Enter it below.';
   codeErr.style.display = 'none';
   codeInput.value = '';
   showStep('code');
@@ -344,8 +344,8 @@ codeForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   codeErr.style.display = 'none';
   const code = codeInput.value.trim();
-  if (!/^\d{6}$/.test(code)) {
-    codeErr.textContent = 'Please enter the 6-digit code.';
+  if (!/^\d{5,6}$/.test(code)) {
+    codeErr.textContent = 'Please enter the verification code.';
     codeErr.style.display = 'block';
     return;
   }
