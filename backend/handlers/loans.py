@@ -1025,8 +1025,11 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
     fname_base = fname_base.replace("/", "_").replace("\\", "_").replace('"', "")
 
     # PDF path: only meaningful when the source is HTML/aspx. For PDFs
-    # already, just stream the original. For everything else, fall back
-    # to the original content too — we only convert HTML.
+    # already, just stream the original (no conversion needed).
+    # If conversion fails, return 502 explicitly — falling through to
+    # HTML response with the customer's frontend expecting a PDF would
+    # save HTML content as a .pdf file, which fails to open. The
+    # frontend handles the 502 by retrying without ?format=pdf.
     if want_pdf and type_name in ("html", "htm", "aspx"):
         pdf_bytes = _render_html_to_pdf(data_b64, fname_base)
         if pdf_bytes:
@@ -1042,9 +1045,8 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
                 "isBase64Encoded": True,
                 "body": base64.b64encode(pdf_bytes).decode("ascii"),
             }
-        # PDF render failed — fall through and serve HTML so the user
-        # still gets *something* rather than an error.
-        log.warning("doc-pdf render failed; falling back to HTML cust=%s doc=%s", cid, doc_id)
+        log.warning("doc-pdf render failed cust=%s doc=%s", cid, doc_id)
+        return _json_response(502, {"error": "pdf_render_failed"})
 
     return {
         "statusCode": 200,

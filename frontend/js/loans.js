@@ -483,10 +483,15 @@
       var loading = qs('#docModalLoading');
       var frame = qs('#docModalFrame');
       if (loading) loading.hidden = false;
+
+      // Show the modal FIRST so the iframe is in a visible layout
+      // tree when src is set. Chrome doesn't fire the iframe load
+      // event for elements whose ancestors are display:none — that
+      // was the previous bug that left the modal stuck on Loading.
+      qs('#docModal').hidden = false;
+      document.body.style.overflow = 'hidden';
+
       if (frame) {
-        // The iframe stays visible (the loading panel sits on top via
-        // z-index until onload fires). Setting display:none / hidden
-        // prevents Chrome from firing onload and stalls the spinner.
         frame.onload = function () {
           if (loading) loading.hidden = true;
         };
@@ -498,9 +503,6 @@
       setTimeout(function () {
         if (loading && !loading.hidden) loading.hidden = true;
       }, 6000);
-
-      qs('#docModal').hidden = false;
-      document.body.style.overflow = 'hidden';
 
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }).catch(function (err) {
@@ -556,26 +558,44 @@
     });
   }
 
+  function _triggerDownload(blob, fileName) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+  }
+
   function downloadDocument(doc, btn) {
     var orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Preparing PDF…'; }
-    // Server-side PDF render via the doc-pdf Lambda (headless Chromium).
-    // First-call cold-start can be ~5–8s; warm calls are 1–3s.
+    // Try server-side PDF render first (doc-pdf Lambda). If it fails
+    // (function not yet deployed, render error, etc.), fall back to
+    // saving Vergent's original HTML — the customer always gets SOMETHING
+    // rather than a broken file.
     fetchDocBlob(doc, 'pdf').then(function (blob) {
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = pdfFileName(doc);
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+      _triggerDownload(blob, pdfFileName(doc));
       if (btn) { btn.disabled = false; btn.textContent = orig; }
     }).catch(function (err) {
       if (err && err.message === 'unauthorized') return;
-      if (btn) { btn.disabled = false; btn.textContent = orig; }
-      alert('Sorry — we couldn’t download that document right now. Please try again, or call (747) 270-7121.');
+      // PDF path failed — fall back to HTML so the user gets a valid
+      // file with the correct extension. They can still print-to-PDF
+      // from the browser if they want PDF specifically.
+      console.warn('[loans] PDF render failed, falling back to HTML', err);
+      if (btn) btn.textContent = 'Downloading…';
+      fetchDocBlob(doc, 'html').then(function (blob) {
+        var fname = doc.fileName || ('document-' + doc.id + '.html');
+        _triggerDownload(blob, fname);
+        if (btn) { btn.disabled = false; btn.textContent = orig; }
+      }).catch(function (err2) {
+        if (err2 && err2.message === 'unauthorized') return;
+        if (btn) { btn.disabled = false; btn.textContent = orig; }
+        alert('Sorry — we couldn’t download that document right now. Please try again, or call (747) 270-7121.');
+      });
     });
   }
 
