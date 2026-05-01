@@ -66,11 +66,13 @@ jobs:
 
             # Placeholder zip — just an empty handler so the function
             # can be created. deploy-doc-pdf.yml replaces this on first
-            # push.
+            # push. (No heredoc here — YAML's run: | preserves leading
+            # whitespace and bash's <<'EOF' wants the closing token at
+            # column 0, which YAML can't give us. Single printf avoids
+            # the trap entirely.)
             mkdir -p /tmp/placeholder
-            cat > /tmp/placeholder/index.mjs <<'EOF'
-            export const handler = async () => ({ ok: false, error: 'not_yet_deployed' });
-            EOF
+            printf 'export const handler = async () => ({ ok: false, error: "not_yet_deployed" });\n' \
+              > /tmp/placeholder/index.mjs
             (cd /tmp/placeholder && zip -q /tmp/placeholder.zip index.mjs)
 
             aws lambda create-function \
