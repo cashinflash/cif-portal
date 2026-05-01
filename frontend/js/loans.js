@@ -349,6 +349,9 @@
     docs.forEach(function (doc) {
       var row = document.createElement('div');
       row.className = 'dash-doc-row';
+      row.setAttribute('role', 'button');
+      row.setAttribute('tabindex', '0');
+      row.setAttribute('aria-label', 'View ' + (doc.displayName || doc.fileName || 'document'));
 
       var icon = document.createElement('span');
       icon.className = 'dash-doc-icon';
@@ -371,7 +374,20 @@
       btn.type = 'button';
       btn.className = 'dash-doc-view';
       btn.textContent = 'View';
-      btn.addEventListener('click', function () { openDocument(doc, btn); });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openDocument(doc, btn);
+      });
+
+      // Whole row is clickable as a fallback if the button is hidden
+      // by any CSS quirk. Clicking anywhere on the row opens the doc.
+      row.addEventListener('click', function () { openDocument(doc, btn); });
+      row.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openDocument(doc, btn);
+        }
+      });
 
       row.appendChild(icon);
       row.appendChild(meta);

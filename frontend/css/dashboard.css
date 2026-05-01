@@ -742,8 +742,18 @@
   grid-template-columns: 36px 1fr max-content;
   gap: 14px;
   align-items: center;
-  padding: 14px 0;
+  padding: 14px 8px;
+  margin: 0 -8px;
   border-bottom: 1px solid var(--cif-hairline);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.dash-doc-row:hover { background: rgba(14,135,65,.05); }
+.dash-doc-row:focus-visible {
+  outline: 2px solid #0E8741;
+  outline-offset: 2px;
+  background: rgba(14,135,65,.05);
 }
 .dash-doc-row:last-child { border-bottom: none; }
 .dash-doc-icon {
