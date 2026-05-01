@@ -1415,6 +1415,18 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         "HeaderId": hdr_id,
         "PaymentDate": now_iso,
         "PaymentAmount": round(amount_num, 2),
+        # Documented v1 PaymentInfo fields the v1 PDF lists but we
+        # had been omitting. Vergent's controller dereferences these
+        # internally and crashes with NullReferenceException at
+        # V1Controller.PostCustomerLoanPayment line 3413 if any are
+        # missing. Defaults are safe for an ad-hoc card payment that
+        # isn't using a coupon, isn't returning change, and isn't
+        # tied to a paper instrument.
+        "ChangeDue": 0,
+        "SelectedCoupon": None,
+        "CouponAmount": 0,
+        "PaymentSource": 0,
+        "InstrumentNumber": "",
         "PaymentMethod": method_obj,
     }
 
