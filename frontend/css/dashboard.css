@@ -787,8 +787,15 @@
   gap: 8px;
   flex-shrink: 0;
 }
-.dash-doc-view,
-.dash-doc-download {
+/* Note on specificity: portal.css (loaded before dashboard.css) ships
+   a generic `button { background: transparent; }` reset for the auth
+   pages. Those rules bleed into the dashboard pages too, and at
+   single-class specificity they overrode `.dash-doc-view`'s default
+   background — making the button invisible until :hover lifted it
+   above the reset. Using `button.dash-doc-view` (element + class)
+   reliably wins over a bare `button` selector. */
+button.dash-doc-view,
+button.dash-doc-download {
   display: inline-flex;
   align-items: center;
   padding: 8px 16px;
@@ -799,26 +806,28 @@
   cursor: pointer;
   transition: background .15s ease, color .15s ease, border-color .15s ease;
   white-space: nowrap;
+  appearance: none;
+  -webkit-appearance: none;
 }
-.dash-doc-view {
+button.dash-doc-view {
   background: #0E8741;
   border: 1px solid #0E8741;
   color: #fff;
 }
-.dash-doc-view:hover:not(:disabled) {
+button.dash-doc-view:hover:not(:disabled) {
   background: #0a6d34;
   border-color: #0a6d34;
 }
-.dash-doc-download {
+button.dash-doc-download {
   background: #fff;
   border: 1px solid #0E8741;
   color: #0E8741;
 }
-.dash-doc-download:hover:not(:disabled) {
+button.dash-doc-download:hover:not(:disabled) {
   background: rgba(14,135,65,.08);
 }
-.dash-doc-view:disabled,
-.dash-doc-download:disabled {
+button.dash-doc-view:disabled,
+button.dash-doc-download:disabled {
   opacity: .6;
   cursor: progress;
 }
