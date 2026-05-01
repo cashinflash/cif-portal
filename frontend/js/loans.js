@@ -459,13 +459,20 @@
       var frame = qs('#docModalFrame');
       if (loading) loading.hidden = false;
       if (frame) {
-        frame.hidden = true;
+        // The iframe stays visible (the loading panel sits on top via
+        // z-index until onload fires). Setting display:none / hidden
+        // prevents Chrome from firing onload and stalls the spinner.
         frame.onload = function () {
           if (loading) loading.hidden = true;
-          frame.hidden = false;
         };
         frame.src = url;
       }
+      // Watchdog — if onload doesn't fire (some Vergent docs reference
+      // external CSS that fails to fetch from a blob: origin), hide
+      // the loading panel after 6s so the user sees what did render.
+      setTimeout(function () {
+        if (loading && !loading.hidden) loading.hidden = true;
+      }, 6000);
 
       qs('#docModal').hidden = false;
       document.body.style.overflow = 'hidden';
@@ -483,12 +490,11 @@
     if (!modal || modal.hidden) return;
     var frame = qs('#docModalFrame');
     if (frame) {
-      frame.src = 'about:blank';
-      frame.hidden = true;
       frame.onload = null;
+      frame.src = 'about:blank';
     }
     var loading = qs('#docModalLoading');
-    if (loading) loading.hidden = false;
+    if (loading) loading.hidden = true;
     var dl = qs('#docModalDownload');
     if (dl) { dl.removeAttribute('href'); dl.removeAttribute('download'); }
     if (_activeBlobUrl) {
