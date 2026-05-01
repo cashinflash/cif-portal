@@ -5,6 +5,8 @@ Routes (bound to HttpApi with Cognito JWT authorizer):
   GET  /api/my-profile       -> profile card data
   GET  /api/my-loans/active  -> active loan with balance / due date / status
   GET  /api/my-loans/activity -> recent activity (empty until loan/transactions wired)
+  GET  /api/my-loans/documents -> list signed documents for ?loanId=X
+  GET  /api/my-loans/documents/{docId}/download -> stream document binary
   POST /api/my-loan/new      -> returns handoff URL into Vergent loan-application UI
 
 Auth model:
@@ -233,6 +235,49 @@ def _v1_get(path: str) -> Tuple[int, Optional[Any]]:
         if tok2:
             status, body, _raw = _http(f"{V1_BASE}{path}", "GET", headers={"Token": tok2})
     return status, body
+
+
+def _v1_get_binary(path: str, timeout: int = 20) -> Tuple[int, bytes, Dict[str, str]]:
+    """GET a v1 endpoint that returns binary (e.g. /docs/{id}/download).
+
+    Returns (status, body_bytes, response_headers). On failure returns
+    (status, b"", {}). Refreshes service token once on 401/403.
+    """
+    def _attempt(tok: str) -> Tuple[int, bytes, Dict[str, str]]:
+        req = urllib.request.Request(
+            f"{V1_BASE}{path}",
+            method="GET",
+            headers={
+                "Token": tok,
+                "Accept": "*/*",
+                "User-Agent": "cif-portal/1.0",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, resp.read(), {k.lower(): v for k, v in resp.headers.items()}
+        except urllib.error.HTTPError as e:
+            try:
+                _ = e.read()  # drain
+            except Exception:
+                pass
+            log.warning("v1 binary GET %s -> %s", path, e.code)
+            return e.code, b"", {}
+        except (urllib.error.URLError, TimeoutError) as exc:
+            log.error("v1 binary GET %s network: %s", path, exc)
+            return 0, b"", {}
+
+    token = _get_v1_token()
+    if not token:
+        return 0, b"", {}
+    status, body, headers = _attempt(token)
+    if status in (401, 403):
+        global _v1_token_exp
+        _v1_token_exp = 0
+        tok2 = _get_v1_token()
+        if tok2:
+            status, body, headers = _attempt(tok2)
+    return status, body, headers
 
 
 # ─────────────────────────────────────────
@@ -572,6 +617,198 @@ def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str) -> Optional[Dict[str, Any]]:
+    """Normalize one v1 document record from /customer/{id}/docs/loan/{hdr}.
+
+    Vergent v1 doc records vary in field naming. We pull the most common
+    forms and fall back gracefully. Anything without an id is dropped.
+    """
+    if not isinstance(record, dict):
+        return None
+    doc_id = (
+        record.get("Id") or record.get("id")
+        or record.get("DocId") or record.get("docId")
+        or record.get("DocumentId") or record.get("documentId")
+    )
+    if doc_id in (None, ""):
+        return None
+    fname = (
+        record.get("Filename") or record.get("FileName")
+        or record.get("filename") or record.get("fileName")
+        or record.get("Name") or record.get("name")
+        or ""
+    )
+    title = (
+        record.get("Title") or record.get("title")
+        or record.get("DisplayName") or record.get("displayName")
+        or fname
+        or "Document"
+    )
+    when = (
+        record.get("DocumentDate") or record.get("documentDate")
+        or record.get("Date") or record.get("date")
+        or record.get("CreatedDate") or record.get("createdDate")
+        or record.get("UploadDate") or record.get("uploadDate")
+    )
+    return {
+        "id": str(doc_id),
+        "fileName": fname or (str(title) + ".pdf"),
+        "displayName": title,
+        "documentDate": _format_iso(when),
+        "kind": kind,
+        "loanId": loan_id,
+    }
+
+
+def _list_v1_loan_docs(cid: str, loan_id: Any) -> List[Dict[str, Any]]:
+    """Hit /V1/customer/{cid}/docs/loan/{loanId} and .../OtherFiles, merge."""
+    if loan_id in (None, ""):
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    def _consume(body: Any, kind: str) -> None:
+        rows: List[Dict[str, Any]] = []
+        if isinstance(body, list):
+            rows = [r for r in body if isinstance(r, dict)]
+        elif isinstance(body, dict):
+            for key in ("Items", "Documents", "Docs", "items", "documents", "docs"):
+                v = body.get(key)
+                if isinstance(v, list):
+                    rows = [r for r in v if isinstance(r, dict)]
+                    break
+            if not rows:
+                for v in body.values():
+                    if isinstance(v, list):
+                        rows.extend([r for r in v if isinstance(r, dict)])
+        for r in rows:
+            shaped = _shape_v1_document(r, loan_id, kind)
+            if not shaped or shaped["id"] in seen:
+                continue
+            seen.add(shaped["id"])
+            out.append(shaped)
+
+    status1, body1 = _v1_get(f"/V1/customer/{cid}/docs/loan/{loan_id}")
+    if status1 == 200:
+        _consume(body1, "loan")
+    elif status1 not in (404,):
+        log.warning("v1 loan-docs status=%s loan=%s", status1, loan_id)
+
+    status2, body2 = _v1_get(f"/V1/customer/{cid}/docs/loan/{loan_id}/OtherFiles")
+    if status2 == 200:
+        _consume(body2, "other")
+    elif status2 not in (404,):
+        log.warning("v1 loan-docs/OtherFiles status=%s loan=%s", status2, loan_id)
+
+    # Newest first.
+    def _key(item: Dict[str, Any]) -> str:
+        return str(item.get("documentDate") or "")
+    out.sort(key=_key, reverse=True)
+    return out
+
+
+def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(200, {"documents": []})
+
+    qs = event.get("queryStringParameters") or {}
+    requested = (qs or {}).get("loanId") if isinstance(qs, dict) else None
+    if not requested:
+        return _json_response(400, {"error": "missing_loanId"})
+
+    # Validate ownership: the loanId must belong to this customer.
+    status, body = _v1_get(f"/V1/{cid}/loans")
+    if status != 200 or not isinstance(body, list):
+        return _json_response(200, {"documents": []})
+    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
+    loan = next(
+        (l for l in shaped
+         if str(l.get("id")) == str(requested)
+         or str(l.get("publicId") or "") == str(requested)),
+        None,
+    )
+    if not loan:
+        return _json_response(404, {"error": "loan_not_found"})
+
+    docs = _list_v1_loan_docs(cid, loan.get("id"))
+    return _json_response(200, {
+        "documents": docs,
+        "loanId": loan.get("id"),
+        "publicId": loan.get("publicId"),
+    })
+
+
+def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Stream a single document binary back to the browser.
+
+    Ownership: only docs found via the customer's own loans are
+    eligible. We list every loan's docs and confirm the requested
+    docId is in that set before fetching from Vergent.
+    """
+    import base64
+
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "no_customer_id"})
+
+    # docId can come from API Gateway pathParameters or by parsing the path.
+    doc_id = None
+    pp = event.get("pathParameters") or {}
+    if isinstance(pp, dict):
+        doc_id = pp.get("docId") or pp.get("documentId")
+    if not doc_id:
+        path = (event.get("requestContext") or {}).get("http", {}).get("path", "")
+        # Expect: /api/my-loans/documents/{docId}/download
+        parts = [p for p in path.split("/") if p]
+        if len(parts) >= 4 and parts[-1] == "download" and parts[-3] == "documents":
+            doc_id = parts[-2]
+    if not doc_id:
+        return _json_response(400, {"error": "missing_docId"})
+
+    # Ownership check: walk this customer's loans and confirm the docId
+    # is on one of them. Cheap relative to the binary fetch.
+    status, body = _v1_get(f"/V1/{cid}/loans")
+    if status != 200 or not isinstance(body, list):
+        return _json_response(404, {"error": "doc_not_found"})
+    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
+    matched = None
+    for loan in shaped:
+        for d in _list_v1_loan_docs(cid, loan.get("id")):
+            if str(d.get("id")) == str(doc_id):
+                matched = d
+                break
+        if matched:
+            break
+    if not matched:
+        log.warning("doc-download not-owned cust=%s doc=%s", cid, doc_id)
+        return _json_response(404, {"error": "doc_not_found"})
+
+    status, body_bytes, headers = _v1_get_binary(f"/V1/docs/{doc_id}/download")
+    if status != 200 or not body_bytes:
+        log.warning("doc-download upstream status=%s doc=%s", status, doc_id)
+        return _json_response(502, {"error": "doc_unavailable"})
+
+    content_type = headers.get("content-type") or "application/pdf"
+    fname = matched.get("fileName") or f"document-{doc_id}.pdf"
+    # Strip any path separators a server might have put in the filename.
+    fname = fname.replace("/", "_").replace("\\", "_").replace('"', "")
+
+    return {
+        "statusCode": 200,
+        "headers": {
+            **CORS_HEADERS,
+            "Content-Type": content_type,
+            "Content-Disposition": f'inline; filename="{fname}"',
+            "Cache-Control": "private, max-age=60",
+        },
+        "isBase64Encoded": True,
+        "body": base64.b64encode(body_bytes).decode("ascii"),
+    }
+
+
 def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -623,6 +860,13 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_active_loan(event)
         if path.endswith("/my-loans/activity") and method == "GET":
             return get_activity(event)
+        if path.endswith("/my-loans/documents") and method == "GET":
+            return get_loan_documents(event)
+        # /api/my-loans/documents/{docId}/download
+        if (path.endswith("/download")
+                and "/my-loans/documents/" in path
+                and method == "GET"):
+            return get_document_download(event)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:

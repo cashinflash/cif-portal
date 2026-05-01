@@ -49,7 +49,9 @@ backend/
   handlers/            # One Lambda per .py file (plus a couple of
                        # helpers that get bundled as a single zip).
     loans.py           # GET /api/my-profile, /api/my-loans/active,
-                       #   /api/my-loans/activity
+                       #   /api/my-loans/activity (?loanId=N optional),
+                       #   /api/my-loans/documents (?loanId=N),
+                       #   /api/my-loans/documents/{docId}/download
                        # POST /api/my-loan/new (handoff to Vergent)
     payments.py        # GET /api/my-cards, /api/my-payment/loan-summary
                        # POST /api/my-cards (add new card — forwards
@@ -277,6 +279,48 @@ organic blobs).
 ## Recent work log
 
 Update this section at the end of each session. Newest first.
+
+### 2026-05-01 — My Loans page (Phases 1 + 2)
+- **Phase 1 (commit `e561107`)**: replaced `loans.html` stub with real
+  list-and-detail page. Lists every loan newest-first; deep-linkable
+  detail view at `/loans.html?id=N` shows summary, full details, and
+  transaction history. New `frontend/js/loans.js`, CSS additions in
+  `dashboard.css`. `get_activity()` extended to accept `?loanId=N`
+  with ownership validation. No infra changes — reuses existing
+  `/api/my-loans/active` (whose `allLoans` field already had every
+  loan) and `/api/my-loans/activity`.
+- **Phase 2**: signed loan agreements + disclosures now viewable
+  inline. Two new routes on the loans Lambda:
+    - `GET /api/my-loans/documents?loanId=N` → list of docs
+      (id, fileName, displayName, documentDate, kind, loanId)
+    - `GET /api/my-loans/documents/{docId}/download` → binary PDF
+      response, base64-encoded, with Content-Type and inline
+      Content-Disposition. 6 MB Lambda response cap is fine for
+      typical signed agreements.
+  Both use the **v1 LMS API** (`/V1/customer/{cid}/docs/loan/{hdr}`,
+  `/V1/customer/{cid}/docs/loan/{hdr}/OtherFiles`,
+  `/V1/docs/{docId}/download`) with our existing service Token
+  header — no new auth flow. Ownership is enforced by walking the
+  customer's loans and confirming the requested docId belongs to one
+  of them before fetching.
+  Frontend: documents card on the loan-detail view fetches the list
+  and renders each doc with a "View" button that does a
+  `fetch + URL.createObjectURL(blob) + window.open` so the
+  Authorization header travels with the request.
+  New `provision-loans.yml` workflow registers all loans Lambda
+  routes idempotently (run once after merging this commit).
+- Updated `VERGENT_INTEGRATION.md` to reflect that v1 LMS at
+  `shared.vergentlms.com/api/api` is now the production path (the
+  earlier "Unknown prod URL" TL;DR was stale from Round 19B).
+
+### 2026-04-30 — Telnyx SMS MFA debug + 5/6-digit reconciliation
+- Earlier commits switched SMS MFA from Twilio Verify to Telnyx
+  Verify. Debugging session walked the user through Verify-Profile
+  config (messaging profile attached, allowed-destinations enabled
+  for US). Telnyx defaults SMS codes to 5 digits and our
+  `code_length: 6` request parameter wasn't honored, so frontend
+  regex relaxed to `/^\d{5,6}$/` and SMS-channel copy says "5-digit
+  code" while email-channel (Cognito 6-digit) stays "6-digit".
 
 ### 2026-04-21 — In-portal Add Card (direct to Vergent)
 - New `POST /api/my-cards` route on the payments Lambda. Accepts

@@ -10,6 +10,7 @@
   var TOKEN_KEY = 'cif_id_token';
   var ACTIVE_ENDPOINT = API_BASE + '/my-loans/active';
   var ACTIVITY_ENDPOINT = API_BASE + '/my-loans/activity';
+  var DOCS_ENDPOINT = API_BASE + '/my-loans/documents';
   var LOGIN_URL = '/start.html';
   var ACTIVITY_LIMIT = 50;
 
@@ -249,6 +250,7 @@
         }
         renderDetail(loan);
         loadActivity(loan.id);
+        loadDocuments(loan.id);
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
@@ -379,6 +381,125 @@
     if (!root) return;
     root.innerHTML =
       '<p class="dash-loanlist-empty">We couldn’t load transactions right now.</p>';
+  }
+
+  // ---------- DOCUMENTS ----------
+  function loadDocuments(loanId) {
+    api(DOCS_ENDPOINT + '?loanId=' + encodeURIComponent(loanId), token)
+      .then(function (data) {
+        renderDocuments((data && data.documents) || []);
+      })
+      .catch(function (err) {
+        if (err && err.message === 'unauthorized') return;
+        renderDocumentsError();
+      });
+  }
+
+  function renderDocuments(docs) {
+    var root = qs('#loanDocuments');
+    var count = qs('#loanDocsCount');
+    if (!root) return;
+    root.innerHTML = '';
+
+    if (!docs.length) {
+      var p = document.createElement('p');
+      p.className = 'dash-loanlist-empty';
+      p.textContent = 'No documents on file for this loan yet.';
+      root.appendChild(p);
+      if (count) count.hidden = true;
+      return;
+    }
+    if (count) {
+      count.textContent = docs.length + (docs.length === 1 ? ' document' : ' documents');
+      count.hidden = false;
+    }
+
+    var list = document.createElement('div');
+    list.className = 'dash-doc-list';
+
+    docs.forEach(function (doc) {
+      var row = document.createElement('div');
+      row.className = 'dash-doc-row';
+
+      var icon = document.createElement('span');
+      icon.className = 'dash-doc-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+      var meta = document.createElement('div');
+      meta.className = 'dash-doc-meta';
+      var title = document.createElement('strong');
+      title.textContent = doc.displayName || doc.fileName || ('Document #' + doc.id);
+      var sub = document.createElement('small');
+      var subParts = [];
+      if (doc.documentDate) subParts.push(fmtDate(doc.documentDate));
+      if (doc.kind === 'other') subParts.push('Additional');
+      sub.textContent = subParts.join(' · ') || '—';
+      meta.appendChild(title);
+      meta.appendChild(sub);
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'dash-doc-view';
+      btn.textContent = 'View';
+      btn.addEventListener('click', function () { openDocument(doc, btn); });
+
+      row.appendChild(icon);
+      row.appendChild(meta);
+      row.appendChild(btn);
+      list.appendChild(row);
+    });
+    root.appendChild(list);
+  }
+
+  function renderDocumentsError() {
+    var root = qs('#loanDocuments');
+    if (!root) return;
+    root.innerHTML =
+      '<p class="dash-loanlist-empty">We couldn’t load documents right now. Please refresh, or call us at <a href="tel:+17472707121">(747) 270-7121</a>.</p>';
+  }
+
+  function openDocument(doc, btn) {
+    var orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Opening…';
+    fetch(DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download', {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': '*/*' },
+      credentials: 'omit'
+    }).then(function (res) {
+      if (res.status === 401 || res.status === 403) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        window.location.replace(LOGIN_URL);
+        throw new Error('unauthorized');
+      }
+      if (!res.ok) {
+        throw new Error('http ' + res.status);
+      }
+      return res.blob();
+    }).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var w = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!w) {
+        // Pop-up blocked — fall back to a one-shot anchor click.
+        var a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.download = doc.fileName || ('document-' + doc.id + '.pdf');
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      // Revoke the blob URL after a delay so the new tab has time to load.
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      btn.disabled = false;
+      btn.textContent = orig;
+    }).catch(function (err) {
+      if (err && err.message === 'unauthorized') return;
+      btn.disabled = false;
+      btn.textContent = orig;
+      alert('Sorry — we couldn’t open that document right now. Please try again, or call (747) 270-7121.');
+    });
   }
 
   function renderDetailNotFound() {

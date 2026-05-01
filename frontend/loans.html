@@ -132,9 +132,10 @@
       <section class="dash-card">
         <div class="dash-card-head">
           <h3>Documents</h3>
+          <span class="dash-card-meta" id="loanDocsCount" hidden></span>
         </div>
-        <div id="loanDocuments">
-          <p style="color:#555; max-width:600px;">Signed loan agreements and disclosures for this loan are coming to the portal soon. In the meantime, you can <a href="#" data-action="open-vergent-portal" style="color:#0E8741; font-weight:600;">view them in our Vergent portal</a> &mdash; you'll be signed in automatically.</p>
+        <div id="loanDocuments" aria-live="polite">
+          <p class="dash-loading">Loading documents…</p>
         </div>
       </section>
     </section>

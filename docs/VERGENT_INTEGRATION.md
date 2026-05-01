@@ -4,28 +4,30 @@ How the customer-facing portal at `d1zucrj1ouu3c.cloudfront.net` (later
 `portal.cashinflash.com`) talks to Vergent to show each customer their own
 loan, balance, and transaction history.
 
-## TL;DR (status as of Round 19B mid)
+## TL;DR (status as of 2026-05)
 
-We've discovered there are **two different Vergent APIs**, both versioned
-"v1" of their respective specs but covering wildly different surface area:
+We talk to **two different Vergent APIs**, both versioned "v1" of their
+respective specs but covering different surface area. Both are wired
+and working in production:
 
-| API | Purpose | Host | Spec source |
-|---|---|---|---|
-| **Customer Portal API** ("v2" in our naming) | Per-customer reads/writes — profile, loans, payments | `https://prod.apim.vergentlms.com/external/shared` ✅ | `docs/vergent-swagger.json` (95 paths) |
-| **LMS API** ("v1" in our naming, full LMS) | Everything Cash in Flash uses internally — `/api/V1/{customerId}/...` for any customer | **Unknown prod URL** ❌ — Vergent must provide | `docs/vergent-v1/v1.pdf` (424 pages) |
+| API | Purpose | Host | Auth | Spec |
+|---|---|---|---|---|
+| **LMS API** ("v1" in our naming) ✅ | Everything Cash in Flash uses internally — `/api/V1/{customerId}/...` for any customer | `https://shared.vergentlms.com/api/api` | Service `Token` header from `/api/authenticate` | `docs/vergent-v1/v1.pdf` (424 pages) |
+| **Customer Portal API** ("v2" in our naming) ⚠️ | Customer-scoped reads/writes via Cognito JWT | `https://prod.apim.vergentlms.com/external/shared` | Customer Bearer from `AuthenticateCognito` (broken for our tenant) — service token works on a few v2 endpoints undocumented-ly | `docs/vergent-swagger.json` (95 paths) |
 
-Until Vergent unblocks one of two things, the dashboard cannot pull live
-loan data:
+**We use v1 for everything that actually matters** — loans, history,
+profile, cards, banks, documents — because v2's `AuthenticateCognito`
+is broken for our tenant. v2 is still used for two things: the
+`/api/authenticate/handoff/create` endpoint (new-loan redirect) and
+the `CreditCardPayment` charge call (which accepts our service token
+even though docs say it needs customer JWT).
 
-1. **(Preferred) Enable AuthenticateCognito on our tenant** so we can use
-   the Customer Portal API with customer-scoped JWTs.
-2. Tell us the **production base URL for the LMS API** so we can use
-   `/api/V1/{customerId}/loans/all` with the service token from
-   `/api/authenticate`.
+### What's still blocked
 
-The Lambda is deployed and waiting — `loans.py` already implements the
-AuthenticateCognito-then-call-Customer-Portal flow. The moment Vergent
-flips switch (1) it starts returning real data without a code change.
+1. **`AuthenticateCognito`** still returns 500 NullReferenceException.
+   Not blocking for the customer portal — every feature has a working
+   v1 path. Stays open as an item to raise with Vergent (issuer +
+   audience details below).
 
 ## What we already know works
 
@@ -138,7 +140,10 @@ Pre-built shopping list once we have the URL. Auth: service `Token` header.
 | POST | `/api/V1/customer/{id}/communication/{type}/validate/{cell}/confirm/{code}` | Verify SMS PIN |
 | POST | `/api/V1/customer/{id}/communication/trigger/emailchanged/{newEmail}` | Trigger email-change notification |
 | POST | `/api/V1/PostBankPayment` | Initiate bank payment |
-| GET  | `/api/V1/customer/{id}/docs/loan/{loanHeaderId}` | Loan documents |
+| GET  | `/api/V1/customer/{id}/docs/loan/{loanHeaderId}` | Loan documents (used in production) |
+| GET  | `/api/V1/customer/{id}/docs/loan/{loanHeaderId}/OtherFiles` | Additional files for a loan |
+| GET  | `/api/V1/customer/{id}/docs` | All documents for a customer |
+| GET  | `/api/V1/docs/{docId}/download` | Document binary by id (used in production) |
 
 ## Lambda-side contracts
 

@@ -1,0 +1,115 @@
+name: Provision loans Lambda
+
+# Reconciles every HttpApi route the loans Lambda backs. Idempotent —
+# routes that already exist are skipped, missing ones are created.
+# Run this after adding a new route in code (and template.yaml). The
+# regular deploy.yml takes care of Lambda code updates on push.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/workflows/provision-loans.yml'
+
+env:
+  AWS_REGION: us-east-1
+  HTTP_API_ID: anh066l1wf
+  AUTHORIZER_ID: ppc9vg
+  FN: cif-portal-loans-dev
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Wire HttpApi routes
+        run: |
+          set -e
+          FN_ARN=$(aws lambda get-function --function-name "$FN" --query 'Configuration.FunctionArn' --output text)
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          echo "Lambda ARN: $FN_ARN"
+          echo "API: $HTTP_API_ID  Authorizer: $AUTHORIZER_ID"
+
+          INTEG_ID=$(aws apigatewayv2 get-integrations --api-id "$HTTP_API_ID" \
+            --query "Items[?IntegrationUri=='$FN_ARN'].IntegrationId | [0]" \
+            --output text 2>/dev/null || echo "")
+          if [ -z "$INTEG_ID" ] || [ "$INTEG_ID" = "None" ]; then
+            INTEG_ID=$(aws apigatewayv2 create-integration \
+              --api-id "$HTTP_API_ID" \
+              --integration-type AWS_PROXY \
+              --integration-uri "$FN_ARN" \
+              --payload-format-version 2.0 \
+              --query IntegrationId --output text)
+            echo "Created integration $INTEG_ID"
+          else
+            echo "Reusing integration $INTEG_ID"
+          fi
+
+          ROUTES=(
+            "GET /api/my-profile"
+            "GET /api/my-loans/active"
+            "GET /api/my-loans/activity"
+            "GET /api/my-loans/documents"
+            "GET /api/my-loans/documents/{docId}/download"
+            "POST /api/my-loan/new"
+          )
+          for RK in "${ROUTES[@]}"; do
+            EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
+              --query "Items[?RouteKey=='$RK'].RouteId | [0]" \
+              --output text 2>/dev/null || echo "")
+            if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
+              echo "Route '$RK' already exists ($EXISTING)"
+              continue
+            fi
+            aws apigatewayv2 create-route \
+              --api-id "$HTTP_API_ID" \
+              --route-key "$RK" \
+              --target "integrations/$INTEG_ID" \
+              --authorization-type JWT \
+              --authorizer-id "$AUTHORIZER_ID" \
+              --no-cli-pager >/dev/null
+            echo "Created route '$RK'"
+          done
+
+          STMT_ID=apigateway-invoke-loans
+          EXISTING_SIDS=$(aws lambda get-policy --function-name "$FN" 2>/dev/null \
+            | jq -r '.Policy | fromjson | .Statement[].Sid' 2>/dev/null \
+            || true)
+          if echo "$EXISTING_SIDS" | grep -qxF "$STMT_ID"; then
+            echo "Lambda permission $STMT_ID already set."
+          else
+            aws lambda add-permission \
+              --function-name "$FN" \
+              --statement-id "$STMT_ID" \
+              --action lambda:InvokeFunction \
+              --principal apigateway.amazonaws.com \
+              --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCT:$HTTP_API_ID/*/*/*" \
+              --no-cli-pager >/dev/null
+            echo "Added invoke permission."
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Loans provisioning"
+            echo ""
+            echo "- Lambda: $FN"
+            echo "- Routes:"
+            echo "  - GET /api/my-profile"
+            echo "  - GET /api/my-loans/active"
+            echo "  - GET /api/my-loans/activity"
+            echo "  - GET /api/my-loans/documents"
+            echo "  - GET /api/my-loans/documents/{docId}/download"
+            echo "  - POST /api/my-loan/new"
+          } >> "$GITHUB_STEP_SUMMARY"

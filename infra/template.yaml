@@ -75,6 +75,24 @@ Resources:
             Auth:
               Authorizer: JwtAuthorizer
               AuthorizerId: !Ref JwtAuthorizerId
+        LoanDocs:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/my-loans/documents
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        LoanDocDownload:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/my-loans/documents/{docId}/download
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
 
   PaymentsFn:
     Type: AWS::Serverless::Function

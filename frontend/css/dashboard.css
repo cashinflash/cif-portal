@@ -732,6 +732,67 @@
   .dash-activity-bal  { grid-column: 2 / 3; grid-row: 2; text-align: right; }
 }
 
+/* Document rows in the loan-detail Documents section. */
+.dash-doc-list {
+  display: flex;
+  flex-direction: column;
+}
+.dash-doc-row {
+  display: grid;
+  grid-template-columns: 36px 1fr max-content;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--cif-hairline);
+}
+.dash-doc-row:last-child { border-bottom: none; }
+.dash-doc-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(14,135,65,.08);
+  color: #0E8741;
+  flex-shrink: 0;
+}
+.dash-doc-meta { min-width: 0; }
+.dash-doc-meta strong {
+  display: block;
+  color: var(--cif-navy);
+  font-weight: 700;
+  font-size: .96rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-doc-meta small {
+  color: var(--cif-subtle);
+  font-size: .8rem;
+}
+.dash-doc-view {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: #0E8741;
+  border: 0;
+  color: #fff;
+  font-family: inherit;
+  font-size: .88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+.dash-doc-view:hover:not(:disabled) {
+  background: #0a6d34;
+}
+.dash-doc-view:disabled {
+  opacity: .6;
+  cursor: progress;
+}
+
 /* ---------- PAYMENTS PAGE ---------- */
 .pay-summary-row {
   display: flex;
