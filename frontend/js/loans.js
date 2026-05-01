@@ -276,29 +276,30 @@
       pill.textContent = statusPillText(loan);
     }
 
-    renderStats(qs('#loanStatsSummary'), [
-      ['Status', loan.status || (loan.isOutstanding ? 'Current' : 'Closed')],
-      ['Original principal', fmtCurrency(loan.principal)],
-      [loan.isOutstanding ? 'Current balance' : 'Final balance', fmtCurrency(loan.balance)],
-      ['Payoff amount', fmtCurrency(loan.payoffAmount)],
-      ['Next payment', loan.isOutstanding && loan.nextDueDate
-        ? fmtCurrency(loan.nextDueAmount) + ' on ' + fmtDate(loan.nextDueDate)
-        : '—'],
-      ['Days late', loan.daysLate || '—']
-    ]);
-
-    renderStats(qs('#loanStatsDetails'), [
-      ['Loan ID', String(loan.publicId || loan.id || '—')],
-      ['APR', fmtApr(loan.apr)],
-      ['Origination date', fmtDate(loan.loanDate || loan.originationDate)],
-      ['Number of payments', loan.numberOfPayments != null ? String(loan.numberOfPayments) : '—'],
-      ['Fees', fmtCurrency(loan.fees)],
-      ['Fee balance', fmtCurrency(loan.feeBalance)],
-      ['Store', loan.storeName || '—'],
-      ['Eligible for refinance', fmtBool(loan.isEligibleForRefi)],
-      ['In rescind period', fmtBool(loan.isInRescindPeriod)],
-      ['Autopay scheduled', fmtBool(loan.autopay)]
-    ]);
+    var summary;
+    if (loan.isOutstanding) {
+      summary = [
+        ['Status', loan.status || 'Current'],
+        ['Amount Borrowed', fmtCurrency(loan.principal)],
+        ['Current Balance', fmtCurrency(loan.balance)],
+        ['Payoff Amount', fmtCurrency(loan.payoffAmount)],
+        ['Next Payment', loan.nextDueDate
+          ? fmtCurrency(loan.nextDueAmount) + ' on ' + fmtDate(loan.nextDueDate)
+          : '—'],
+        ['Payment Status', loan.daysLate || '—']
+      ];
+    } else {
+      var principal = Number(loan.principal) || 0;
+      var fees = Number(loan.fees) || 0;
+      summary = [
+        ['Status', loan.status || 'Closed'],
+        ['Amount Borrowed', fmtCurrency(loan.principal)],
+        ['Fee', fmtCurrency(loan.fees)],
+        ['Total Paid', fmtCurrency(principal + fees)],
+        ['Payment Status', loan.daysLate || '—']
+      ];
+    }
+    renderStats(qs('#loanStatsSummary'), summary);
   }
 
   function renderStats(root, pairs) {
