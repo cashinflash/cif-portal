@@ -539,19 +539,37 @@ def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(200, {"items": []})
 
     limit = _parse_limit(event, default=5)
+    qs = event.get("queryStringParameters") or {}
+    requested = (qs or {}).get("loanId") if isinstance(qs, dict) else None
 
-    # Find the active (or most recent) loan so we can scope history to it.
+    # Always fetch the customer's loans — gives us ownership validation
+    # plus the storeId we need for GetCustomerLoanHistory.
     status, body = _v1_get(f"/V1/{cid}/loans")
     if status != 200 or not isinstance(body, list):
         return _json_response(200, {"items": []})
     shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
-    outstanding = [l for l in shaped if l.get("isOutstanding")]
-    loan = outstanding[0] if outstanding else (shaped[0] if shaped else None)
-    if not loan:
-        return _json_response(200, {"items": []})
+
+    if requested:
+        loan = next(
+            (l for l in shaped
+             if str(l.get("id")) == str(requested)
+             or str(l.get("publicId") or "") == str(requested)),
+            None,
+        )
+        if not loan:
+            return _json_response(404, {"error": "loan_not_found"})
+    else:
+        outstanding = [l for l in shaped if l.get("isOutstanding")]
+        loan = outstanding[0] if outstanding else (shaped[0] if shaped else None)
+        if not loan:
+            return _json_response(200, {"items": []})
 
     items = _fetch_loan_history(cid, loan.get("id"), loan.get("storeId"), limit)
-    return _json_response(200, {"items": items})
+    return _json_response(200, {
+        "items": items,
+        "loanId": loan.get("id"),
+        "publicId": loan.get("publicId"),
+    })
 
 
 def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:

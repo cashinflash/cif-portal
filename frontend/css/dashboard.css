@@ -573,6 +573,165 @@
   margin: 8px 0;
 }
 
+/* Clickable loan-list rows on the My Loans page. */
+.dash-loanlist-row--link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+  border-radius: 8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  margin-left: -8px;
+  margin-right: -8px;
+}
+.dash-loanlist-row--link:hover {
+  background: rgba(14,135,65,.04);
+}
+.dash-loanlist-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--cif-subtle);
+  flex-shrink: 0;
+}
+.dash-loanlist-row--link:hover .dash-loanlist-chevron { color: #0E8741; }
+
+.dash-card-meta {
+  font-size: .82rem;
+  color: var(--cif-subtle);
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+/* ---------- LOAN DETAIL VIEW ---------- */
+.dash-loading {
+  color: var(--cif-muted);
+  font-size: .92rem;
+  margin: 8px 0;
+  padding: 12px 0;
+}
+
+.dash-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #0E8741;
+  font-weight: 600;
+  font-size: .92rem;
+  text-decoration: none;
+  margin-bottom: 16px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 8px;
+  transition: background .15s ease;
+}
+.dash-back-link:hover { background: rgba(14,135,65,.08); }
+
+.dash-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.dash-detail-head h2 {
+  margin: 0 0 4px;
+  color: var(--cif-navy);
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+.dash-detail-meta {
+  margin: 0;
+  color: var(--cif-subtle);
+  font-size: .92rem;
+}
+
+/* Two-column definition list for loan stats. */
+.dash-loan-stats {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 10px 24px;
+  margin: 0;
+  padding: 4px 0 0;
+}
+.dash-loan-stats dt {
+  color: var(--cif-subtle);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  align-self: center;
+}
+.dash-loan-stats dd {
+  margin: 0;
+  color: var(--cif-navy);
+  font-size: .98rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  align-self: center;
+}
+
+/* Transaction history rows. */
+.dash-activity-table {
+  display: flex;
+  flex-direction: column;
+}
+.dash-activity-row {
+  display: grid;
+  grid-template-columns: 110px 1fr max-content max-content;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--cif-hairline);
+}
+.dash-activity-row:last-child { border-bottom: none; }
+.dash-activity-when {
+  color: var(--cif-subtle);
+  font-size: .85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.dash-activity-desc {
+  color: var(--cif-navy);
+  font-size: .94rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-activity-amt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: .96rem;
+}
+.dash-activity-amt.is-credit { color: #0E8741; }
+.dash-activity-amt.is-debit  { color: var(--cif-navy); }
+.dash-activity-bal {
+  color: var(--cif-subtle);
+  font-size: .82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .dash-loan-stats {
+    grid-template-columns: 1fr;
+    gap: 4px 0;
+  }
+  .dash-loan-stats dt { padding-top: 8px; }
+  .dash-loan-stats dd { padding-bottom: 4px; }
+  .dash-activity-row {
+    grid-template-columns: 1fr max-content;
+    grid-auto-rows: auto;
+    gap: 4px 12px;
+  }
+  .dash-activity-when { grid-column: 1 / 2; grid-row: 1; }
+  .dash-activity-amt  { grid-column: 2 / 3; grid-row: 1; text-align: right; }
+  .dash-activity-desc { grid-column: 1 / 2; grid-row: 2; }
+  .dash-activity-bal  { grid-column: 2 / 3; grid-row: 2; text-align: right; }
+}
+
 /* ---------- PAYMENTS PAGE ---------- */
 .pay-summary-row {
   display: flex;
