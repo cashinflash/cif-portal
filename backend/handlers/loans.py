@@ -703,23 +703,35 @@ def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
-def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str) -> Optional[Dict[str, Any]]:
+def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str,
+                       include_data: bool = False) -> Optional[Dict[str, Any]]:
     """Normalize one v1 document record from /customer/{id}/docs/loan/{hdr}.
 
-    Vergent v1 doc records vary in field naming. We pull the most common
-    forms and fall back gracefully. Anything without an id is dropped.
+    Vergent's loan-docs endpoint returns records like:
+      { ChainId, HdrId, CustomerId, TransId, DocumentName,
+        Data (base64 HTML), DocumentUrl (10-min Azure blob URL),
+        DocType, DocTypeName, ... }
+
+    We use ChainId as the unique id (Id/DocId/etc are not present).
+    The Data field IS the document content — the listing endpoint
+    inlines it. Download path re-fetches with include_data=True and
+    streams Data straight back to the browser.
+
+    Anything without an id is dropped.
     """
     if not isinstance(record, dict):
         return None
     doc_id = (
-        record.get("Id") or record.get("id")
+        record.get("ChainId")
+        or record.get("Id") or record.get("id")
         or record.get("DocId") or record.get("docId")
         or record.get("DocumentId") or record.get("documentId")
     )
     if doc_id in (None, ""):
         return None
     fname = (
-        record.get("Filename") or record.get("FileName")
+        record.get("DocumentName")
+        or record.get("Filename") or record.get("FileName")
         or record.get("filename") or record.get("fileName")
         or record.get("Name") or record.get("name")
         or ""
@@ -730,37 +742,52 @@ def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str) -> Optio
         or fname
         or "Document"
     )
+    # Strip extension from the display label for cleaner UI ("DDT
+    # Disclosure" instead of "DDT Disclosure.html"). The fileName
+    # keeps its extension for the download dialog.
+    display = str(title)
+    for ext in (".html", ".htm", ".pdf", ".aspx"):
+        if display.lower().endswith(ext):
+            display = display[: -len(ext)]
+            break
     when = (
         record.get("DocumentDate") or record.get("documentDate")
         or record.get("Date") or record.get("date")
         or record.get("CreatedDate") or record.get("createdDate")
         or record.get("UploadDate") or record.get("uploadDate")
     )
-    return {
+    out = {
         "id": str(doc_id),
-        "fileName": fname or (str(title) + ".pdf"),
-        "displayName": title,
+        "fileName": fname or (str(title) + ".html"),
+        "displayName": display,
         "documentDate": _format_iso(when),
         "kind": kind,
         "loanId": loan_id,
     }
+    if include_data:
+        # Pass through fields the download path needs. _data is already
+        # base64; we forward it verbatim with isBase64Encoded=true.
+        out["_data"] = record.get("Data") or ""
+        out["_docTypeName"] = (record.get("DocTypeName") or "").lower()
+        out["_documentUrl"] = record.get("DocumentUrl") or ""
+    return out
 
 
 def _list_v1_loan_docs(cid: str, loan_id: Any,
-                       debug: bool = False) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Hunt for documents attached to a specific loan via the v1 API.
+                       debug: bool = False,
+                       include_data: bool = False) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """List signed documents attached to a specific loan via Vergent v1.
 
-    Vergent v1 has inconsistent URL conventions across endpoints
-    (some lowercase, some PascalCase, some verb-style with query
-    params), so we try several candidate paths and merge whatever
-    comes back. Empty list ≠ no docs — the path may just not exist
-    on our tenant. The customer-level `/docs` endpoint is the most
-    reliable fallback because it returns every document the
-    customer has, which we then filter to the requested loanId.
+    Single endpoint: GET /V1/customer/{cid}/docs/loan/{loanId}. Verified
+    2026-05-01 against Harut's loan 4826490 — returns 3 signed records
+    (Advance Receipt, DDT Disclosure, Advance Contract w E-Sign), each
+    with its content base64-inlined as `Data`. The OtherFiles sibling,
+    PascalCase variants, verb-style endpoints, and customer-level dump
+    were all tested and either return duplicates or 404 — dropped.
 
-    Returns (shaped_docs, attempts). `attempts` is for diagnostics
-    when debug=True — a list of {path, status, body_preview} dicts
-    showing exactly what each candidate path returned.
+    Returns (shaped_docs, attempts). `attempts` is populated only when
+    debug=True for diagnostics. With include_data=True, each shaped doc
+    carries its raw Data + DocumentUrl for the download path to use.
     """
     if loan_id in (None, ""):
         return [], []
@@ -768,9 +795,11 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
     out: List[Dict[str, Any]] = []
     seen: set = set()
     attempts: List[Dict[str, Any]] = []
+    path = f"/V1/customer/{cid}/docs/loan/{loan_id}"
+    status, body = _v1_get(path)
 
-    def _rows_from(body: Any) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
+    rows: List[Dict[str, Any]] = []
+    if status == 200:
         if isinstance(body, list):
             rows = [r for r in body if isinstance(r, dict)]
         elif isinstance(body, dict):
@@ -779,66 +808,34 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
                 if isinstance(v, list):
                     rows = [r for r in v if isinstance(r, dict)]
                     break
-            if not rows:
-                for v in body.values():
-                    if isinstance(v, list):
-                        rows.extend([r for r in v if isinstance(r, dict)])
-        return rows
 
-    def _consume(rows: List[Dict[str, Any]], kind: str) -> int:
-        kept = 0
-        for r in rows:
-            shaped = _shape_v1_document(r, loan_id, kind)
-            if not shaped or shaped["id"] in seen:
-                continue
-            seen.add(shaped["id"])
-            out.append(shaped)
-            kept += 1
-        return kept
+    kept = 0
+    for r in rows:
+        shaped = _shape_v1_document(r, loan_id, "loan", include_data=include_data)
+        if not shaped or shaped["id"] in seen:
+            continue
+        seen.add(shaped["id"])
+        out.append(shaped)
+        kept += 1
 
-    def _try(path: str, kind: str, filter_by_loan: bool = False) -> None:
-        status, body = _v1_get(path)
-        rows = _rows_from(body) if status == 200 else []
-        if filter_by_loan and rows:
-            # Customer-level docs endpoint returns ALL of the customer's
-            # documents — narrow to the ones belonging to this loan.
-            matching = []
-            for r in rows:
-                rec_loan = (r.get("loanId") or r.get("LoanId")
-                            or r.get("hdr_id") or r.get("HdrId")
-                            or r.get("LoanHeaderId"))
-                if rec_loan in (None, ""):
-                    continue
-                if str(rec_loan) == str(loan_id):
-                    matching.append(r)
-            rows = matching
-        kept = _consume(rows, kind) if status == 200 else 0
-        if debug:
-            preview = body
-            if isinstance(body, list):
-                preview = body[:2]
-            elif isinstance(body, dict):
-                # cap dict-of-list previews
-                preview = {k: (v[:2] if isinstance(v, list) else v)
-                           for k, v in list(body.items())[:10]}
-            attempts.append({
-                "path": path, "status": status, "rows": len(rows),
-                "kept": kept, "preview": preview,
-            })
-        if status not in (200, 404):
-            log.warning("v1 loan-docs %s status=%s loan=%s", path, status, loan_id)
-
-    # Try the documented per-loan endpoint plus several Vergent-style
-    # variants. Order matters: prefer per-loan endpoints (more specific)
-    # before falling back to the customer-level dump.
-    _try(f"/V1/customer/{cid}/docs/loan/{loan_id}", "loan")
-    _try(f"/V1/customer/{cid}/docs/loan/{loan_id}/OtherFiles", "other")
-    _try(f"/V1/Customer/{cid}/Docs/Loan/{loan_id}", "loan")  # PascalCase
-    _try(f"/V1/GetCustomerLoanDocs?custId={cid}&loanId={loan_id}", "loan")
-    _try(f"/V1/GetCustomerLoanDocs?custId={cid}&hdrId={loan_id}", "loan")
-    # Customer-level dump filtered to this loan — the most-likely-to-work
-    # fallback if the per-loan paths 404 on our tenant.
-    _try(f"/V1/customer/{cid}/docs", "loan", filter_by_loan=True)
+    if debug:
+        # Cap the preview so we don't blow up the response when content
+        # is base64-inlined. Strip Data field from previews.
+        def _strip(rec: Any) -> Any:
+            if isinstance(rec, dict):
+                return {k: ("<...>" if k == "Data" else v) for k, v in rec.items()}
+            return rec
+        preview = body
+        if isinstance(body, list):
+            preview = [_strip(r) for r in body[:3]]
+        elif isinstance(body, dict):
+            preview = {k: v for k, v in list(body.items())[:8]}
+        attempts.append({
+            "path": path, "status": status, "rows": len(rows),
+            "kept": kept, "preview": preview,
+        })
+    if status not in (200, 404):
+        log.warning("v1 loan-docs %s status=%s loan=%s", path, status, loan_id)
 
     # Newest first.
     def _key(item: Dict[str, Any]) -> str:
@@ -921,14 +918,17 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
     if not doc_id:
         return _json_response(400, {"error": "missing_docId"})
 
-    # Ownership check: walk this customer's loans and confirm the docId
-    # is on one of them. Cheap relative to the binary fetch.
+    # Ownership check + content fetch: walk this customer's loans and
+    # find the matching docId. Vergent's listing endpoint inlines the
+    # document content as base64 in the `Data` field, so a single
+    # listing call gets us both ownership confirmation AND the content
+    # — no separate binary download endpoint needed.
     shaped = _fetch_all_loans(cid)
     if not shaped:
         return _json_response(404, {"error": "doc_not_found"})
     matched = None
     for loan in shaped:
-        docs, _ = _list_v1_loan_docs(cid, loan.get("id"))
+        docs, _ = _list_v1_loan_docs(cid, loan.get("id"), include_data=True)
         for d in docs:
             if str(d.get("id")) == str(doc_id):
                 matched = d
@@ -939,14 +939,32 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
         log.warning("doc-download not-owned cust=%s doc=%s", cid, doc_id)
         return _json_response(404, {"error": "doc_not_found"})
 
-    status, body_bytes, headers = _v1_get_binary(f"/V1/docs/{doc_id}/download")
-    if status != 200 or not body_bytes:
-        log.warning("doc-download upstream status=%s doc=%s", status, doc_id)
+    data_b64 = matched.get("_data") or ""
+    if not data_b64:
+        # Fallback: redirect to the short-lived Azure blob URL Vergent
+        # provides. Used only if Data was empty (rare).
+        url = matched.get("_documentUrl") or ""
+        if url:
+            return {
+                "statusCode": 302,
+                "headers": {**CORS_HEADERS, "Location": url, "Cache-Control": "no-store"},
+                "body": "",
+            }
+        log.warning("doc-download no-data cust=%s doc=%s", cid, doc_id)
         return _json_response(502, {"error": "doc_unavailable"})
 
-    content_type = headers.get("content-type") or "application/pdf"
-    fname = matched.get("fileName") or f"document-{doc_id}.pdf"
-    # Strip any path separators a server might have put in the filename.
+    # Content type from Vergent's DocTypeName (e.g. "aspx" -> html).
+    type_name = matched.get("_docTypeName") or ""
+    if type_name in ("html", "htm", "aspx"):
+        content_type = "text/html; charset=utf-8"
+    elif type_name == "pdf":
+        content_type = "application/pdf"
+    elif type_name in ("png", "jpg", "jpeg", "gif"):
+        content_type = f"image/{'jpeg' if type_name == 'jpg' else type_name}"
+    else:
+        content_type = "application/octet-stream"
+
+    fname = matched.get("fileName") or f"document-{doc_id}.html"
     fname = fname.replace("/", "_").replace("\\", "_").replace('"', "")
 
     return {
@@ -958,7 +976,7 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
             "Cache-Control": "private, max-age=60",
         },
         "isBase64Encoded": True,
-        "body": base64.b64encode(body_bytes).decode("ascii"),
+        "body": data_b64,  # Vergent already base64-encodes Data
     }
 
 
