@@ -126,7 +126,7 @@ def start_sms(to: str) -> Tuple[bool, str]:
 
     status, body, _raw = _post(
         creds, "/verifications/sms",
-        {"phone_number": to_e164, "verify_profile_id": creds["verifyProfileId"]},
+        {"phone_number": to_e164, "verify_profile_id": creds["verifyProfileId"], "code_length": 6},
     )
     data = body.get("data") if isinstance(body, dict) else None
     if status in (200, 201) and isinstance(data, dict):
