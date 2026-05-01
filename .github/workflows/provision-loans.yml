@@ -64,21 +64,27 @@ jobs:
             "POST /api/my-loan/new"
           )
           for RK in "${ROUTES[@]}"; do
+            # NOTE: --query "Items[?...].RouteId | [0]" with --output text
+            # was returning multi-line "None\nNone" for non-existent routes,
+            # which the existence check below treated as a real id and
+            # silently skipped creation. Drop the | [0], take head -n 1
+            # explicitly. Empty output = route doesn't exist.
             EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
-              --query "Items[?RouteKey=='$RK'].RouteId | [0]" \
-              --output text 2>/dev/null || echo "")
+              --query "Items[?RouteKey=='$RK'].RouteId" \
+              --output text 2>/dev/null | head -n 1 || echo "")
             if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
               echo "Route '$RK' already exists ($EXISTING)"
               continue
             fi
-            aws apigatewayv2 create-route \
+            CREATED_ID=$(aws apigatewayv2 create-route \
               --api-id "$HTTP_API_ID" \
               --route-key "$RK" \
               --target "integrations/$INTEG_ID" \
               --authorization-type JWT \
               --authorizer-id "$AUTHORIZER_ID" \
-              --no-cli-pager >/dev/null
-            echo "Created route '$RK'"
+              --query RouteId --output text \
+              --no-cli-pager)
+            echo "Created route '$RK' ($CREATED_ID)"
           done
 
           STMT_ID=apigateway-invoke-loans
