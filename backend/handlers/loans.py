@@ -414,6 +414,28 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
+    """Fetch every loan for a customer (open + closed/paid-off).
+
+    v1's plain `/V1/{cid}/loans` returns open loans only by default. We
+    try the broadest endpoint first and fall back, logging which path
+    Vergent actually serves so we can simplify later if a tier proves
+    redundant. Returns an empty list if every attempt fails.
+    """
+    candidates = (
+        f"/V1/{cid}/loans/all",
+        f"/V1/{cid}/loans?includePrevious=true&numresults=200",
+        f"/V1/{cid}/loans",
+    )
+    for path in candidates:
+        status, body = _v1_get(path)
+        if status == 200 and isinstance(body, list):
+            log.info("v1 loans served by %s count=%s", path, len(body))
+            return [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
+        log.info("v1 loans %s status=%s", path, status)
+    return []
+
+
 # ─────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────
@@ -472,12 +494,10 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     if not cid:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
 
-    status, body = _v1_get(f"/V1/{cid}/loans")
-    if status != 200 or not isinstance(body, list):
-        log.warning("v1 loans call failed status=%s", status)
-        return _json_response(200, {"loan": None, "reason": "upstream-error"})
+    shaped = _fetch_all_loans(cid)
+    if not shaped:
+        return _json_response(200, {"loan": None, "loanCount": 0, "allLoans": []})
 
-    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
     # Pick the first outstanding loan; fall back to most recent by origination date.
     outstanding = [l for l in shaped if l.get("isOutstanding")]
     active = outstanding[0] if outstanding else (shaped[0] if shaped else None)
@@ -587,12 +607,12 @@ def get_activity(event: Dict[str, Any]) -> Dict[str, Any]:
     qs = event.get("queryStringParameters") or {}
     requested = (qs or {}).get("loanId") if isinstance(qs, dict) else None
 
-    # Always fetch the customer's loans — gives us ownership validation
-    # plus the storeId we need for GetCustomerLoanHistory.
-    status, body = _v1_get(f"/V1/{cid}/loans")
-    if status != 200 or not isinstance(body, list):
+    # Always fetch the customer's loans (open + closed) — gives us
+    # ownership validation plus the storeId we need for
+    # GetCustomerLoanHistory.
+    shaped = _fetch_all_loans(cid)
+    if not shaped:
         return _json_response(200, {"items": []})
-    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
 
     if requested:
         loan = next(
@@ -719,10 +739,9 @@ def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(400, {"error": "missing_loanId"})
 
     # Validate ownership: the loanId must belong to this customer.
-    status, body = _v1_get(f"/V1/{cid}/loans")
-    if status != 200 or not isinstance(body, list):
+    shaped = _fetch_all_loans(cid)
+    if not shaped:
         return _json_response(200, {"documents": []})
-    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
     loan = next(
         (l for l in shaped
          if str(l.get("id")) == str(requested)
@@ -770,10 +789,9 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
 
     # Ownership check: walk this customer's loans and confirm the docId
     # is on one of them. Cheap relative to the binary fetch.
-    status, body = _v1_get(f"/V1/{cid}/loans")
-    if status != 200 or not isinstance(body, list):
+    shaped = _fetch_all_loans(cid)
+    if not shaped:
         return _json_response(404, {"error": "doc_not_found"})
-    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
     matched = None
     for loan in shaped:
         for d in _list_v1_loan_docs(cid, loan.get("id")):
