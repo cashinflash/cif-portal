@@ -1,0 +1,133 @@
+name: Provision doc-pdf Lambda
+
+# Creates / reconciles the cif-portal-doc-pdf-dev Lambda used to
+# convert Vergent's HTML document content to PDF via headless
+# Chromium. Idempotent — safe to re-run.
+#
+# What this workflow does:
+#   1. Creates the Lambda if it doesn't exist (Node.js 20, x86_64,
+#      1024 MB memory, 30 s timeout). Uses an empty placeholder
+#      zip — actual code is shipped by deploy-doc-pdf.yml.
+#   2. Grants the loans Lambda's IAM role permission to invoke
+#      doc-pdf via lambda:InvokeFunction.
+#   3. Adds DOC_PDF_FN_NAME env var to the loans Lambda so its
+#      handler knows which function name to invoke.
+#
+# Run once after merging the doc-pdf code; deploy-doc-pdf.yml then
+# updates the code on every push.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/workflows/provision-doc-pdf.yml'
+
+env:
+  AWS_REGION: us-east-1
+  FN: cif-portal-doc-pdf-dev
+  LOANS_FN: cif-portal-loans-dev
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create or reconcile doc-pdf Lambda
+        run: |
+          set -e
+          if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
+            echo "$FN already exists — leaving code to deploy-doc-pdf.yml."
+            # Still reconcile config (memory, timeout, runtime, arch) in case
+            # someone changed them out-of-band.
+            aws lambda update-function-configuration \
+              --function-name "$FN" \
+              --memory-size 1024 \
+              --timeout 30 \
+              --runtime nodejs20.x \
+              --no-cli-pager >/dev/null
+            aws lambda wait function-updated --function-name "$FN"
+          else
+            echo "$FN does not exist — creating with placeholder code."
+            # Reuse the loans Lambda's IAM role — same secret-read perms
+            # aren't strictly needed but keeping it identical means we
+            # don't sprout a third role to maintain.
+            ROLE=$(aws lambda get-function-configuration --function-name "$LOANS_FN" --query 'Role' --output text)
+            echo "Using IAM role: $ROLE"
+
+            # Placeholder zip — just an empty handler so the function
+            # can be created. deploy-doc-pdf.yml replaces this on first
+            # push.
+            mkdir -p /tmp/placeholder
+            cat > /tmp/placeholder/index.mjs <<'EOF'
+            export const handler = async () => ({ ok: false, error: 'not_yet_deployed' });
+            EOF
+            (cd /tmp/placeholder && zip -q /tmp/placeholder.zip index.mjs)
+
+            aws lambda create-function \
+              --function-name "$FN" \
+              --runtime nodejs20.x \
+              --architectures x86_64 \
+              --role "$ROLE" \
+              --handler index.handler \
+              --zip-file fileb:///tmp/placeholder.zip \
+              --memory-size 1024 \
+              --timeout 30 \
+              --no-cli-pager >/dev/null
+            aws lambda wait function-active --function-name "$FN"
+            echo "$FN created."
+          fi
+
+      - name: Grant loans Lambda permission to invoke doc-pdf
+        run: |
+          set -e
+          DOC_PDF_ARN=$(aws lambda get-function --function-name "$FN" --query 'Configuration.FunctionArn' --output text)
+          LOANS_ROLE_ARN=$(aws lambda get-function-configuration --function-name "$LOANS_FN" --query 'Role' --output text)
+          LOANS_ROLE_NAME=$(echo "$LOANS_ROLE_ARN" | awk -F/ '{print $NF}')
+          echo "doc-pdf ARN: $DOC_PDF_ARN"
+          echo "loans role: $LOANS_ROLE_NAME"
+
+          aws iam put-role-policy \
+            --role-name "$LOANS_ROLE_NAME" \
+            --policy-name loans-invoke-doc-pdf \
+            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"lambda:InvokeFunction\",\"Resource\":\"$DOC_PDF_ARN\"}]}"
+          echo "IAM policy loans-invoke-doc-pdf attached."
+
+      - name: Set DOC_PDF_FN_NAME env var on loans Lambda
+        run: |
+          set -e
+          EXISTING_ENV=$(aws lambda get-function-configuration \
+            --function-name "$LOANS_FN" \
+            --query 'Environment.Variables' --output json 2>/dev/null)
+          if [ "$EXISTING_ENV" = "null" ] || [ -z "$EXISTING_ENV" ]; then
+            EXISTING_ENV='{}'
+          fi
+          NEW_ENV=$(echo "$EXISTING_ENV" | jq --arg v "$FN" '. + {DOC_PDF_FN_NAME: $v}')
+          aws lambda update-function-configuration \
+            --function-name "$LOANS_FN" \
+            --environment "{\"Variables\": $NEW_ENV}" \
+            --no-cli-pager >/dev/null
+          aws lambda wait function-updated --function-name "$LOANS_FN"
+          echo "Set DOC_PDF_FN_NAME=$FN on $LOANS_FN."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### doc-pdf provisioning"
+            echo ""
+            echo "- Lambda: $FN (nodejs20.x, x86_64, 1024 MB, 30 s)"
+            echo "- IAM: $LOANS_FN role granted lambda:InvokeFunction on doc-pdf"
+            echo "- Env: DOC_PDF_FN_NAME=$FN set on $LOANS_FN"
+            echo ""
+            echo "Next: push to backend/doc_pdf/** to deploy actual code via deploy-doc-pdf.yml."
+          } >> "$GITHUB_STEP_SUMMARY"

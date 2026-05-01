@@ -66,6 +66,8 @@ VERGENT_SECRET_ARN = os.environ["VERGENT_SECRET_ARN"]
 HANDOFF_AUTHORITY = os.environ.get("VERGENT_HANDOFF_AUTHORITY", "cashinflash.apply.vergentlms.com")
 
 _secrets = boto3.client("secretsmanager")
+_lambda_client = boto3.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+DOC_PDF_FN_NAME = os.environ.get("DOC_PDF_FN_NAME", "")  # set by provision-doc-pdf.yml
 _creds_cache: Optional[Dict[str, str]] = None
 
 # v1 service Token (GUID) — used on every v1 LMS call.
@@ -890,12 +892,64 @@ def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
     return _json_response(200, response)
 
 
+def _render_html_to_pdf(html_b64: str, file_name: str) -> Optional[bytes]:
+    """Invoke the doc-pdf Lambda to render HTML → PDF. Returns the
+    raw PDF bytes on success, or None on any failure (caller falls
+    back to serving HTML)."""
+    import base64
+    if not DOC_PDF_FN_NAME:
+        log.warning("DOC_PDF_FN_NAME not set; skipping PDF render")
+        return None
+    try:
+        html = base64.b64decode(html_b64).decode("utf-8", "replace")
+    except Exception as exc:
+        log.warning("doc-pdf decode failed: %s", exc)
+        return None
+    try:
+        resp = _lambda_client.invoke(
+            FunctionName=DOC_PDF_FN_NAME,
+            InvocationType="RequestResponse",
+            Payload=json.dumps({"html": html, "fileName": file_name}).encode("utf-8"),
+        )
+    except ClientError as exc:
+        log.warning("doc-pdf invoke failed: %s", exc.response.get("Error", {}).get("Code"))
+        return None
+    except Exception as exc:
+        log.warning("doc-pdf invoke unexpected: %s", exc)
+        return None
+
+    payload_bytes = resp.get("Payload").read() if resp.get("Payload") else b""
+    if resp.get("FunctionError"):
+        log.warning("doc-pdf returned FunctionError; payload=%s",
+                    payload_bytes[:200].decode("utf-8", "replace"))
+        return None
+    try:
+        result = json.loads(payload_bytes.decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not result.get("ok"):
+        log.warning("doc-pdf result not ok: %s", result.get("error") or result.get("detail") or "?")
+        return None
+    pdf_b64 = result.get("pdfBase64") or ""
+    if not pdf_b64:
+        return None
+    try:
+        return base64.b64decode(pdf_b64)
+    except Exception:
+        return None
+
+
 def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Stream a single document binary back to the browser.
+    """Stream a single document back to the browser.
 
     Ownership: only docs found via the customer's own loans are
     eligible. We list every loan's docs and confirm the requested
     docId is in that set before fetching from Vergent.
+
+    `?format=pdf` invokes the doc-pdf Lambda (Node.js + headless
+    Chromium) to convert Vergent's HTML to a real PDF before
+    serving it. Without that param, the original HTML is served
+    so the in-page modal can render it.
     """
     import base64
 
@@ -917,6 +971,9 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
             doc_id = parts[-2]
     if not doc_id:
         return _json_response(400, {"error": "missing_docId"})
+
+    qs = event.get("queryStringParameters") or {}
+    want_pdf = (qs or {}).get("format") == "pdf"
 
     # Ownership check + content fetch: walk this customer's loans and
     # find the matching docId. Vergent's listing endpoint inlines the
@@ -964,15 +1021,37 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
     else:
         content_type = "application/octet-stream"
 
-    fname = matched.get("fileName") or f"document-{doc_id}.html"
-    fname = fname.replace("/", "_").replace("\\", "_").replace('"', "")
+    fname_base = matched.get("fileName") or f"document-{doc_id}.html"
+    fname_base = fname_base.replace("/", "_").replace("\\", "_").replace('"', "")
+
+    # PDF path: only meaningful when the source is HTML/aspx. For PDFs
+    # already, just stream the original. For everything else, fall back
+    # to the original content too — we only convert HTML.
+    if want_pdf and type_name in ("html", "htm", "aspx"):
+        pdf_bytes = _render_html_to_pdf(data_b64, fname_base)
+        if pdf_bytes:
+            pdf_fname = fname_base.rsplit(".", 1)[0] + ".pdf"
+            return {
+                "statusCode": 200,
+                "headers": {
+                    **CORS_HEADERS,
+                    "Content-Type": "application/pdf",
+                    "Content-Disposition": f'inline; filename="{pdf_fname}"',
+                    "Cache-Control": "private, max-age=60",
+                },
+                "isBase64Encoded": True,
+                "body": base64.b64encode(pdf_bytes).decode("ascii"),
+            }
+        # PDF render failed — fall through and serve HTML so the user
+        # still gets *something* rather than an error.
+        log.warning("doc-pdf render failed; falling back to HTML cust=%s doc=%s", cid, doc_id)
 
     return {
         "statusCode": 200,
         "headers": {
             **CORS_HEADERS,
             "Content-Type": content_type,
-            "Content-Disposition": f'inline; filename="{fname}"',
+            "Content-Disposition": f'inline; filename="{fname_base}"',
             "Cache-Control": "private, max-age=60",
         },
         "isBase64Encoded": True,

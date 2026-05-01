@@ -52,7 +52,16 @@ backend/
                        #   /api/my-loans/activity (?loanId=N optional),
                        #   /api/my-loans/documents (?loanId=N),
                        #   /api/my-loans/documents/{docId}/download
+                       #     (?format=pdf invokes the doc-pdf Lambda)
                        # POST /api/my-loan/new (handoff to Vergent)
+  doc_pdf/             # Node.js 20 Lambda — HTML → PDF conversion via
+                       #   puppeteer-core + @sparticuz/chromium.
+                       #   Driven from loans.py via boto3 lambda.invoke
+                       #   when a customer hits ?format=pdf on the doc
+                       #   download endpoint. x86_64 / 1024 MB / 30 s.
+                       #   ~50 MB zip with chromium binary; deployed
+                       #   via .github/workflows/deploy-doc-pdf.yml
+                       #   (zip → S3 → update-function-code).
     payments.py        # GET /api/my-cards, /api/my-payment/loan-summary
                        # POST /api/my-cards (add new card — forwards
                        #   full PAN over HTTPS to Vergent's
@@ -279,6 +288,30 @@ organic blobs).
 ## Recent work log
 
 Update this section at the end of each session. Newest first.
+
+### 2026-05-01 — Server-side PDF for loan documents (doc-pdf Lambda)
+- New Node.js 20 Lambda `cif-portal-doc-pdf-dev` converts Vergent's
+  HTML signed-document content to real PDFs via headless Chromium
+  (`puppeteer-core` + `@sparticuz/chromium`). x86_64 / 1024 MB / 30s.
+- Driven from `loans.py` via `boto3.lambda.invoke` when the customer
+  hits `/api/my-loans/documents/{docId}/download?format=pdf`. Without
+  that param, the original HTML is served (used by the in-page modal
+  viewer for fast inline rendering).
+- Two new workflows:
+    - `provision-doc-pdf.yml`: creates the Lambda, grants the loans
+      Lambda's IAM role `lambda:InvokeFunction` permission on it,
+      sets `DOC_PDF_FN_NAME` env var on the loans Lambda. Idempotent.
+    - `deploy-doc-pdf.yml`: builds the function zip (npm install +
+      zip including chromium binary, ~50 MB), uploads to a private
+      S3 bucket `cif-portal-lambda-artifacts-730667140069` (created
+      on first run), and runs `lambda update-function-code` against
+      the S3 reference. Triggers on push to `backend/doc_pdf/**`.
+- Frontend: View button still uses the HTML render (fast modal),
+  Download button (and the modal's internal Download) call
+  `?format=pdf` to get a real PDF. Filenames swapped from `.html`
+  to `.pdf`. Modal-stuck-on-loading bug fixed by overlaying the
+  loading panel via CSS instead of toggling `iframe.hidden` (Chrome
+  skips the load event for `display:none` iframes).
 
 ### 2026-05-01 — My Loans page (Phases 1 + 2)
 - **Phase 1 (commit `e561107`)**: replaced `loans.html` stub with real

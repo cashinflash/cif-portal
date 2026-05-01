@@ -1,0 +1,15 @@
+{
+  "name": "cif-portal-doc-pdf",
+  "version": "1.0.0",
+  "description": "HTML to PDF conversion Lambda using headless Chromium",
+  "type": "module",
+  "main": "index.mjs",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^131.0.1",
+    "puppeteer-core": "^23.10.0"
+  }
+}

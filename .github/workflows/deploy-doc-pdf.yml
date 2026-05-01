@@ -1,0 +1,121 @@
+name: Deploy doc-pdf Lambda
+
+# Builds the doc-pdf Lambda zip (Node.js 20 + @sparticuz/chromium +
+# puppeteer-core) and updates the Lambda code. Runs on every push
+# that touches backend/doc_pdf/**.
+#
+# The zip ends up around 50–60 MB (chromium binary), which exceeds
+# the 50 MB direct upload limit. We push to a dedicated S3 bucket
+# and update the function via --s3-bucket / --s3-key.
+#
+# Provisioning (creating the function the first time + IAM grants)
+# lives in provision-doc-pdf.yml — run that once before this can do
+# anything.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'backend/doc_pdf/**'
+      - '.github/workflows/deploy-doc-pdf.yml'
+
+env:
+  AWS_REGION: us-east-1
+  FN: cif-portal-doc-pdf-dev
+  ARTIFACT_BUCKET: cif-portal-lambda-artifacts-730667140069
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure artifact bucket exists
+        run: |
+          set -e
+          if aws s3api head-bucket --bucket "$ARTIFACT_BUCKET" 2>/dev/null; then
+            echo "Bucket $ARTIFACT_BUCKET exists."
+          else
+            echo "Creating bucket $ARTIFACT_BUCKET (region $AWS_REGION)."
+            # us-east-1 is the only region where create-bucket must NOT
+            # specify a LocationConstraint.
+            if [ "$AWS_REGION" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$ARTIFACT_BUCKET"
+            else
+              aws s3api create-bucket --bucket "$ARTIFACT_BUCKET" \
+                --create-bucket-configuration "LocationConstraint=$AWS_REGION"
+            fi
+            # Block public access — these are private Lambda artifacts.
+            aws s3api put-public-access-block --bucket "$ARTIFACT_BUCKET" \
+              --public-access-block-configuration \
+              "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+          fi
+
+      - name: Install production deps
+        working-directory: backend/doc_pdf
+        run: |
+          # Use npm install (not ci) since we don't commit package-lock.json
+          # for this small dependency tree. Lock to production deps only.
+          npm install --omit=dev --no-audit --no-fund --no-progress
+
+      - name: Package zip
+        working-directory: backend/doc_pdf
+        run: |
+          set -e
+          rm -f /tmp/doc_pdf.zip
+          # Include source + node_modules. Exclude tests, docs, maps to
+          # keep size as small as possible.
+          zip -qr /tmp/doc_pdf.zip index.mjs package.json node_modules \
+            -x "node_modules/**/*.md" \
+            -x "node_modules/**/test/**" \
+            -x "node_modules/**/tests/**" \
+            -x "node_modules/**/*.ts" \
+            -x "node_modules/**/*.map"
+          ls -lh /tmp/doc_pdf.zip
+
+      - name: Upload zip to S3
+        run: |
+          set -e
+          KEY="doc-pdf/${GITHUB_SHA}.zip"
+          aws s3 cp /tmp/doc_pdf.zip "s3://$ARTIFACT_BUCKET/$KEY"
+          echo "S3_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Update Lambda code from S3
+        run: |
+          set -e
+          aws lambda update-function-code \
+            --function-name "$FN" \
+            --s3-bucket "$ARTIFACT_BUCKET" \
+            --s3-key "$S3_KEY" \
+            --no-cli-pager >/dev/null
+          aws lambda wait function-updated --function-name "$FN"
+          # Reconcile handler in case the create-function placeholder
+          # set it differently.
+          aws lambda update-function-configuration \
+            --function-name "$FN" \
+            --handler index.handler \
+            --no-cli-pager >/dev/null
+          aws lambda wait function-updated --function-name "$FN"
+          echo "Lambda $FN updated from s3://$ARTIFACT_BUCKET/$S3_KEY."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### doc-pdf deploy"
+            echo "- Lambda: $FN"
+            echo "- Artifact: s3://$ARTIFACT_BUCKET/$S3_KEY"
+          } >> "$GITHUB_STEP_SUMMARY"

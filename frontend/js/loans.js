@@ -424,8 +424,13 @@
   // ---------- DOCUMENT VIEWER (MODAL) + DOWNLOAD ----------
   var _activeBlobUrl = null;  // currently-displayed modal blob — revoked on close
 
-  function fetchDocBlob(doc) {
-    return fetch(DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download', {
+  // format='html' for the modal viewer (Vergent's native HTML, fast),
+  // 'pdf' for the Download button (rendered server-side via headless
+  // Chromium so the customer gets a real PDF on disk).
+  function fetchDocBlob(doc, format) {
+    var url = DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download';
+    if (format === 'pdf') url += '?format=pdf';
+    return fetch(url, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': '*/*' },
       credentials: 'omit'
     }).then(function (res) {
@@ -439,10 +444,22 @@
     });
   }
 
+  function pdfFileName(doc) {
+    var n = doc.fileName || ('document-' + doc.id);
+    // Strip .html / .aspx / .htm and append .pdf so the saved file is
+    // labelled correctly when the customer opens their downloads folder.
+    n = n.replace(/\.(html|htm|aspx)$/i, '');
+    if (!/\.pdf$/i.test(n)) n += '.pdf';
+    return n;
+  }
+
   function openDocInModal(doc, btn) {
     var orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
-    fetchDocBlob(doc).then(function (blob) {
+    // Modal uses the HTML render — it's fast (~200ms) and the iframe
+    // renders Vergent's docs perfectly. The Download button inside
+    // the modal triggers the PDF render path separately.
+    fetchDocBlob(doc, 'html').then(function (blob) {
       // Release any previous blob URL still attached to the modal.
       if (_activeBlobUrl) { URL.revokeObjectURL(_activeBlobUrl); _activeBlobUrl = null; }
       var url = URL.createObjectURL(blob);
@@ -451,8 +468,16 @@
       setText(qs('#docModalTitle'), doc.displayName || doc.fileName || 'Document');
       var dl = qs('#docModalDownload');
       if (dl) {
-        dl.href = url;
-        dl.download = doc.fileName || ('document-' + doc.id + '.html');
+        // Wire the modal's Download button to trigger the same PDF
+        // download path the row-level Download button uses (not the
+        // HTML blob URL — that'd save .html which is what we're
+        // moving away from).
+        dl.onclick = function (e) {
+          e.preventDefault();
+          downloadDocument(doc, dl);
+        };
+        dl.removeAttribute('href');
+        dl.removeAttribute('download');
       }
 
       var loading = qs('#docModalLoading');
@@ -496,7 +521,11 @@
     var loading = qs('#docModalLoading');
     if (loading) loading.hidden = true;
     var dl = qs('#docModalDownload');
-    if (dl) { dl.removeAttribute('href'); dl.removeAttribute('download'); }
+    if (dl) {
+      dl.removeAttribute('href');
+      dl.removeAttribute('download');
+      dl.onclick = null;
+    }
     if (_activeBlobUrl) {
       // Slight delay so the iframe finishes releasing the URL.
       var u = _activeBlobUrl;
@@ -529,12 +558,14 @@
 
   function downloadDocument(doc, btn) {
     var orig = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = 'Downloading…'; }
-    fetchDocBlob(doc).then(function (blob) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Preparing PDF…'; }
+    // Server-side PDF render via the doc-pdf Lambda (headless Chromium).
+    // First-call cold-start can be ~5–8s; warm calls are 1–3s.
+    fetchDocBlob(doc, 'pdf').then(function (blob) {
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = doc.fileName || ('document-' + doc.id + '.html');
+      a.download = pdfFileName(doc);
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();

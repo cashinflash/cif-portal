@@ -148,8 +148,32 @@ Resources:
               Authorizer: JwtAuthorizer
               AuthorizerId: !Ref JwtAuthorizerId
 
+  # HTML → PDF conversion Lambda (Node.js + headless Chromium). Driven
+  # from the loans Lambda via boto3 lambda.invoke when a customer
+  # requests ?format=pdf on /api/my-loans/documents/{id}/download.
+  # Provisioned and deployed via .github/workflows/provision-doc-pdf.yml
+  # and deploy-doc-pdf.yml — this declaration is documentation only;
+  # the actual function is created/updated by the workflows because the
+  # zipped artifact (~50 MB with chromium binary) needs S3-based deploy
+  # which the SAM transform doesn't handle as cleanly.
+  DocPdfFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub cif-portal-doc-pdf-${StackEnv}
+      Runtime: nodejs20.x
+      Architectures: [x86_64]
+      MemorySize: 1024
+      Timeout: 30
+      Handler: index.handler
+      CodeUri: ../backend/doc_pdf/
+      Description: HTML → PDF conversion via puppeteer-core + chromium
+
 Outputs:
   LoansFnArn:
     Value: !GetAtt LoansFn.Arn
     Export:
       Name: !Sub cif-portal-${StackEnv}-LoansFnArn
+  DocPdfFnArn:
+    Value: !GetAtt DocPdfFn.Arn
+    Export:
+      Name: !Sub cif-portal-${StackEnv}-DocPdfFnArn
