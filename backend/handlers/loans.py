@@ -746,14 +746,30 @@ def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str) -> Optio
     }
 
 
-def _list_v1_loan_docs(cid: str, loan_id: Any) -> List[Dict[str, Any]]:
-    """Hit /V1/customer/{cid}/docs/loan/{loanId} and .../OtherFiles, merge."""
+def _list_v1_loan_docs(cid: str, loan_id: Any,
+                       debug: bool = False) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Hunt for documents attached to a specific loan via the v1 API.
+
+    Vergent v1 has inconsistent URL conventions across endpoints
+    (some lowercase, some PascalCase, some verb-style with query
+    params), so we try several candidate paths and merge whatever
+    comes back. Empty list ≠ no docs — the path may just not exist
+    on our tenant. The customer-level `/docs` endpoint is the most
+    reliable fallback because it returns every document the
+    customer has, which we then filter to the requested loanId.
+
+    Returns (shaped_docs, attempts). `attempts` is for diagnostics
+    when debug=True — a list of {path, status, body_preview} dicts
+    showing exactly what each candidate path returned.
+    """
     if loan_id in (None, ""):
-        return []
+        return [], []
+
     out: List[Dict[str, Any]] = []
     seen: set = set()
+    attempts: List[Dict[str, Any]] = []
 
-    def _consume(body: Any, kind: str) -> None:
+    def _rows_from(body: Any) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         if isinstance(body, list):
             rows = [r for r in body if isinstance(r, dict)]
@@ -767,30 +783,68 @@ def _list_v1_loan_docs(cid: str, loan_id: Any) -> List[Dict[str, Any]]:
                 for v in body.values():
                     if isinstance(v, list):
                         rows.extend([r for r in v if isinstance(r, dict)])
+        return rows
+
+    def _consume(rows: List[Dict[str, Any]], kind: str) -> int:
+        kept = 0
         for r in rows:
             shaped = _shape_v1_document(r, loan_id, kind)
             if not shaped or shaped["id"] in seen:
                 continue
             seen.add(shaped["id"])
             out.append(shaped)
+            kept += 1
+        return kept
 
-    status1, body1 = _v1_get(f"/V1/customer/{cid}/docs/loan/{loan_id}")
-    if status1 == 200:
-        _consume(body1, "loan")
-    elif status1 not in (404,):
-        log.warning("v1 loan-docs status=%s loan=%s", status1, loan_id)
+    def _try(path: str, kind: str, filter_by_loan: bool = False) -> None:
+        status, body = _v1_get(path)
+        rows = _rows_from(body) if status == 200 else []
+        if filter_by_loan and rows:
+            # Customer-level docs endpoint returns ALL of the customer's
+            # documents — narrow to the ones belonging to this loan.
+            matching = []
+            for r in rows:
+                rec_loan = (r.get("loanId") or r.get("LoanId")
+                            or r.get("hdr_id") or r.get("HdrId")
+                            or r.get("LoanHeaderId"))
+                if rec_loan in (None, ""):
+                    continue
+                if str(rec_loan) == str(loan_id):
+                    matching.append(r)
+            rows = matching
+        kept = _consume(rows, kind) if status == 200 else 0
+        if debug:
+            preview = body
+            if isinstance(body, list):
+                preview = body[:2]
+            elif isinstance(body, dict):
+                # cap dict-of-list previews
+                preview = {k: (v[:2] if isinstance(v, list) else v)
+                           for k, v in list(body.items())[:10]}
+            attempts.append({
+                "path": path, "status": status, "rows": len(rows),
+                "kept": kept, "preview": preview,
+            })
+        if status not in (200, 404):
+            log.warning("v1 loan-docs %s status=%s loan=%s", path, status, loan_id)
 
-    status2, body2 = _v1_get(f"/V1/customer/{cid}/docs/loan/{loan_id}/OtherFiles")
-    if status2 == 200:
-        _consume(body2, "other")
-    elif status2 not in (404,):
-        log.warning("v1 loan-docs/OtherFiles status=%s loan=%s", status2, loan_id)
+    # Try the documented per-loan endpoint plus several Vergent-style
+    # variants. Order matters: prefer per-loan endpoints (more specific)
+    # before falling back to the customer-level dump.
+    _try(f"/V1/customer/{cid}/docs/loan/{loan_id}", "loan")
+    _try(f"/V1/customer/{cid}/docs/loan/{loan_id}/OtherFiles", "other")
+    _try(f"/V1/Customer/{cid}/Docs/Loan/{loan_id}", "loan")  # PascalCase
+    _try(f"/V1/GetCustomerLoanDocs?custId={cid}&loanId={loan_id}", "loan")
+    _try(f"/V1/GetCustomerLoanDocs?custId={cid}&hdrId={loan_id}", "loan")
+    # Customer-level dump filtered to this loan — the most-likely-to-work
+    # fallback if the per-loan paths 404 on our tenant.
+    _try(f"/V1/customer/{cid}/docs", "loan", filter_by_loan=True)
 
     # Newest first.
     def _key(item: Dict[str, Any]) -> str:
         return str(item.get("documentDate") or "")
     out.sort(key=_key, reverse=True)
-    return out
+    return out, attempts
 
 
 def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -801,6 +855,7 @@ def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
 
     qs = event.get("queryStringParameters") or {}
     requested = (qs or {}).get("loanId") if isinstance(qs, dict) else None
+    debug = (qs or {}).get("debug") == "1"
     if not requested:
         return _json_response(400, {"error": "missing_loanId"})
 
@@ -817,12 +872,25 @@ def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
     if not loan:
         return _json_response(404, {"error": "loan_not_found"})
 
-    docs = _list_v1_loan_docs(cid, loan.get("id"))
-    return _json_response(200, {
+    docs, attempts = _list_v1_loan_docs(cid, loan.get("id"), debug=debug)
+    response = {
         "documents": docs,
         "loanId": loan.get("id"),
         "publicId": loan.get("publicId"),
-    })
+    }
+    if debug:
+        response["_debug"] = {
+            "cid": cid,
+            "requestedLoanId": requested,
+            "matchedLoan": {
+                "id": loan.get("id"),
+                "publicId": loan.get("publicId"),
+                "status": loan.get("status"),
+                "statusId": loan.get("statusId"),
+            },
+            "attempts": attempts,
+        }
+    return _json_response(200, response)
 
 
 def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -860,7 +928,8 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(404, {"error": "doc_not_found"})
     matched = None
     for loan in shaped:
-        for d in _list_v1_loan_docs(cid, loan.get("id")):
+        docs, _ = _list_v1_loan_docs(cid, loan.get("id"))
+        for d in docs:
             if str(d.get("id")) == str(doc_id):
                 matched = d
                 break

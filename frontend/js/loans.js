@@ -9,10 +9,8 @@
   var API_BASE = '/api';
   var TOKEN_KEY = 'cif_id_token';
   var ACTIVE_ENDPOINT = API_BASE + '/my-loans/active';
-  var ACTIVITY_ENDPOINT = API_BASE + '/my-loans/activity';
   var DOCS_ENDPOINT = API_BASE + '/my-loans/documents';
   var LOGIN_URL = '/start.html';
-  var ACTIVITY_LIMIT = 50;
 
   // ---------- Helpers ----------
   function qs(sel, root) { return (root || document).querySelector(sel); }
@@ -249,7 +247,6 @@
           return;
         }
         renderDetail(loan);
-        loadActivity(loan.id);
         loadDocuments(loan.id);
       })
       .catch(function (err) {
@@ -313,75 +310,6 @@
       root.appendChild(dt);
       root.appendChild(dd);
     });
-  }
-
-  function loadActivity(loanId) {
-    api(ACTIVITY_ENDPOINT + '?loanId=' + encodeURIComponent(loanId) +
-        '&limit=' + ACTIVITY_LIMIT, token)
-      .then(function (data) {
-        renderActivity((data && data.items) || []);
-      })
-      .catch(function (err) {
-        if (err && err.message === 'unauthorized') return;
-        renderActivityError();
-      });
-  }
-
-  function renderActivity(items) {
-    var root = qs('#loanActivity');
-    if (!root) return;
-    root.innerHTML = '';
-
-    if (!items.length) {
-      var p = document.createElement('p');
-      p.className = 'dash-loanlist-empty';
-      p.textContent = 'No transactions on this loan yet.';
-      root.appendChild(p);
-      return;
-    }
-
-    var table = document.createElement('div');
-    table.className = 'dash-activity-table';
-
-    items.forEach(function (item) {
-      var row = document.createElement('div');
-      row.className = 'dash-activity-row';
-
-      var when = document.createElement('div');
-      when.className = 'dash-activity-when';
-      when.textContent = fmtDate(item.date);
-
-      var desc = document.createElement('div');
-      desc.className = 'dash-activity-desc';
-      desc.textContent = item.description || 'Activity';
-
-      var amt = document.createElement('div');
-      amt.className = 'dash-activity-amt ' +
-        (item.direction === 'credit' ? 'is-credit' : 'is-debit');
-      var prefix = item.direction === 'credit' ? '−' : '+';
-      amt.textContent = item.amount != null
-        ? (prefix + fmtCurrency(item.amount).replace(/^-/, ''))
-        : '—';
-
-      var bal = document.createElement('div');
-      bal.className = 'dash-activity-bal';
-      bal.textContent = item.balance != null
-        ? 'Balance ' + fmtCurrency(item.balance) : '';
-
-      row.appendChild(when);
-      row.appendChild(desc);
-      row.appendChild(amt);
-      row.appendChild(bal);
-      table.appendChild(row);
-    });
-    root.appendChild(table);
-  }
-
-  function renderActivityError() {
-    var root = qs('#loanActivity');
-    if (!root) return;
-    root.innerHTML =
-      '<p class="dash-loanlist-empty">We couldn’t load transactions right now.</p>';
   }
 
   // ---------- DOCUMENTS ----------
