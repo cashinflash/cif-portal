@@ -301,6 +301,27 @@ organic blobs).
 
 Update this section at the end of each session. Newest first.
 
+### 2026-05-02 — Phase E: customer confirmations + phone-verify diagnostic
+- New `_send_customer_confirmation()` in loans.py fires a banking-
+  style "we received your request" SES email to the customer's
+  sign-in inbox right after the admin notification, inside
+  `_create_change_request()`. All three flows (email/address/phone)
+  get acknowledged automatically. Best-effort — failures log but
+  don't propagate; queue is still source of truth.
+- `start_phone_verify` / `confirm_phone_verify` now log the
+  upstream status + first 400 chars of the raw response body to
+  CloudWatch on every attempt (with last-4-digits of phone for
+  PII safety) and surface `upstreamStatus` + `upstreamBody` in
+  the 502 JSON response. Added a single retry with uppercase
+  `SMS` (the {type} placeholder in the doc) when the lowercase
+  `sms` path returns 404. This is the diagnostic surface needed
+  to figure out why Vergent's SMS validate endpoint is returning
+  non-2xx for our tenant — pivot from there based on what the
+  diagnostic shows.
+- `_v1_request` extended with optional `return_raw=True` so callers
+  that need the raw body for diagnostics can opt in without
+  changing the default `(status, parsed)` shape.
+
 ### 2026-05-02 — Phase D: profile change-requests via admin-approval queue
 - Architecture pivot from the original Phase C plan. Profile edits
   on /profile.html (email / phone / address) no longer write to

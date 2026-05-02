@@ -272,14 +272,20 @@ def _v1_get(path: str) -> Tuple[int, Optional[Any]]:
 
 
 def _v1_request(method: str, path: str,
-                body: Optional[Dict[str, Any]] = None) -> Tuple[int, Optional[Any]]:
+                body: Optional[Dict[str, Any]] = None,
+                return_raw: bool = False):
     """Generic v1 call with method override. Used by profile-edit
     endpoints (PUT/POST) — _v1_get only handles GETs. Same token
-    refresh-on-401 behaviour."""
+    refresh-on-401 behaviour.
+
+    Returns (status, parsed) by default. With return_raw=True, returns
+    (status, parsed, raw_body) so callers can surface diagnostic info
+    when an endpoint returns an unexpected status.
+    """
     token = _get_v1_token()
     if not token:
-        return 0, None
-    status, resp, _raw = _http(
+        return (0, None, "") if return_raw else (0, None)
+    status, resp, raw = _http(
         f"{V1_BASE}{path}", method,
         body=body, headers={"Token": token},
     )
@@ -288,10 +294,12 @@ def _v1_request(method: str, path: str,
         _v1_token_exp = 0
         tok2 = _get_v1_token()
         if tok2:
-            status, resp, _raw = _http(
+            status, resp, raw = _http(
                 f"{V1_BASE}{path}", method,
                 body=body, headers={"Token": tok2},
             )
+    if return_raw:
+        return status, resp, raw
     return status, resp
 
 
@@ -671,6 +679,11 @@ def _create_change_request(cid: str, claims: Dict[str, Any],
     # IS in DDB so an admin reviewing the queue still sees it.
     _send_admin_notification(request_id, cid, claims, field,
                               current_value, requested_value, extra)
+
+    # Customer-facing confirmation email — closes the loop so they
+    # know their request landed. Best-effort; the queue is the
+    # source of truth.
+    _send_customer_confirmation(claims, field, requested_value, extra)
     return True, ""
 
 
@@ -774,6 +787,111 @@ def _send_admin_notification(request_id: str, cid: str, claims: Dict[str, Any],
                   e.response.get("Error", {}).get("Code"))
     except Exception as e:
         log.error("SES admin notification unexpected: %s", type(e).__name__)
+
+
+def _send_customer_confirmation(claims: Dict[str, Any], field: str,
+                                  requested: Any, extra: Dict[str, Any]) -> None:
+    """Send a banking-style 'we received your request' email to the
+    customer's sign-in inbox. Best-effort — failures log but don't
+    propagate. The queue is the source of truth either way."""
+    customer_email = (claims.get("email") or "").strip()
+    if not customer_email:
+        return
+
+    first_name = (claims.get("given_name") or "").strip() or "there"
+
+    field_labels = {
+        "email":   "email address",
+        "phone":   "mobile phone number",
+        "address": "mailing address",
+    }
+    field_label = field_labels.get(field, field)
+
+    def _fmt_request(v):
+        if v is None or v == "":
+            return ""
+        if isinstance(v, dict):
+            parts = [v.get("addr1"), v.get("addr2"), v.get("city"),
+                     v.get("state"), v.get("zip")]
+            return ", ".join(p for p in parts if p)
+        return str(v)
+
+    requested_display = _fmt_request(requested)
+
+    subject = "Cash in Flash — we received your request"
+
+    body_text = (
+        f"Hi {first_name},\n\n"
+        f"We've received your request to update the {field_label} on "
+        f"your Cash in Flash account.\n\n"
+        + (f"Requested: {requested_display}\n\n" if requested_display else "")
+        + "Our team will review and confirm the change with you within "
+          "one business day. For your security, this update won't take "
+          "effect until we've verified it.\n\n"
+          "If you didn't request this, please call us right away at "
+          "(747) 270-7121.\n\n"
+          "Thank you for being a Cash in Flash customer.\n\n"
+          "— The Cash in Flash Team\n\n"
+          "---\n"
+          "Cash in Flash · Licensed by the California Department of "
+          "Financial Protection and Innovation #214840\n"
+          "This is an automated message. Please do not reply to this email.\n"
+    )
+
+    requested_row = (
+        f'<tr><td style="padding:10px 0;color:#6b7280;width:140px;">Requested</td>'
+        f'<td style="padding:10px 0;color:#1a1a2e;font-weight:600;">{requested_display}</td></tr>'
+    ) if requested_display else ""
+
+    body_html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:32px 12px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="background:#0E8741;padding:24px 28px;">
+          <h1 style="margin:0;font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">We received your request</h1>
+        </td></tr>
+        <tr><td style="padding:28px;font-size:15px;line-height:1.6;color:#1a1a2e;">
+          <p style="margin:0 0 16px;">Hi {first_name},</p>
+          <p style="margin:0 0 16px;">We've received your request to update the <strong>{field_label}</strong> on your Cash in Flash account.</p>
+          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:16px 0 20px;background:#f9fafb;border-radius:8px;">
+            <tr><td style="padding:0 16px;">
+              <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+                {requested_row}
+              </table>
+            </td></tr>
+          </table>
+          <p style="margin:0 0 16px;">Our team will review and confirm the change with you within <strong>one business day</strong>. For your security, this update won't take effect until we've verified it.</p>
+          <p style="margin:0 0 16px;color:#6b7280;font-size:13px;">If you didn't request this change, please call us right away at <a href="tel:+17472707121" style="color:#0E8741;font-weight:600;text-decoration:none;">(747) 270-7121</a>.</p>
+          <p style="margin:24px 0 0;">Thank you for being a Cash in Flash customer.</p>
+          <p style="margin:8px 0 0;color:#6b7280;">— The Cash in Flash Team</p>
+        </td></tr>
+        <tr><td style="padding:20px 28px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.5;">
+          Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840<br>
+          This is an automated message. Please do not reply to this email.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+    try:
+        _ses.send_email(
+            Source=SES_SENDER_EMAIL,
+            Destination={"ToAddresses": [customer_email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {
+                    "Text": {"Data": body_text, "Charset": "UTF-8"},
+                    "Html": {"Data": body_html, "Charset": "UTF-8"},
+                },
+            },
+        )
+    except ClientError as e:
+        log.error("SES customer confirmation failed: %s",
+                  e.response.get("Error", {}).get("Code"))
+    except Exception as e:
+        log.error("SES customer confirmation unexpected: %s", type(e).__name__)
 
 
 def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -900,11 +1018,40 @@ def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if not phone:
         return _json_response(400, {"error": "invalid_phone"})
 
-    status, resp = _v1_request(
-        "POST", f"/V1/customer/{cid}/communication/sms/validate/{phone}")
+    # Try documented lowercase 'sms' first, fall back to uppercase 'SMS'
+    # on 404 — Vergent's docs show {type} as a placeholder, casing
+    # convention isn't pinned down. Capture the upstream status + body
+    # on every attempt so we can iterate from CloudWatch / DevTools.
+    last4 = phone[-4:] if len(phone) >= 4 else phone
+    status, _resp, raw = _v1_request(
+        "POST",
+        f"/V1/customer/{cid}/communication/sms/validate/{phone}",
+        return_raw=True,
+    )
+    log.info("phone validate-start type=sms status=%s cid=%s last4=%s body=%s",
+             status, cid, last4, (raw or "")[:400])
+    used_type = "sms"
+
+    if status == 404:
+        status2, _resp2, raw2 = _v1_request(
+            "POST",
+            f"/V1/customer/{cid}/communication/SMS/validate/{phone}",
+            return_raw=True,
+        )
+        log.info("phone validate-start type=SMS status=%s cid=%s last4=%s body=%s",
+                 status2, cid, last4, (raw2 or "")[:400])
+        if status2 in (200, 204):
+            status, raw, used_type = status2, raw2, "SMS"
+
     if status not in (200, 204):
-        log.warning("phone validate-start status=%s cid=%s", status, cid)
-        return _json_response(502, {"error": "sms_send_failed"})
+        log.warning("phone validate-start failed status=%s cid=%s last4=%s type=%s",
+                    status, cid, last4, used_type)
+        return _json_response(502, {
+            "error": "sms_send_failed",
+            "upstreamStatus": status,
+            "upstreamBody": (raw or "")[:400],
+            "triedType": used_type,
+        })
 
     return _json_response(200, {"ok": True, "maskedPhone": _mask_phone(phone)})
 
@@ -933,12 +1080,37 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
 
     # Verify the PIN with Vergent. This is the security boundary that
     # keeps a stolen session from queueing a fake phone for the admin
-    # to approve later.
-    status, resp = _v1_request(
-        "POST", f"/V1/customer/{cid}/communication/sms/validate/{phone}/confirm/{code}")
+    # to approve later. Mirrors the lowercase-then-uppercase casing
+    # fallback we use for start-verify so both paths work the same
+    # way.
+    last4 = phone[-4:] if len(phone) >= 4 else phone
+    status, _resp, raw = _v1_request(
+        "POST",
+        f"/V1/customer/{cid}/communication/sms/validate/{phone}/confirm/{code}",
+        return_raw=True,
+    )
+    log.info("phone validate-confirm type=sms status=%s cid=%s last4=%s body=%s",
+             status, cid, last4, (raw or "")[:400])
+
+    if status == 404:
+        status2, _resp2, raw2 = _v1_request(
+            "POST",
+            f"/V1/customer/{cid}/communication/SMS/validate/{phone}/confirm/{code}",
+            return_raw=True,
+        )
+        log.info("phone validate-confirm type=SMS status=%s cid=%s last4=%s body=%s",
+                 status2, cid, last4, (raw2 or "")[:400])
+        if status2 in (200, 204):
+            status, raw = status2, raw2
+
     if status not in (200, 204):
-        log.warning("phone validate-confirm status=%s cid=%s", status, cid)
-        return _json_response(400, {"error": "code_invalid_or_expired"})
+        log.warning("phone validate-confirm failed status=%s cid=%s last4=%s",
+                    status, cid, last4)
+        return _json_response(400, {
+            "error": "code_invalid_or_expired",
+            "upstreamStatus": status,
+            "upstreamBody": (raw or "")[:400],
+        })
 
     # Look up current phone so admin sees old vs new.
     current_phone = None
