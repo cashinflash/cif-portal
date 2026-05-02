@@ -24,6 +24,7 @@ env:
   ADMIN_NOTIFY_EMAIL: info@cashinflash.com
   SES_SENDER_EMAIL: no-reply@cashinflash.com
   TELNYX_SECRET_NAME: cif-portal/telnyx/credentials
+  COGNITO_USER_POOL_ID: us-east-1_U508xOs95
 
 jobs:
   provision:
@@ -152,6 +153,7 @@ jobs:
           TABLE_ARN="arn:aws:dynamodb:$AWS_REGION:$ACCT:table/$PROFILE_REQUESTS_TABLE"
           TELNYX_SECRET_ARN=$(aws secretsmanager describe-secret \
             --secret-id "$TELNYX_SECRET_NAME" --query ARN --output text)
+          USER_POOL_ARN="arn:aws:cognito-idp:$AWS_REGION:$ACCT:userpool/$COGNITO_USER_POOL_ID"
 
           POLICY_NAME=cif-portal-loans-profile-requests
           POLICY_DOC=$(cat <<EOF
@@ -183,6 +185,15 @@ jobs:
                 "Effect": "Allow",
                 "Action": "secretsmanager:GetSecretValue",
                 "Resource": "$TELNYX_SECRET_ARN"
+              },
+              {
+                "Sid": "CognitoEmailSync",
+                "Effect": "Allow",
+                "Action": [
+                  "cognito-idp:AdminUpdateUserAttributes",
+                  "cognito-idp:AdminGetUser"
+                ],
+                "Resource": "$USER_POOL_ARN"
               }
             ]
           }
@@ -209,7 +220,8 @@ jobs:
             --arg a "$ADMIN_NOTIFY_EMAIL" \
             --arg s "$SES_SENDER_EMAIL" \
             --arg x "$TELNYX_SECRET_ARN" \
-            '{Variables: (. + {PROFILE_REQUESTS_TABLE: $t, ADMIN_NOTIFY_EMAIL: $a, SES_SENDER_EMAIL: $s, TELNYX_SECRET_ARN: $x})}')
+            --arg c "$COGNITO_USER_POOL_ID" \
+            '{Variables: (. + {PROFILE_REQUESTS_TABLE: $t, ADMIN_NOTIFY_EMAIL: $a, SES_SENDER_EMAIL: $s, TELNYX_SECRET_ARN: $x, COGNITO_USER_POOL_ID: $c})}')
           # AWS CLI's --environment expects JSON like {"Variables":{...}}, NOT
           # the shorthand "Variables={...}" form (the latter only works with
           # CLI shorthand key=value syntax, not JSON values).
@@ -221,6 +233,7 @@ jobs:
           echo "  PROFILE_REQUESTS_TABLE=$PROFILE_REQUESTS_TABLE"
           echo "  ADMIN_NOTIFY_EMAIL=$ADMIN_NOTIFY_EMAIL"
           echo "  SES_SENDER_EMAIL=$SES_SENDER_EMAIL"
+          echo "  COGNITO_USER_POOL_ID=$COGNITO_USER_POOL_ID"
           echo "  TELNYX_SECRET_ARN=$TELNYX_SECRET_ARN"
 
       - name: Summary

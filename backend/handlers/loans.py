@@ -79,6 +79,8 @@ _secrets = boto3.client("secretsmanager")
 _lambda_client = boto3.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 _dynamo = boto3.client("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 _ses = boto3.client("ses", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+_cognito = boto3.client("cognito-idp", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
 DOC_PDF_FN_NAME = os.environ.get("DOC_PDF_FN_NAME", "")  # set by provision-doc-pdf.yml
 PROFILE_REQUESTS_TABLE = os.environ.get(
     "PROFILE_REQUESTS_TABLE", "cif-portal-profile-change-requests-dev"
@@ -510,6 +512,59 @@ def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
 # ─────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────
+def _maybe_sync_cognito_email(claims: Dict[str, Any], vergent_email: Optional[str]) -> None:
+    """If the customer's Vergent email differs from their Cognito email,
+    update Cognito so they can sign in with the new email next time.
+
+    Vergent is the system of record. When an admin changes the email
+    in Vergent admin, the next /api/my-profile call from the customer
+    triggers this sync — they continue using their old email for the
+    current session, then sign in next time with the new email.
+
+    Best-effort: failures log but never propagate to the customer.
+    Email is an alias attribute in our user pool (username = sub),
+    so updating the email attribute makes the new value the valid
+    sign-in alias.
+    """
+    if not COGNITO_USER_POOL_ID:
+        return
+    cognito_email = (claims.get("email") or "").strip().lower()
+    new_email = (vergent_email or "").strip().lower()
+    if not new_email or cognito_email == new_email:
+        return
+    sub = claims.get("sub") or claims.get("cognito:username")
+    if not sub:
+        return
+    try:
+        _cognito.admin_update_user_attributes(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=sub,
+            UserAttributes=[
+                {"Name": "email", "Value": new_email},
+                {"Name": "email_verified", "Value": "true"},
+            ],
+        )
+        log.info("cognito email synced sub=%s old=%s new=%s",
+                 sub, _mask_email(cognito_email), _mask_email(new_email))
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "?")
+        # AliasExistsException = the new email is already used by
+        # another Cognito user (rare; would require two CIF customers
+        # to share an email at Vergent). Log and move on.
+        log.warning("cognito email sync failed code=%s sub=%s", code, sub)
+    except Exception as e:
+        log.warning("cognito email sync unexpected: %s", type(e).__name__)
+
+
+def _mask_email(e: str) -> str:
+    if not e or "@" not in e:
+        return "***"
+    name, _, dom = e.partition("@")
+    if len(name) <= 2:
+        return "***@" + dom
+    return name[0] + "***" + name[-1] + "@" + dom
+
+
 def get_my_profile(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -588,6 +643,12 @@ def get_my_profile(event: Dict[str, Any]) -> Dict[str, Any]:
                     "zip": primary_addr.get("zip"),
                     "typeId": primary_addr.get("type_id"),
                 }
+
+    # Sync Cognito email to match Vergent if they've diverged. This
+    # is what makes admin email changes in Vergent flow through to
+    # the customer's sign-in email — without this, the customer keeps
+    # signing in with their old email forever.
+    _maybe_sync_cognito_email(claims, profile.get("vergentEmail"))
 
     return _json_response(200, profile)
 
