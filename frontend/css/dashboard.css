@@ -1164,6 +1164,9 @@ button.dash-doc-download:disabled {
   opacity: 0;
   transition: opacity .18s ease;
 }
+/* Ensure [hidden] truly hides — without this the flex modal covers the
+   viewport invisibly and intercepts clicks meant for the rows. */
+.profile-modal[hidden] { display: none; }
 .profile-modal.is-open { opacity: 1; }
 .profile-modal-backdrop {
   position: absolute;
