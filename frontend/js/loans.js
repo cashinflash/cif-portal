@@ -422,8 +422,6 @@
   }
 
   // ---------- DOCUMENT VIEWER (MODAL) + DOWNLOAD ----------
-  var _activeBlobUrl = null;  // currently-displayed modal blob — revoked on close
-
   // format='html' for the modal viewer (Vergent's native HTML, fast),
   // 'pdf' for the Download button (rendered server-side via headless
   // Chromium so the customer gets a real PDF on disk).
@@ -456,22 +454,27 @@
   function openDocInModal(doc, btn) {
     var orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
-    // Modal uses the HTML render — it's fast (~200ms) and the iframe
-    // renders Vergent's docs perfectly. The Download button inside
-    // the modal triggers the PDF render path separately.
-    fetchDocBlob(doc, 'html').then(function (blob) {
-      // Release any previous blob URL still attached to the modal.
-      if (_activeBlobUrl) { URL.revokeObjectURL(_activeBlobUrl); _activeBlobUrl = null; }
-      var url = URL.createObjectURL(blob);
-      _activeBlobUrl = url;
-
+    // Modal renders the doc via iframe srcdoc (inline HTML) instead of
+    // a blob: URL. iOS Safari is unreliable with blob: URLs in iframes
+    // — produces blank white renders. srcdoc handles inline HTML
+    // consistently across desktop + mobile browsers. Bonus: no blob
+    // URL lifecycle to manage for the modal (download still uses one).
+    var url = DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download';
+    fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': '*/*' },
+      credentials: 'omit'
+    }).then(function (res) {
+      if (res.status === 401 || res.status === 403) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        window.location.replace(LOGIN_URL);
+        throw new Error('unauthorized');
+      }
+      if (!res.ok) throw new Error('http ' + res.status);
+      return res.text();
+    }).then(function (html) {
       setText(qs('#docModalTitle'), doc.displayName || doc.fileName || 'Document');
       var dl = qs('#docModalDownload');
       if (dl) {
-        // Wire the modal's Download button to trigger the same PDF
-        // download path the row-level Download button uses (not the
-        // HTML blob URL — that'd save .html which is what we're
-        // moving away from).
         dl.onclick = function (e) {
           e.preventDefault();
           downloadDocument(doc, dl);
@@ -484,10 +487,8 @@
       var frame = qs('#docModalFrame');
       if (loading) loading.hidden = false;
 
-      // Show the modal FIRST so the iframe is in a visible layout
-      // tree when src is set. Chrome doesn't fire the iframe load
-      // event for elements whose ancestors are display:none — that
-      // was the previous bug that left the modal stuck on Loading.
+      // Show the modal first so the iframe is in a visible layout when
+      // its content loads.
       qs('#docModal').hidden = false;
       document.body.style.overflow = 'hidden';
 
@@ -495,11 +496,13 @@
         frame.onload = function () {
           if (loading) loading.hidden = true;
         };
-        frame.src = url;
+        // srcdoc replaces src for inline HTML rendering. Vergent's docs
+        // reference external CSS at shared.vergentlms.com which may or
+        // may not load (CORS), but the document body always renders.
+        frame.removeAttribute('src');
+        frame.srcdoc = html;
       }
-      // Watchdog — if onload doesn't fire (some Vergent docs reference
-      // external CSS that fails to fetch from a blob: origin), hide
-      // the loading panel after 6s so the user sees what did render.
+      // Watchdog — if onload doesn't fire, hide loading after 6s.
       setTimeout(function () {
         if (loading && !loading.hidden) loading.hidden = true;
       }, 6000);
@@ -518,6 +521,9 @@
     var frame = qs('#docModalFrame');
     if (frame) {
       frame.onload = null;
+      // Clear srcdoc so the iframe doesn't keep the doc HTML in memory
+      // while the modal is closed. about:blank for src as belt+suspenders.
+      frame.removeAttribute('srcdoc');
       frame.src = 'about:blank';
     }
     var loading = qs('#docModalLoading');
@@ -527,12 +533,6 @@
       dl.removeAttribute('href');
       dl.removeAttribute('download');
       dl.onclick = null;
-    }
-    if (_activeBlobUrl) {
-      // Slight delay so the iframe finishes releasing the URL.
-      var u = _activeBlobUrl;
-      _activeBlobUrl = null;
-      setTimeout(function () { URL.revokeObjectURL(u); }, 500);
     }
     modal.hidden = true;
     document.body.style.overflow = '';
