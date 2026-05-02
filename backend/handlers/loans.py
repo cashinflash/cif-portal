@@ -1366,6 +1366,24 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
 COGNITO_APP_CLIENT_ID = os.environ.get("COGNITO_APP_CLIENT_ID", "")
 
 
+def _format_pacific_time(dt: datetime) -> str:
+    """Format a naive UTC datetime for customer-facing display in
+    Pacific time. Auto-handles PST/PDT via zoneinfo so the displayed
+    label is always correct."""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import timezone as _tz
+        local = dt.replace(tzinfo=_tz.utc).astimezone(ZoneInfo("America/Los_Angeles"))
+        return local.strftime("%b %d, %Y at %I:%M %p %Z")
+    except Exception:
+        # Defensive fallback — Lambda Python 3.12 ships with tzdata,
+        # so this branch shouldn't trigger in production. Approximates
+        # PST (no DST awareness).
+        from datetime import timedelta, timezone as _tz
+        local = dt.replace(tzinfo=_tz.utc).astimezone(_tz(timedelta(hours=-8)))
+        return local.strftime("%b %d, %Y at %I:%M %p PST")
+
+
 def _validate_new_password(pw: str) -> Optional[str]:
     """Returns an error code if the password fails policy, else None.
     Mirror of typical Cognito default policy + sensible minimums."""
@@ -1389,7 +1407,7 @@ def _send_password_changed_alert(claims: Dict[str, Any]) -> None:
     if not customer_email:
         return
     first_name = (claims.get("given_name") or "").strip() or "there"
-    when = datetime.utcnow().strftime("%b %d, %Y at %I:%M %p UTC")
+    when = _format_pacific_time(datetime.utcnow())
 
     text = (
         f"Hi {first_name},\n\n"
