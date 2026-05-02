@@ -364,10 +364,18 @@
     }).then(function (r) {
       btns.forEach(function (b) { b.disabled = false; });
       if (r.status === 200 && r.data && r.data.ok) {
-        banner('ok', 'Email verified and submitted for review. Our team will confirm before it becomes your sign-in email.');
-        markPending('email');
+        if (r.data.status === 'applied') {
+          banner('ok', 'Your email has been updated. We just sent a confirmation to your new address.');
+        } else {
+          banner('ok', 'Email verified and submitted for review. Our team will confirm before it becomes your sign-in email.');
+          markPending('email');
+        }
         _pendingEmail = null;
         _pendingEmailRequestId = null;
+        // Refresh the profile rows so the new email shows up if it's
+        // already live (auto-apply path). On the queued path the page
+        // value stays the same and the pending pill is shown.
+        loadProfile();
         closeModal();
       } else if (r.status === 400 && r.data && r.data.error === 'too_many_attempts') {
         err.textContent = 'Too many incorrect attempts. Please start over.';

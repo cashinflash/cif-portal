@@ -1087,6 +1087,94 @@ def start_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def _push_email_to_vergent(cid: str, new_email: str) -> Tuple[bool, int, str]:
+    """Best-effort PUT to Vergent's PutCustomerEmail endpoint after we've
+    verified the customer owns the new address. Returns
+    (ok, upstream_status, raw_body_snippet) for logging/diagnostics.
+
+    On success the customer's email is live in Vergent immediately; on
+    failure the caller should fall back to the existing admin-queue
+    notification path so an admin can apply the change manually.
+    """
+    try:
+        cid_int = int(cid)
+    except (TypeError, ValueError):
+        return False, 0, "bad_cid"
+
+    # Most-likely body shape based on GetCustomer's response field
+    # ("EmailAddr"). If Vergent rejects with a 400 about a missing
+    # parameter we'll see exactly what to swap in CloudWatch.
+    body = {"id": cid_int, "EmailAddr": new_email}
+    status, _resp, raw = _v1_request(
+        "PUT", "/V1/PutCustomerEmail", body=body, return_raw=True,
+    )
+    log.info("vergent put-email status=%s cid=%s body=%s",
+             status, cid, (raw or "")[:300])
+    if status in (200, 204):
+        return True, status, ""
+    return False, status, (raw or "")[:300]
+
+
+def _send_email_applied_alert(claims: Dict[str, Any], new_email: str) -> None:
+    """Customer-facing email sent after a successful auto-applied
+    email change. Different copy from the queued/pending notification
+    — this one says 'your new email is now active.'"""
+    if not new_email:
+        return
+    first_name = (claims.get("given_name") or "").strip() or "there"
+    when = _format_pacific_time(datetime.utcnow())
+
+    text = (
+        f"Hi {first_name},\n\n"
+        f"Your Cash in Flash account email is now {new_email}, effective {when}.\n\n"
+        f"Future account notices, sign-in codes, and statements will be "
+        f"delivered here. There's nothing else you need to do.\n\n"
+        f"If you didn't make this change, please call us right away at "
+        f"(747) 270-7121 so we can secure your account.\n\n"
+        f"---\n"
+        f"Cash in Flash · Licensed by the California Department of "
+        f"Financial Protection and Innovation #214840\n"
+        f"This is an automated security notification. Please do not reply.\n"
+    )
+    html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,'SF Pro Text','Segoe UI',Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:36px 12px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
+        <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+        </td></tr>
+        <tr><td style="padding:36px 36px 8px;">
+          <p style="margin:0 0 6px;font-size:12px;color:#0E8741;letter-spacing:.08em;text-transform:uppercase;font-weight:700;">Email updated</p>
+          <h1 style="margin:0 0 18px;font-size:22px;font-weight:700;color:#1a1a2e;letter-spacing:-0.01em;line-height:1.25;">Your email address is now active.</h1>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#1a1a2e;">Hi {first_name}, your Cash in Flash account email is now <strong>{new_email}</strong>, effective {when}.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#1a1a2e;">Future account notices, sign-in codes, and statements will be delivered here. There's nothing else you need to do.</p>
+          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0;margin:6px 0 22px;background:#fef3f2;border-radius:10px;border-left:4px solid #dc2626;">
+            <tr><td style="padding:14px 18px;color:#991b1b;font-size:14px;line-height:1.55;">
+              <strong>Didn't make this change?</strong> Call us right away at <a href="tel:+17472707121" style="color:#991b1b;font-weight:700;text-decoration:underline;">(747) 270-7121</a> and we'll secure your account.
+            </td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:22px 36px 32px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.6;">
+          <p style="margin:0 0 6px;">Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840</p>
+          <p style="margin:0;">This email was sent by Cash in Flash &middot; 13937B Van Nuys Blvd, Arleta, CA 91331. Please do not reply to this email.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+    ok, err_code, err_msg = resend_email.send(
+        to=new_email,
+        subject="Your email address is now active",
+        text=text,
+        html=html,
+    )
+    if not ok:
+        log.warning("email-applied alert send failed code=%s msg=%s",
+                    err_code, (err_msg or "")[:200])
+
+
 def confirm_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/my-profile/email/confirm — verify the 6-digit code
     we sent to the candidate new email, then flip the queued row to
@@ -1148,10 +1236,23 @@ def confirm_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
             pass
         return _json_response(400, {"error": "code_invalid"})
 
-    # Code matches. Promote the row to a real pending change request.
+    # Code matches. Try to push to Vergent directly — if it accepts,
+    # the change is live immediately. If it rejects, fall back to the
+    # admin-queue path so an admin can apply manually. Customer is
+    # safe either way: they've already proven control of the new email.
     new_email = item.get("requestedValue", {}).get("S", "")
     current_email = item.get("currentValue", {}).get("S", "") or None
     long_ttl = int(time.time()) + 90 * 24 * 60 * 60  # 90-day audit retention
+
+    pushed_ok, push_status, push_raw = _push_email_to_vergent(str(cid), new_email)
+    final_status = "applied_auto" if pushed_ok else "pending"
+    meta = {
+        "emailVerified": True,
+        "vergentPushStatus": push_status,
+    }
+    if not pushed_ok and push_raw:
+        meta["vergentPushBody"] = push_raw[:200]
+
     try:
         _dynamo.update_item(
             TableName=PROFILE_REQUESTS_TABLE,
@@ -1162,9 +1263,9 @@ def confirm_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
             ),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
-                ":s": {"S": "pending"},
+                ":s": {"S": final_status},
                 ":e": {"N": str(long_ttl)},
-                ":meta": {"S": json.dumps({"emailVerified": True})},
+                ":meta": {"S": json.dumps(meta, default=str)},
             },
         )
     except ClientError as e:
@@ -1172,8 +1273,22 @@ def confirm_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
                   e.response.get("Error", {}).get("Code"))
         return _json_response(502, {"error": "queue_unavailable"})
 
-    # Fire admin + customer notifications now that we've proven the
-    # customer controls the new address.
+    if pushed_ok:
+        # Auto-apply succeeded — sync Cognito immediately so the new
+        # email becomes the valid sign-in alias right away (Phase H
+        # would otherwise wait until the next /api/my-profile call).
+        _maybe_sync_cognito_email(claims, new_email)
+        # Customer-facing "your email is now active" alert. No admin
+        # email — there's nothing for them to do.
+        _send_email_applied_alert(claims, new_email)
+        log.info("email auto-applied cid=%s old=%s new=%s",
+                 cid, _mask_email(current_email or ""), _mask_email(new_email))
+        return _json_response(200, {"ok": True, "status": "applied"})
+
+    # Vergent rejected the push — fall back to the existing admin
+    # queue flow so a human can apply it.
+    log.warning("vergent push failed status=%s falling back to admin queue cid=%s",
+                push_status, cid)
     _send_admin_notification(
         request_id, str(cid), claims, "email",
         current_email, new_email,
