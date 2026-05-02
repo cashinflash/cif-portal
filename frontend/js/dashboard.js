@@ -212,12 +212,12 @@
           }
         }
 
-        // "Set up security questions" nudge
+        // Show the "set up security questions" nudge if applicable;
+        // otherwise leave the default hint copy in place (which now
+        // describes what the Manage profile link does).
         const hint = qs('#profileHint');
         if (hint && data.isSecurityQuestionsSetup === false) {
           hint.innerHTML = 'Security questions not set. <a href="/forgot.html">Set them up</a> for easier password recovery.';
-        } else if (hint) {
-          hint.textContent = 'Need to change your name, phone, or address? Call us at (818) 800-5227.';
         }
       })
       .catch(function () { /* non-critical — profile already has Cognito data */ });

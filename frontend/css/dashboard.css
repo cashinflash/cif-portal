@@ -2428,15 +2428,48 @@ body.has-sidebar .site-header { display: none; }
 .dash-profile-actions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  align-items: flex-start;
 }
-.dash-profile-actions .btn-login[disabled] {
-  opacity: .55;
-  cursor: not-allowed;
+.btn-profile-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 10px 14px;
+  background: #fff;
+  color: #0E8741;
+  border: 1.5px solid rgba(14, 135, 65, .25);
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: .92rem;
+  font-weight: 600;
+  text-decoration: none;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease,
+              color .15s ease, transform .15s ease, box-shadow .15s ease;
+  white-space: nowrap;
+}
+.btn-profile-edit:hover,
+.btn-profile-edit:focus-visible {
+  background: #0E8741;
+  color: #fff;
+  border-color: #0E8741;
+  outline: none;
+  box-shadow: 0 4px 12px rgba(14, 135, 65, .25);
+}
+.btn-profile-edit-arrow {
+  transition: transform .15s ease;
+}
+.btn-profile-edit:hover .btn-profile-edit-arrow,
+.btn-profile-edit:focus-visible .btn-profile-edit-arrow {
+  transform: translateX(2px);
 }
 .dash-profile-hint {
   color: #6b7280;
-  font-size: .8rem;
+  font-size: .82rem;
+  line-height: 1.45;
+  margin: 0;
 }
 
 @media (max-width: 640px) {
