@@ -191,12 +191,12 @@
           if (row) row.hidden = false;
         }
 
-        // If the Vergent on-file email differs from the Cognito sign-in email, surface it.
-        if (data.vergentEmail && data.vergentEmail.toLowerCase() !== (claims.email || '').toLowerCase()) {
+        // Vergent is the source of truth for email. If Vergent has
+        // an email on file, show that one (the Cognito sign-in email
+        // gets re-synced separately when an admin updates Vergent).
+        if (data.vergentEmail) {
           const emailEl = qs('#profileEmail');
-          if (emailEl) {
-            emailEl.innerHTML = claims.email + ' <small style="color:#6b7280;font-weight:500;">(loan on file: ' + data.vergentEmail + ')</small>';
-          }
+          if (emailEl) emailEl.textContent = data.vergentEmail;
         }
 
         // Account status pill — e.g. "Good". Never surface storeName:
