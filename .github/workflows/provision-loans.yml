@@ -1,5 +1,6 @@
 name: Provision loans Lambda
 
+# Re-fired 2026-05-02 to grant Telnyx secret + env var for phone verify.
 # Reconciles every HttpApi route the loans Lambda backs. Idempotent —
 # routes that already exist are skipped, missing ones are created.
 # Run this after adding a new route in code (and template.yaml). The
