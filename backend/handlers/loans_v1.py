@@ -78,11 +78,21 @@ _token: Optional[str] = None
 _token_exp: float = 0.0
 TOKEN_TTL_SECS = 60 * 60
 
+ALLOWED_ORIGIN = os.environ.get(
+    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+)
+
 CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Max-Age": "300",
+    "Vary": "Origin",
     "Cache-Control": "no-store",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
 }
 
 

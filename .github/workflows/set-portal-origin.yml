@@ -1,0 +1,66 @@
+name: Set portal origin env var on all Lambdas
+
+# One-shot helper: sets PORTAL_ORIGIN env var on every customer-portal
+# Lambda. If a custom domain is added later (e.g. portal.cashinflash.com),
+# update PORTAL_ORIGIN at the top of this file and re-run.
+#
+# CORS in the handlers is locked to whatever this value is at runtime;
+# without it, the code falls back to the dev CloudFront domain
+# (d1zucrj1ouu3c.cloudfront.net), so this workflow is only required if
+# you want a different origin allowed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      portal_origin:
+        description: "Frontend origin allowed by CORS (e.g. https://portal.cashinflash.com)"
+        required: true
+        default: "https://d1zucrj1ouu3c.cloudfront.net"
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set PORTAL_ORIGIN on each Lambda
+        env:
+          PORTAL_ORIGIN: ${{ inputs.portal_origin }}
+        run: |
+          set -e
+          for FN in cif-portal-loans-dev cif-portal-payments-dev cif-portal-auth-mfa-dev cif-portal-search-dev cif-portal-pre-signup-dev; do
+            if ! aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
+              echo "Skipping $FN (does not exist)."
+              continue
+            fi
+            EXISTING=$(aws lambda get-function-configuration \
+              --function-name "$FN" \
+              --query 'Environment.Variables' --output json 2>/dev/null)
+            if [ "$EXISTING" = "null" ] || [ -z "$EXISTING" ]; then
+              EXISTING='{}'
+            fi
+            NEW=$(echo "$EXISTING" | jq --arg v "$PORTAL_ORIGIN" '. + {PORTAL_ORIGIN: $v}')
+            aws lambda update-function-configuration \
+              --function-name "$FN" \
+              --environment "{\"Variables\": $NEW}" \
+              --no-cli-pager >/dev/null
+            aws lambda wait function-updated --function-name "$FN"
+            echo "Updated $FN: PORTAL_ORIGIN=$PORTAL_ORIGIN"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### PORTAL_ORIGIN set"
+            echo "Value: \`${{ inputs.portal_origin }}\`"
+            echo ""
+            echo "Functions updated: cif-portal-loans-dev, payments-dev, auth-mfa-dev, search-dev, pre-signup-dev"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -94,11 +94,22 @@ _V1_TOKEN_TTL = 60 * 60  # one hour
 # forgets or an application never gets resolved.
 TTL_SECONDS = 30 * 24 * 60 * 60
 
+ALLOWED_ORIGIN = os.environ.get(
+    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+)
+
 CORS_HEADERS = {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type,Authorization,X-View-Secret",
+    "Access-Control-Max-Age": "300",
+    "Vary": "Origin",
+    "Cache-Control": "no-store",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
 }
 
 

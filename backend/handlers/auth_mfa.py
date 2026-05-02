@@ -86,12 +86,22 @@ _apim_token: Optional[str] = None
 _apim_token_exp: float = 0.0
 TOKEN_TTL = 60 * 60
 
+ALLOWED_ORIGIN = os.environ.get(
+    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+)
+
 CORS = {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Max-Age": "300",
+    "Vary": "Origin",
     "Cache-Control": "no-store",
     "Content-Type": "application/json",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
 }
 
 

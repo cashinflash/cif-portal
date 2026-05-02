@@ -979,152 +979,15 @@ def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
     (which performs server-side Repay tokenization on Vergent's
     infrastructure). This keeps PAN entirely off our infrastructure.
 
-    Re-enable by:
-      1. Integrating Repay's Hosted Fields iframe in the SPA so PAN
-         goes browser → Repay (never our server).
-      2. Removing this short-circuit so the body below runs and
-         saves the resulting Repay token to Vergent via
-         /V1/PostCustomerCardTokenized.
-
-    Until then, return 410 Gone immediately — never parse the body,
-    never touch any cardholder data even briefly.
+    Returns 410 Gone immediately — never parses the body, never
+    touches cardholder data. To re-enable, design a PCI-compliant
+    PAN flow first (e.g. Repay Hosted Fields iframe so PAN goes
+    browser → Repay, never through this Lambda).
     """
     log.info("post_card invoked while disabled — returning 410")
     return _json_response(410, {
         "error": "self_service_disabled",
         "message": "Card entry is handled by Cash in Flash agents at (747) 270-7121 or any store location.",
-    })
-
-    # ─── Implementation below is intentionally unreachable. ──────
-    claims = _claims(event)
-    cid = _customer_id(claims)
-    if not cid:
-        return _json_response(401, {"error": "unauthorized"})
-
-    try:
-        body = json.loads(event.get("body") or "{}")
-    except (TypeError, ValueError):
-        return _json_response(400, {"error": "bad_body"})
-
-    name = (body.get("cardHolderName") or "").strip()
-    pan = "".join(ch for ch in (body.get("cardNumber") or "") if ch.isdigit())
-    ccv = "".join(ch for ch in (body.get("ccv") or "") if ch.isdigit())
-    zip_code = "".join(ch for ch in (body.get("zip") or "") if ch.isdigit())[:9]
-    try:
-        exp_month = int(body.get("expireMonth") or 0)
-        exp_year = int(body.get("expireYear") or 0)
-    except (TypeError, ValueError):
-        exp_month = exp_year = 0
-
-    # Shape checks (cheap guardrails; Vergent validates too).
-    if not name or len(name) > 80:
-        return _json_response(400, {"error": "name_invalid"})
-    if not _luhn_ok(pan):
-        return _json_response(400, {"error": "card_invalid"})
-    if not (1 <= exp_month <= 12):
-        return _json_response(400, {"error": "exp_invalid"})
-    if exp_year < 100:  # two-digit year → 2000s
-        exp_year += 2000
-    if exp_year < 2024 or exp_year > 2099:
-        return _json_response(400, {"error": "exp_invalid"})
-    if not (3 <= len(ccv) <= 4):
-        return _json_response(400, {"error": "ccv_invalid"})
-    if not (5 <= len(zip_code) <= 9):
-        return _json_response(400, {"error": "zip_invalid"})
-
-    card_type = (body.get("cardType") or _detect_card_type(pan)).strip() or "Other"
-    card_type_id = _vergent_card_type_id(card_type)
-    last4 = pan[-4:]
-
-    # Never log PAN or CCV. Custid + last4 + amount-ish metadata only.
-    log.info("add card attempt cid=%s last4=%s brand=%s exp=%02d/%d",
-             cid, last4, card_type, exp_month, exp_year)
-
-    # Step 1 — tokenize at Repay.
-    repay_token = _repay_tokenize_card(pan, exp_month, exp_year, ccv, zip_code, name)
-    if not repay_token:
-        # Most common cause: Repay creds not yet in Secrets Manager
-        # (dispatch store-repay-secrets.yml) or IAM not granted
-        # (re-run provision-payments.yml).
-        return _json_response(502, {"error": "tokenization_failed"})
-
-    log.info("repay tokenized cid=%s last4=%s token_len=%s",
-             cid, last4, len(repay_token))
-
-    # Step 2 — save the tokenized card on the Vergent customer record.
-    v1_body = {
-        "id": 0,
-        "company_id": VERGENT_COMPANY_ID,
-        "customer_id": int(cid),
-        "card_type_id": card_type_id,
-        "card_holder": name,
-        "card_number": pan,
-        "last_four_digits": last4,
-        "card_id": "",
-        "card_ref": repay_token,
-        "is_eligible_for_disbursement": False,
-        "expire_month": exp_month,
-        "expire_year": exp_year,
-        "ccv": ccv,
-        "billing_zip_code": zip_code,
-    }
-    status, resp, raw = _v1_request("POST", "/V1/PostCustomerCardTokenized", body=v1_body)
-
-    if status not in (200, 201):
-        flat_raw = (raw or "").replace("\n", " ").replace("\r", " ")
-        redacted = dict(v1_body)
-        redacted["card_number"] = f"****{last4}"
-        redacted["ccv"] = "***"
-        redacted["card_ref"] = f"<len={len(repay_token)}>"
-        log.warning("PostCustomerCardTokenized upstream status=%s body=%s raw=%s",
-                    status, redacted, flat_raw[:1500])
-        return _json_response(502, {"error": "upstream_unavailable"})
-
-    if isinstance(resp, dict) and resp.get("Errors"):
-        log.warning("PostCustomerCardTokenized errors cid=%s last4=%s errors=%s",
-                    cid, last4, resp.get("Errors"))
-        return _json_response(200, {"success": False, "error": "card_declined"})
-
-    new_card_id = resp.get("id") if isinstance(resp, dict) else None
-    debug_flags = {}
-    if isinstance(resp, dict):
-        for k in ("is_existing", "is_active", "card_processor_type",
-                  "CardProcessor", "status", "card_guid"):
-            if k in resp:
-                debug_flags[k] = resp.get(k)
-    log.info("add card success cid=%s last4=%s new_card_id=%s flags=%s",
-             cid, last4, new_card_id, debug_flags)
-
-    # Step 3 — verify the card is actually chargeable. Vergent has
-    # historically returned 200 OK on records that are still stuck
-    # with CardProcessor='None'. Surface that as a real error so the
-    # SPA doesn't celebrate a phantom save.
-    st_v, verify_body, _raw = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
-    is_chargeable = False
-    if st_v == 200 and isinstance(verify_body, list):
-        for c in verify_body:
-            if isinstance(c, dict) and str(c.get("id")) == str(new_card_id):
-                is_chargeable = (
-                    bool(c.get("is_active"))
-                    and (c.get("CardProcessor") or "None") != "None"
-                )
-                log.info("add card verify cid=%s new_card_id=%s active=%s processor=%s",
-                         cid, new_card_id, c.get("is_active"), c.get("CardProcessor"))
-                break
-    if not is_chargeable:
-        log.warning("add card saved but not chargeable cid=%s new_card_id=%s",
-                    cid, new_card_id)
-        return _json_response(200, {
-            "success": False,
-            "error": "tokenization_not_linked",
-            "cardId": new_card_id,
-        })
-
-    return _json_response(200, {
-        "success": True,
-        "last4": last4,
-        "brand": card_type,
-        "cardId": new_card_id,
     })
 
 

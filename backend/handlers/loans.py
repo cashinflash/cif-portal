@@ -50,6 +50,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
+from botocore.exceptions import ClientError
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -82,11 +83,29 @@ _apim_token_exp: float = 0.0
 
 TOKEN_TTL_SECS = 60 * 60  # refresh once an hour even though Timeout is 24h
 
+# Front-end origin allowed to call our API. Locked down from "*" so a
+# malicious site can't relay a logged-in customer's browser into our
+# API. Override via env var when adding a custom domain. Browsers will
+# still block any cross-origin request that doesn't echo this back.
+ALLOWED_ORIGIN = os.environ.get(
+    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+)
+
 CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+    "Access-Control-Max-Age": "300",
+    "Vary": "Origin",
     "Cache-Control": "no-store",
+    # PCI / online-banking baseline security headers. HSTS forces HTTPS
+    # for 2 years; nosniff kills MIME-sniff attacks; Referrer-Policy
+    # prevents leaking auth-bearing URLs to third-party referrers;
+    # Permissions-Policy disables sensors we never use.
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
 }
 
 
@@ -239,49 +258,6 @@ def _v1_get(path: str) -> Tuple[int, Optional[Any]]:
     return status, body
 
 
-def _v1_get_binary(path: str, timeout: int = 20) -> Tuple[int, bytes, Dict[str, str]]:
-    """GET a v1 endpoint that returns binary (e.g. /docs/{id}/download).
-
-    Returns (status, body_bytes, response_headers). On failure returns
-    (status, b"", {}). Refreshes service token once on 401/403.
-    """
-    def _attempt(tok: str) -> Tuple[int, bytes, Dict[str, str]]:
-        req = urllib.request.Request(
-            f"{V1_BASE}{path}",
-            method="GET",
-            headers={
-                "Token": tok,
-                "Accept": "*/*",
-                "User-Agent": "cif-portal/1.0",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.status, resp.read(), {k.lower(): v for k, v in resp.headers.items()}
-        except urllib.error.HTTPError as e:
-            try:
-                _ = e.read()  # drain
-            except Exception:
-                pass
-            log.warning("v1 binary GET %s -> %s", path, e.code)
-            return e.code, b"", {}
-        except (urllib.error.URLError, TimeoutError) as exc:
-            log.error("v1 binary GET %s network: %s", path, exc)
-            return 0, b"", {}
-
-    token = _get_v1_token()
-    if not token:
-        return 0, b"", {}
-    status, body, headers = _attempt(token)
-    if status in (401, 403):
-        global _v1_token_exp
-        _v1_token_exp = 0
-        tok2 = _get_v1_token()
-        if tok2:
-            status, body, headers = _attempt(tok2)
-    return status, body, headers
-
-
 # ─────────────────────────────────────────
 # Shape helpers
 # ─────────────────────────────────────────
@@ -377,21 +353,6 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         or hdr.get("NextPaymentScheduledDate")
     )
     autopay = False  # conservative default; see TODO above
-    if log.isEnabledFor(logging.INFO):
-        # One-shot full inventory — we need to see every field Vergent
-        # actually returns so we can pick the right autopay-indicator.
-        # Remove this once autopay is wired correctly.
-        log.info("autopay probe hdr_id=%s hdr_keys=%s detail_keys=%s",
-                 hdr.get("hdr_id"),
-                 sorted(hdr.keys()) if isinstance(hdr, dict) else None,
-                 sorted(detail.keys()) if isinstance(detail, dict) else None)
-        # Status probe — figure out which Vergent field carries the
-        # admin-UI "Paid Off" vs "Deleted" distinction so we can
-        # tighten _is_visible_loan precisely.
-        log.info("loan-status probe hdr_id=%s isOutstanding=%s statusId=%s "
-                 "Status=%r SubStatus=%r",
-                 hdr.get("hdr_id"), is_outstanding, status_id,
-                 hdr.get("Status"), hdr.get("SubStatus"))
 
     return {
         "id": hdr.get("hdr_id"),
@@ -493,10 +454,7 @@ def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
         status, body = _v1_get(path)
         if status == 200 and isinstance(body, list):
             shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
-            visible = [l for l in shaped if _is_visible_loan(l)]
-            log.info("v1 loans served by %s raw=%d visible=%d", path, len(shaped), len(visible))
-            return visible
-        log.info("v1 loans %s status=%s", path, status)
+            return [l for l in shaped if _is_visible_loan(l)]
     return []
 
 
@@ -776,27 +734,22 @@ def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str,
 
 
 def _list_v1_loan_docs(cid: str, loan_id: Any,
-                       debug: bool = False,
-                       include_data: bool = False) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+                       include_data: bool = False) -> List[Dict[str, Any]]:
     """List signed documents attached to a specific loan via Vergent v1.
 
     Single endpoint: GET /V1/customer/{cid}/docs/loan/{loanId}. Verified
-    2026-05-01 against Harut's loan 4826490 — returns 3 signed records
-    (Advance Receipt, DDT Disclosure, Advance Contract w E-Sign), each
-    with its content base64-inlined as `Data`. The OtherFiles sibling,
-    PascalCase variants, verb-style endpoints, and customer-level dump
-    were all tested and either return duplicates or 404 — dropped.
+    against Harut's loan 4826490 — returns 3 signed records (Advance
+    Receipt, DDT Disclosure, Advance Contract w E-Sign), each with its
+    content base64-inlined as `Data`.
 
-    Returns (shaped_docs, attempts). `attempts` is populated only when
-    debug=True for diagnostics. With include_data=True, each shaped doc
-    carries its raw Data + DocumentUrl for the download path to use.
+    With include_data=True, each shaped doc carries its raw Data +
+    DocumentUrl for the download path to use.
     """
     if loan_id in (None, ""):
-        return [], []
+        return []
 
     out: List[Dict[str, Any]] = []
     seen: set = set()
-    attempts: List[Dict[str, Any]] = []
     path = f"/V1/customer/{cid}/docs/loan/{loan_id}"
     status, body = _v1_get(path)
 
@@ -811,31 +764,13 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
                     rows = [r for r in v if isinstance(r, dict)]
                     break
 
-    kept = 0
     for r in rows:
         shaped = _shape_v1_document(r, loan_id, "loan", include_data=include_data)
         if not shaped or shaped["id"] in seen:
             continue
         seen.add(shaped["id"])
         out.append(shaped)
-        kept += 1
 
-    if debug:
-        # Cap the preview so we don't blow up the response when content
-        # is base64-inlined. Strip Data field from previews.
-        def _strip(rec: Any) -> Any:
-            if isinstance(rec, dict):
-                return {k: ("<...>" if k == "Data" else v) for k, v in rec.items()}
-            return rec
-        preview = body
-        if isinstance(body, list):
-            preview = [_strip(r) for r in body[:3]]
-        elif isinstance(body, dict):
-            preview = {k: v for k, v in list(body.items())[:8]}
-        attempts.append({
-            "path": path, "status": status, "rows": len(rows),
-            "kept": kept, "preview": preview,
-        })
     if status not in (200, 404):
         log.warning("v1 loan-docs %s status=%s loan=%s", path, status, loan_id)
 
@@ -843,7 +778,7 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
     def _key(item: Dict[str, Any]) -> str:
         return str(item.get("documentDate") or "")
     out.sort(key=_key, reverse=True)
-    return out, attempts
+    return out
 
 
 def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -854,7 +789,6 @@ def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
 
     qs = event.get("queryStringParameters") or {}
     requested = (qs or {}).get("loanId") if isinstance(qs, dict) else None
-    debug = (qs or {}).get("debug") == "1"
     if not requested:
         return _json_response(400, {"error": "missing_loanId"})
 
@@ -871,25 +805,12 @@ def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
     if not loan:
         return _json_response(404, {"error": "loan_not_found"})
 
-    docs, attempts = _list_v1_loan_docs(cid, loan.get("id"), debug=debug)
-    response = {
+    docs = _list_v1_loan_docs(cid, loan.get("id"))
+    return _json_response(200, {
         "documents": docs,
         "loanId": loan.get("id"),
         "publicId": loan.get("publicId"),
-    }
-    if debug:
-        response["_debug"] = {
-            "cid": cid,
-            "requestedLoanId": requested,
-            "matchedLoan": {
-                "id": loan.get("id"),
-                "publicId": loan.get("publicId"),
-                "status": loan.get("status"),
-                "statusId": loan.get("statusId"),
-            },
-            "attempts": attempts,
-        }
-    return _json_response(200, response)
+    })
 
 
 def _render_html_to_pdf(html_b64: str, file_name: str) -> Optional[bytes]:
@@ -985,7 +906,7 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(404, {"error": "doc_not_found"})
     matched = None
     for loan in shaped:
-        docs, _ = _list_v1_loan_docs(cid, loan.get("id"), include_data=True)
+        docs = _list_v1_loan_docs(cid, loan.get("id"), include_data=True)
         for d in docs:
             if str(d.get("id")) == str(doc_id):
                 matched = d
