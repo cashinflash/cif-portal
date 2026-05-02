@@ -61,6 +61,11 @@ from botocore.exceptions import ClientError
 # changes. Same module that powers login MFA in auth_mfa.py.
 from handlers import telnyx_verify
 
+# Resend transactional email — replaced AWS SES after AWS denied
+# production access twice. Both admin notifications and customer
+# change-request confirmations route through it.
+from handlers import resend_email
+
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
@@ -835,23 +840,15 @@ def _send_admin_notification(request_id: str, cid: str, claims: Dict[str, Any],
 
     subject = f"Profile change request: {field_label} — {customer_name}"
 
-    try:
-        _ses.send_email(
-            Source=SES_SENDER_EMAIL,
-            Destination={"ToAddresses": [ADMIN_NOTIFY_EMAIL]},
-            Message={
-                "Subject": {"Data": subject, "Charset": "UTF-8"},
-                "Body": {
-                    "Text": {"Data": body_text, "Charset": "UTF-8"},
-                    "Html": {"Data": body_html, "Charset": "UTF-8"},
-                },
-            },
-        )
-    except ClientError as e:
-        log.error("SES admin notification failed: %s",
-                  e.response.get("Error", {}).get("Code"))
-    except Exception as e:
-        log.error("SES admin notification unexpected: %s", type(e).__name__)
+    ok, err_code, err_msg = resend_email.send(
+        to=ADMIN_NOTIFY_EMAIL,
+        subject=subject,
+        text=body_text,
+        html=body_html,
+    )
+    if not ok:
+        log.warning("admin notification send failed code=%s msg=%s",
+                    err_code, (err_msg or "")[:200])
 
 
 def _send_customer_confirmation(claims: Dict[str, Any], field: str,
@@ -940,23 +937,15 @@ def _send_customer_confirmation(claims: Dict[str, Any], field: str,
   </table>
 </body></html>"""
 
-    try:
-        _ses.send_email(
-            Source=SES_SENDER_EMAIL,
-            Destination={"ToAddresses": [customer_email]},
-            Message={
-                "Subject": {"Data": subject, "Charset": "UTF-8"},
-                "Body": {
-                    "Text": {"Data": body_text, "Charset": "UTF-8"},
-                    "Html": {"Data": body_html, "Charset": "UTF-8"},
-                },
-            },
-        )
-    except ClientError as e:
-        log.error("SES customer confirmation failed: %s",
-                  e.response.get("Error", {}).get("Code"))
-    except Exception as e:
-        log.error("SES customer confirmation unexpected: %s", type(e).__name__)
+    ok, err_code, err_msg = resend_email.send(
+        to=customer_email,
+        subject=subject,
+        text=body_text,
+        html=body_html,
+    )
+    if not ok:
+        log.warning("customer confirmation send failed code=%s msg=%s",
+                    err_code, (err_msg or "")[:200])
 
 
 def update_email(event: Dict[str, Any]) -> Dict[str, Any]:

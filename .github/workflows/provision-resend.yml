@@ -1,0 +1,140 @@
+name: Provision Resend
+
+# One-shot / re-runnable provisioning for the Resend transactional
+# email integration that replaced AWS SES (after AWS denied
+# production access twice).
+#
+# Steps:
+#  1. Store/refresh apiKey + fromAddress in Secrets Manager at
+#     cif-portal/resend/credentials.
+#  2. Attach IAM policy `cif-portal-resend-secret` to BOTH the
+#     auth-mfa Lambda role AND the loans Lambda role granting
+#     secretsmanager:GetSecretValue on that secret.
+#  3. Set RESEND_SECRET_ARN env var on both Lambdas (preserving
+#     existing env vars).
+#
+# Re-run this workflow to rotate the API key (paste the new key
+# in the api_key input; old key in Secrets Manager is replaced).
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_key:
+        description: Resend API key (starts with re_)
+        required: true
+      from_address:
+        description: Verified sender (e.g. no-reply@cashinflash.com)
+        required: true
+        default: "no-reply@cashinflash.com"
+
+env:
+  AWS_REGION: us-east-1
+  SECRET_NAME: cif-portal/resend/credentials
+  AUTH_MFA_FN: cif-portal-auth-mfa-dev
+  LOANS_FN: cif-portal-loans-dev
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Mask API key in logs
+        env:
+          AK: ${{ github.event.inputs.api_key }}
+        run: |
+          echo "::add-mask::$AK"
+
+      - name: Store/refresh secret
+        env:
+          AK: ${{ github.event.inputs.api_key }}
+          FROM: ${{ github.event.inputs.from_address }}
+        run: |
+          set -e
+          PAYLOAD=$(jq -n \
+            --arg ak "$AK" \
+            --arg fr "$FROM" \
+            '{apiKey: $ak, fromAddress: $fr}')
+
+          if aws secretsmanager describe-secret --secret-id "$SECRET_NAME" >/dev/null 2>&1; then
+            aws secretsmanager put-secret-value \
+              --secret-id "$SECRET_NAME" \
+              --secret-string "$PAYLOAD" >/dev/null
+            echo "Updated existing secret $SECRET_NAME"
+          else
+            aws secretsmanager create-secret \
+              --name "$SECRET_NAME" \
+              --description "Resend API credentials for the cif-portal Lambdas" \
+              --secret-string "$PAYLOAD" >/dev/null
+            echo "Created secret $SECRET_NAME"
+          fi
+
+      - name: Grant secret read + set env on both Lambdas
+        run: |
+          set -e
+          SECRET_ARN=$(aws secretsmanager describe-secret \
+            --secret-id "$SECRET_NAME" --query ARN --output text)
+          echo "Secret ARN: $SECRET_ARN"
+
+          POLICY_DOC=$(jq -n --arg arn "$SECRET_ARN" '{
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "ResendSecretRead",
+                "Effect": "Allow",
+                "Action": "secretsmanager:GetSecretValue",
+                "Resource": $arn
+              }
+            ]
+          }')
+
+          for FN in "$AUTH_MFA_FN" "$LOANS_FN"; do
+            ROLE_ARN=$(aws lambda get-function-configuration \
+              --function-name "$FN" --query 'Role' --output text)
+            ROLE_NAME="${ROLE_ARN##*/}"
+            echo "Lambda $FN role: $ROLE_NAME"
+
+            aws iam put-role-policy \
+              --role-name "$ROLE_NAME" \
+              --policy-name cif-portal-resend-secret \
+              --policy-document "$POLICY_DOC" \
+              --no-cli-pager
+            echo "  IAM policy cif-portal-resend-secret attached."
+
+            # Merge RESEND_SECRET_ARN into existing env vars so we
+            # don't drop anything else (TELNYX_SECRET_ARN, etc.)
+            CURRENT_ENV=$(aws lambda get-function-configuration \
+              --function-name "$FN" \
+              --query 'Environment.Variables' --output json 2>/dev/null)
+            if [ "$CURRENT_ENV" = "null" ] || [ -z "$CURRENT_ENV" ]; then
+              CURRENT_ENV='{}'
+            fi
+            ENV_JSON=$(echo "$CURRENT_ENV" | jq \
+              --arg v "$SECRET_ARN" \
+              '{Variables: (. + {RESEND_SECRET_ARN: $v})}')
+            aws lambda update-function-configuration \
+              --function-name "$FN" \
+              --environment "$ENV_JSON" \
+              --no-cli-pager >/dev/null
+            aws lambda wait function-updated --function-name "$FN"
+            echo "  Env var RESEND_SECRET_ARN set on $FN."
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Resend provisioning"
+            echo ""
+            echo "- Secret: \`$SECRET_NAME\`"
+            echo "- IAM policy: \`cif-portal-resend-secret\` (attached to both Lambdas)"
+            echo "- Env var \`RESEND_SECRET_ARN\` set on:"
+            echo "  - \`$AUTH_MFA_FN\`"
+            echo "  - \`$LOANS_FN\`"
+            echo ""
+            echo "Next: test at the portal — login MFA email + profile change request emails should now deliver to any inbox."
+          } >> "$GITHUB_STEP_SUMMARY"

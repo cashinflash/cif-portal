@@ -55,6 +55,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from handlers import telnyx_verify  # Verify (turnkey OTP) — current SMS channel
+from handlers import resend_email   # Resend transactional email — replaced SES
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -540,36 +541,16 @@ def _send_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]
     </td></tr>
   </table>
 </body></html>"""
-    try:
-        ses.send_email(
-            Source=EMAIL_SENDER,
-            Destination={"ToAddresses": [to]},
-            Message={
-                "Subject": {"Data": "Your Cash in Flash sign-in code", "Charset": "UTF-8"},
-                "Body": {
-                    "Text": {"Data": body_text, "Charset": "UTF-8"},
-                    "Html": {"Data": body_html, "Charset": "UTF-8"},
-                },
-            },
-        )
-        return True, None, None
-    except ClientError as e:
-        err = e.response.get("Error", {}) if hasattr(e, "response") else {}
-        ses_code = err.get("Code")
-        ses_msg = err.get("Message")
-        log.error(
-            "SES send_email failed: Source=%s to=%s code=%s type=%s msg=%s",
-            EMAIL_SENDER,
-            to,
-            ses_code,
-            err.get("Type"),
-            ses_msg,
-        )
-        return False, ses_code, ses_msg
-    except Exception as e:
-        log.exception("SES send_email unexpected failure Source=%s to=%s: %s",
-                      EMAIL_SENDER, to, e)
-        return False, type(e).__name__, str(e)
+    # Send via Resend (replaced AWS SES after AWS denied production
+    # access twice). The handler returns the same (ok, code, msg)
+    # tuple shape so the /send-code route surfaces error details to
+    # DevTools the same way it did with SES.
+    return resend_email.send(
+        to=to,
+        subject="Your Cash in Flash sign-in code",
+        text=body_text,
+        html=body_html,
+    )
 
 
 # ─────────────────────────────────────────
