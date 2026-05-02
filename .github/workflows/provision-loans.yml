@@ -64,6 +64,8 @@ jobs:
           ROUTES=(
             "GET /api/my-profile"
             "PUT /api/my-profile/email"
+            "POST /api/my-profile/email/start-verify"
+            "POST /api/my-profile/email/confirm"
             "PUT /api/my-profile/address"
             "POST /api/my-profile/phone/start-verify"
             "POST /api/my-profile/phone/confirm"

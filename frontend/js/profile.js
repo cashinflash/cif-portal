@@ -11,6 +11,8 @@
   var LOGIN_URL = '/start.html';
   var PROFILE_ENDPOINT = API_BASE + '/my-profile';
   var EMAIL_ENDPOINT = API_BASE + '/my-profile/email';
+  var EMAIL_START_ENDPOINT = API_BASE + '/my-profile/email/start-verify';
+  var EMAIL_CONFIRM_ENDPOINT = API_BASE + '/my-profile/email/confirm';
   var ADDRESS_ENDPOINT = API_BASE + '/my-profile/address';
   var PHONE_START_ENDPOINT = API_BASE + '/my-profile/phone/start-verify';
   var PHONE_CONFIRM_ENDPOINT = API_BASE + '/my-profile/phone/confirm';
@@ -87,6 +89,8 @@
 
   var _profile = null;
   var _pendingPhone = null;        // 10-digit phone awaiting code confirmation
+  var _pendingEmail = null;        // candidate new email awaiting code confirmation
+  var _pendingEmailRequestId = null;
   var _modalCurrent = null;        // which edit type is open ('email' | 'phone' | 'address')
   var _lastFocused = null;         // restore focus on modal close
 
@@ -224,14 +228,16 @@
       _modalCurrent = null;
       _lastFocused = null;
       _pendingPhone = null;
+      _pendingEmail = null;
+      _pendingEmailRequestId = null;
     }, 180);
   }
 
-  // ---------- Email modal ----------
-  function renderEmailForm() {
+  // ---------- Email modal (two steps: candidate → code) ----------
+  function renderEmailStartForm() {
     var current = (_profile && (_profile.vergentEmail || _profile.email)) || '';
     return [
-      '<p class="profile-modal-intro">Submit a new email and we\'ll review the request before it takes effect. For your security, this is an account change reviewed by a Cash in Flash specialist.</p>',
+      '<p class="profile-modal-intro">Add a new email for account notices and sign-in. We\'ll send a 6-digit code to confirm you have access to the new address.</p>',
       '<div class="profile-modal-current">',
       '  <div class="profile-modal-current-label">Current email</div>',
       '  <div class="profile-modal-current-value">' + escape(current || '—') + '</div>',
@@ -244,21 +250,54 @@
       '  <div class="profile-modal-error" id="profileEmailError" hidden></div>',
       '  <div class="profile-modal-secure">',
       '    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
-      '    Reviewed by our team within one business day. We\'ll email you to confirm.',
+      '    We\'ll email a verification code so only you can change this address.',
       '  </div>',
       '  <div class="profile-modal-actions">',
       '    <button type="button" class="btn-text" data-modal-action="close">Cancel</button>',
-      '    <button type="submit" class="btn-apply">Submit request</button>',
+      '    <button type="submit" class="btn-apply">Send code</button>',
       '  </div>',
       '</form>',
     ].join('');
   }
 
-  function bindEmailForm() {
-    qs('#profileEmailForm').addEventListener('submit', submitEmail);
+  function renderEmailCodeForm(maskedEmail) {
+    return [
+      '<p class="profile-modal-intro">We sent a 6-digit code to <strong>' + escape(maskedEmail || '') + '</strong>. It expires in 10 minutes.</p>',
+      '<form class="profile-modal-form" id="profileEmailCodeForm" novalidate>',
+      '  <label class="profile-modal-field">',
+      '    <span class="profile-modal-field-label">Verification code</span>',
+      '    <input type="text" name="code" id="profileEmailCodeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required placeholder="123456">',
+      '  </label>',
+      '  <div class="profile-modal-error" id="profileEmailCodeError" hidden></div>',
+      '  <div class="profile-modal-actions">',
+      '    <button type="button" class="btn-text" id="profileEmailCodeRetry">Use a different email</button>',
+      '    <button type="submit" class="btn-apply">Verify and submit</button>',
+      '  </div>',
+      '</form>',
+    ].join('');
   }
 
-  function submitEmail(ev) {
+  function renderEmailForm() {
+    return renderEmailStartForm();
+  }
+
+  function bindEmailForm() {
+    qs('#profileEmailForm').addEventListener('submit', submitEmailStart);
+  }
+
+  function bindEmailCodeForm() {
+    qs('#profileEmailCodeForm').addEventListener('submit', submitEmailConfirm);
+    qs('#profileEmailCodeRetry').addEventListener('click', function () {
+      _pendingEmail = null;
+      _pendingEmailRequestId = null;
+      qs('#profileModalBody').innerHTML = renderEmailStartForm();
+      bindEmailForm();
+      var firstInput = qs('#profileEmailInput');
+      if (firstInput) firstInput.focus();
+    });
+  }
+
+  function submitEmailStart(ev) {
     ev.preventDefault();
     var input = qs('#profileEmailInput');
     var err = qs('#profileEmailError');
@@ -271,17 +310,68 @@
     }
     err.hidden = true;
     btns.forEach(function (b) { b.disabled = true; });
-    apiFetch(EMAIL_ENDPOINT, { method: 'PUT', body: { email: email } }).then(function (r) {
+    apiFetch(EMAIL_START_ENDPOINT, { method: 'POST', body: { email: email } }).then(function (r) {
       btns.forEach(function (b) { b.disabled = false; });
-      if (r.status === 200) {
-        banner('ok', 'Email change submitted. Our team will review and confirm with you shortly.');
-        markPending('email');
-        closeModal();
+      if (r.status === 200 && r.data && r.data.ok) {
+        _pendingEmail = email;
+        _pendingEmailRequestId = r.data.requestId;
+        var maskedEmail = r.data.maskedEmail || email;
+        qs('#profileModalBody').innerHTML = renderEmailCodeForm(maskedEmail);
+        bindEmailCodeForm();
+        var ci = qs('#profileEmailCodeInput');
+        if (ci) ci.focus();
       } else if (r.status === 400 && r.data && r.data.error === 'no_change') {
         err.textContent = "That's the same email we have on file.";
         err.hidden = false;
       } else {
-        err.textContent = "We couldn't submit your request right now. Please try again.";
+        err.textContent = "We couldn't send the code right now. Please try again or call (747) 270-7121.";
+        err.hidden = false;
+      }
+    }).catch(function (e) {
+      btns.forEach(function (b) { b.disabled = false; });
+      if (e && e.message === 'unauthorized') return;
+      err.textContent = 'Network error. Please try again.';
+      err.hidden = false;
+    });
+  }
+
+  function submitEmailConfirm(ev) {
+    ev.preventDefault();
+    var input = qs('#profileEmailCodeInput');
+    var err = qs('#profileEmailCodeError');
+    var btns = qsa('button', qs('#profileEmailCodeForm'));
+    var code = (input.value || '').replace(/\D/g, '');
+    if (code.length < 4) {
+      err.textContent = 'Please enter the code we emailed you.';
+      err.hidden = false;
+      return;
+    }
+    if (!_pendingEmailRequestId) {
+      err.textContent = 'Please start over.';
+      err.hidden = false;
+      return;
+    }
+    err.hidden = true;
+    btns.forEach(function (b) { b.disabled = true; });
+    apiFetch(EMAIL_CONFIRM_ENDPOINT, {
+      method: 'POST',
+      body: { requestId: _pendingEmailRequestId, code: code },
+    }).then(function (r) {
+      btns.forEach(function (b) { b.disabled = false; });
+      if (r.status === 200 && r.data && r.data.ok) {
+        banner('ok', 'Email verified and submitted for review. Our team will confirm before it becomes your sign-in email.');
+        markPending('email');
+        _pendingEmail = null;
+        _pendingEmailRequestId = null;
+        closeModal();
+      } else if (r.status === 400 && r.data && r.data.error === 'too_many_attempts') {
+        err.textContent = 'Too many incorrect attempts. Please start over.';
+        err.hidden = false;
+      } else if (r.status === 400 && r.data && (r.data.error === 'session_expired' || r.data.error === 'session_state')) {
+        err.textContent = 'That session has expired. Please start over.';
+        err.hidden = false;
+      } else {
+        err.textContent = "That code didn't match. Try again or request a new one.";
         err.hidden = false;
       }
     }).catch(function (e) {

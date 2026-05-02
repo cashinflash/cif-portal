@@ -44,10 +44,14 @@ Environment:
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
+import secrets as _secrets_module  # avoid clash with `_secrets` boto client
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -880,7 +884,7 @@ def _send_customer_confirmation(claims: Dict[str, Any], field: str,
 
     requested_display = _fmt_request(requested)
 
-    subject = "Cash in Flash — we received your request"
+    subject = f"We received your request to update your {field_label}"
 
     body_text = (
         f"Hi {first_name},\n\n"
@@ -901,36 +905,31 @@ def _send_customer_confirmation(claims: Dict[str, Any], field: str,
     )
 
     requested_row = (
-        f'<tr><td style="padding:10px 0;color:#6b7280;width:140px;">Requested</td>'
-        f'<td style="padding:10px 0;color:#1a1a2e;font-weight:600;">{requested_display}</td></tr>'
+        f'<tr><td style="padding:14px 18px;color:#6b7280;width:120px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;">Requested</td>'
+        f'<td style="padding:14px 18px 14px 0;color:#1a1a2e;font-size:15px;font-weight:600;line-height:1.45;">{requested_display}</td></tr>'
     ) if requested_display else ""
 
     body_html = f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:32px 12px;">
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,'SF Pro Text','Segoe UI',Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:36px 12px;">
     <tr><td align="center">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;">
-        <tr><td style="background:#0E8741;padding:24px 28px;">
-          <h1 style="margin:0;font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">We received your request</h1>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
+        <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
-        <tr><td style="padding:28px;font-size:15px;line-height:1.6;color:#1a1a2e;">
-          <p style="margin:0 0 16px;">Hi {first_name},</p>
-          <p style="margin:0 0 16px;">We've received your request to update the <strong>{field_label}</strong> on your Cash in Flash account.</p>
-          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:16px 0 20px;background:#f9fafb;border-radius:8px;">
-            <tr><td style="padding:0 16px;">
-              <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
-                {requested_row}
-              </table>
-            </td></tr>
+        <tr><td style="padding:36px 36px 8px;">
+          <p style="margin:0 0 6px;font-size:12px;color:#0E8741;letter-spacing:.08em;text-transform:uppercase;font-weight:700;">Account update received</p>
+          <h1 style="margin:0 0 18px;font-size:22px;font-weight:700;color:#1a1a2e;letter-spacing:-0.01em;line-height:1.25;">We've got your request, {first_name}.</h1>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#1a1a2e;">We've received your request to update the <strong>{field_label}</strong> on your Cash in Flash account.</p>
+          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0;margin:6px 0 22px;background:#f9fafb;border-radius:10px;">
+            {requested_row}
           </table>
-          <p style="margin:0 0 16px;">Our team will review and confirm the change with you within <strong>one business day</strong>. For your security, this update won't take effect until we've verified it.</p>
-          <p style="margin:0 0 16px;color:#6b7280;font-size:13px;">If you didn't request this change, please call us right away at <a href="tel:+17472707121" style="color:#0E8741;font-weight:600;text-decoration:none;">(747) 270-7121</a>.</p>
-          <p style="margin:24px 0 0;">Thank you for being a Cash in Flash customer.</p>
-          <p style="margin:8px 0 0;color:#6b7280;">— The Cash in Flash Team</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#1a1a2e;">For your security, this change is reviewed by a Cash in Flash specialist before it takes effect — usually within <strong>one business day</strong>. We'll email you once it's applied.</p>
+          <p style="margin:0 0 4px;font-size:13px;line-height:1.6;color:#6b7280;">Didn't request this? Call us right away at <a href="tel:+17472707121" style="color:#0E8741;font-weight:600;text-decoration:none;">(747) 270-7121</a>.</p>
         </td></tr>
-        <tr><td style="padding:20px 28px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.5;">
-          Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840<br>
-          This is an automated message. Please do not reply to this email.
+        <tr><td style="padding:22px 36px 32px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.6;">
+          <p style="margin:0 0 6px;">Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840</p>
+          <p style="margin:0;">This email was sent by Cash in Flash &middot; 13937B Van Nuys Blvd, Arleta, CA 91331. Please do not reply to this email.</p>
         </td></tr>
       </table>
     </td></tr>
@@ -948,10 +947,76 @@ def _send_customer_confirmation(claims: Dict[str, Any], field: str,
                     err_code, (err_msg or "")[:200])
 
 
-def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
-    """PUT /api/my-profile/email — queue an email-change REQUEST for
-    admin review. We don't push to Vergent directly; an admin reviews
-    the queued request and applies it via Vergent admin UI.
+def _hash_code(code: str) -> str:
+    """SHA-256 hex digest of a verification code, used for safe storage."""
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _generate_code() -> str:
+    """Six-digit numeric code suitable for an SMS/email OTP."""
+    return f"{_secrets_module.randbelow(1_000_000):06d}"
+
+
+def _send_email_verify_code(to_email: str, code: str) -> Tuple[bool, str]:
+    """Send a 6-digit verification code via Resend to a candidate new
+    email address. Used by the profile email-change flow before the
+    request lands in the admin queue."""
+    text = (
+        f"Your verification code is {code}.\n\n"
+        f"This code lets us confirm you have access to {to_email} "
+        f"before our team applies the change to your Cash in Flash account. "
+        f"It expires in 10 minutes.\n\n"
+        f"If you didn't request this, you can safely ignore this email "
+        f"or call us at (747) 270-7121.\n\n"
+        f"---\n"
+        f"Cash in Flash · Licensed by the California Department of "
+        f"Financial Protection and Innovation #214840\n"
+        f"This is an automated message. Please do not reply.\n"
+    )
+    html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:32px 12px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td align="center" style="background:#0E8741;padding:32px 24px;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+        </td></tr>
+        <tr><td style="padding:32px 36px 8px;">
+          <p style="margin:0 0 8px;font-size:13px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;font-weight:600;">Verification code</p>
+          <h1 style="margin:0 0 18px;font-size:28px;font-weight:700;color:#1a1a2e;letter-spacing:-0.01em;">{code}</h1>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a1a2e;">Enter this code in your account profile to confirm <strong>{to_email}</strong>.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#6b7280;">This code expires in <strong>10 minutes</strong>. If you didn't request this change, you can safely ignore this email or call us at <a href="tel:+17472707121" style="color:#0E8741;text-decoration:none;font-weight:600;">(747) 270-7121</a>.</p>
+        </td></tr>
+        <tr><td style="padding:18px 36px 28px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.5;">
+          Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840<br>
+          This is an automated message. Please do not reply to this email.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+    ok, err_code, err_msg = resend_email.send(
+        to=to_email,
+        subject="Your verification code",
+        text=text,
+        html=html,
+    )
+    if not ok:
+        log.warning("email-verify code send failed code=%s msg=%s",
+                    err_code, (err_msg or "")[:200])
+        return False, err_code or "send_failed"
+    return True, ""
+
+
+def start_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-profile/email/start-verify — kick off the
+    email-change flow by texting (well, emailing) a 6-digit code to
+    the candidate new address. The customer enters the code in the
+    next step (`confirm_email_verify`) before the request lands in
+    the admin queue.
+
+    This is the security boundary that keeps a stolen session from
+    pivoting to email-takeover by changing the contact email.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -966,22 +1031,168 @@ def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
     if not _validate_email(new_email):
         return _json_response(400, {"error": "invalid_email"})
 
-    # Look up current Vergent email so the admin sees old vs new.
+    # Don't waste a code if it's the same as what's already on file.
     current_email = ""
     status, prof = _v1_get(f"/V1/GetCustomer/{cid}")
     if status == 200 and isinstance(prof, dict):
         current_email = (prof.get("EmailAddr") or "").strip()
-
     if current_email and current_email.lower() == new_email:
         return _json_response(400, {"error": "no_change"})
 
-    ok, reason = _create_change_request(
-        cid, claims, "email",
-        current_value=current_email or None,
-        requested_value=new_email,
+    # Generate + store verification session in the existing
+    # profile-change-requests DDB table. status='awaiting_email_verify'
+    # so the admin queue ignores it; TTL 10 min so abandoned sessions
+    # self-delete. On confirm we flip status to 'pending' and fire
+    # the admin/customer notifications.
+    code = _generate_code()
+    code_hash = _hash_code(code)
+    request_id = str(uuid.uuid4())
+    now_iso = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    expires_at = int(time.time()) + 10 * 60  # 10-min TTL
+    item = {
+        "requestId":         {"S": request_id},
+        "customerId":        {"S": str(cid)},
+        "field":             {"S": "email"},
+        "currentValue":      {"S": current_email or ""},
+        "requestedValue":    {"S": new_email},
+        "status":            {"S": "awaiting_email_verify"},
+        "codeHash":          {"S": code_hash},
+        "attempts":          {"N": "0"},
+        "requestedAt":       {"S": now_iso},
+        "requestedByEmail":  {"S": (claims.get("email") or "").strip()},
+        "expiresAt":         {"N": str(expires_at)},
+    }
+    try:
+        _dynamo.put_item(TableName=PROFILE_REQUESTS_TABLE, Item=item)
+    except ClientError as e:
+        log.error("DDB put for email-verify failed: %s",
+                  e.response.get("Error", {}).get("Code"))
+        return _json_response(502, {"error": "queue_unavailable"})
+
+    sent_ok, sent_err = _send_email_verify_code(new_email, code)
+    if not sent_ok:
+        # Best-effort cleanup so a failed send doesn't leave a
+        # dangling session row.
+        try:
+            _dynamo.delete_item(TableName=PROFILE_REQUESTS_TABLE,
+                                Key={"requestId": {"S": request_id}})
+        except Exception:
+            pass
+        return _json_response(502, {"error": "send_failed", "detail": sent_err})
+
+    return _json_response(200, {
+        "ok": True,
+        "requestId": request_id,
+        "maskedEmail": _mask_email(new_email),
+    })
+
+
+def confirm_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-profile/email/confirm — verify the 6-digit code
+    we sent to the candidate new email, then flip the queued row to
+    `status=pending` and fire the admin + customer notification
+    emails. Same end state as the old single-shot update_email but
+    with proven control over the new email."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "no_customer_id"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+    request_id = (body.get("requestId") or "").strip()
+    code = _digits_only(body.get("code") or "")
+    if not request_id or not code:
+        return _json_response(400, {"error": "missing_fields"})
+
+    try:
+        resp = _dynamo.get_item(
+            TableName=PROFILE_REQUESTS_TABLE,
+            Key={"requestId": {"S": request_id}},
+        )
+    except ClientError as e:
+        log.error("DDB get for email-verify failed: %s",
+                  e.response.get("Error", {}).get("Code"))
+        return _json_response(502, {"error": "queue_unavailable"})
+    item = resp.get("Item") or {}
+    if not item:
+        return _json_response(400, {"error": "session_expired"})
+
+    # Belt-and-suspenders: confirm row belongs to this customer + is
+    # in the right state and not expired.
+    if item.get("customerId", {}).get("S") != str(cid):
+        return _json_response(403, {"error": "forbidden"})
+    if item.get("status", {}).get("S") != "awaiting_email_verify":
+        return _json_response(400, {"error": "session_state"})
+    if int(item.get("expiresAt", {}).get("N", "0")) <= int(time.time()):
+        return _json_response(400, {"error": "session_expired"})
+
+    attempts = int(item.get("attempts", {}).get("N", "0"))
+    if attempts >= 5:
+        # Lock out further attempts; the row still TTL-deletes.
+        return _json_response(400, {"error": "too_many_attempts"})
+
+    expected_hash = item.get("codeHash", {}).get("S", "")
+    actual_hash = _hash_code(code)
+    if not expected_hash or not hmac.compare_digest(expected_hash, actual_hash):
+        try:
+            _dynamo.update_item(
+                TableName=PROFILE_REQUESTS_TABLE,
+                Key={"requestId": {"S": request_id}},
+                UpdateExpression="SET attempts = :a",
+                ExpressionAttributeValues={":a": {"N": str(attempts + 1)}},
+            )
+        except Exception:
+            pass
+        return _json_response(400, {"error": "code_invalid"})
+
+    # Code matches. Promote the row to a real pending change request.
+    new_email = item.get("requestedValue", {}).get("S", "")
+    current_email = item.get("currentValue", {}).get("S", "") or None
+    long_ttl = int(time.time()) + 90 * 24 * 60 * 60  # 90-day audit retention
+    try:
+        _dynamo.update_item(
+            TableName=PROFILE_REQUESTS_TABLE,
+            Key={"requestId": {"S": request_id}},
+            UpdateExpression=(
+                "SET #s = :s, expiresAt = :e, "
+                "meta = :meta REMOVE codeHash, attempts"
+            ),
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": {"S": "pending"},
+                ":e": {"N": str(long_ttl)},
+                ":meta": {"S": json.dumps({"emailVerified": True})},
+            },
+        )
+    except ClientError as e:
+        log.error("DDB promote for email-verify failed: %s",
+                  e.response.get("Error", {}).get("Code"))
+        return _json_response(502, {"error": "queue_unavailable"})
+
+    # Fire admin + customer notifications now that we've proven the
+    # customer controls the new address.
+    _send_admin_notification(
+        request_id, str(cid), claims, "email",
+        current_email, new_email,
+        {"emailVerified": True},
     )
-    if not ok:
-        return _json_response(502, {"error": reason})
+    _send_customer_confirmation(claims, "email", new_email,
+                                  {"emailVerified": True})
+
+    return _json_response(200, {"ok": True, "status": "pending_review"})
+
+
+def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Legacy single-shot email change — kept for backward compat
+    in case any old client still hits it. Customers from the portal
+    now go through the two-step verify flow above."""
+    return _json_response(410, {
+        "error": "use_email_verify_flow",
+        "detail": "POST /api/my-profile/email/start-verify then /confirm",
+    })
 
     return _json_response(200, {"ok": True, "status": "pending_review"})
 
@@ -1668,6 +1879,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_my_profile(event)
         if path.endswith("/my-profile/email") and method == "PUT":
             return update_email(event)
+        if path.endswith("/my-profile/email/start-verify") and method == "POST":
+            return start_email_verify(event)
+        if path.endswith("/my-profile/email/confirm") and method == "POST":
+            return confirm_email_verify(event)
         if path.endswith("/my-profile/address") and method == "PUT":
             return update_address(event)
         if path.endswith("/my-profile/phone/start-verify") and method == "POST":
