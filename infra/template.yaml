@@ -93,6 +93,42 @@ Resources:
             Auth:
               Authorizer: JwtAuthorizer
               AuthorizerId: !Ref JwtAuthorizerId
+        ProfileEmail:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: PUT
+            Path: /api/my-profile/email
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        ProfileAddress:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: PUT
+            Path: /api/my-profile/address
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        ProfilePhoneStart:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: POST
+            Path: /api/my-profile/phone/start-verify
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        ProfilePhoneConfirm:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: POST
+            Path: /api/my-profile/phone/confirm
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
 
   PaymentsFn:
     Type: AWS::Serverless::Function

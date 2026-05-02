@@ -970,6 +970,123 @@ button.dash-doc-download:disabled {
   .dash-doc-modal-actions .btn-login { padding: 8px 12px; font-size: .82rem; }
 }
 
+/* ---------- PROFILE PAGE ---------- */
+.profile-section { padding: 22px 24px; }
+.profile-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.profile-row-meta { flex: 1; min-width: 0; }
+.profile-row-meta h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--cif-navy);
+  letter-spacing: .02em;
+}
+.profile-row-value {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  color: var(--cif-navy);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.profile-row-hint {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--cif-muted);
+  line-height: 1.4;
+}
+
+.profile-form {
+  margin: 18px 0 0;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--cif-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.profile-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profile-form .form-field > span {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--cif-subtle);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.profile-form input[type="text"],
+.profile-form input[type="email"],
+.profile-form input[type="tel"] {
+  padding: 10px 12px;
+  border: 1px solid var(--cif-hairline);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--cif-navy);
+  background: #fff;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.profile-form input:focus {
+  outline: none;
+  border-color: #0E8741;
+  box-shadow: 0 0 0 3px rgba(14, 135, 65, .12);
+}
+.profile-form-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.profile-form-row .form-field { flex: 1; min-width: 140px; }
+.profile-form-error {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(220, 38, 38, .08);
+  border-left: 4px solid #dc2626;
+  border-radius: 6px;
+  color: #991b1b;
+  font-size: .9rem;
+  line-height: 1.4;
+}
+.profile-form-hint {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--cif-muted);
+  line-height: 1.4;
+}
+.profile-form-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* Banner variants beyond the existing --ok */
+.dash-banner--warn {
+  background: rgba(217, 119, 6, .10);
+  border-left: 4px solid #d97706;
+  color: #92400e;
+}
+.dash-banner--err {
+  background: rgba(220, 38, 38, .10);
+  border-left: 4px solid #dc2626;
+  color: #991b1b;
+}
+
+@media (max-width: 640px) {
+  .profile-section { padding: 18px 16px; }
+  .profile-form-actions .btn-login,
+  .profile-form-actions .btn-apply { flex: 1; }
+}
+
 /* ---------- SESSION TIMEOUT WARNING MODAL ---------- */
 /* Sits above the doc viewer modal (z-index 9999) so a session
    warning is never hidden behind another modal. Backdrop click is

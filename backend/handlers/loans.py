@@ -2,12 +2,16 @@
 Customer Portal - Account + Loans handler (Vergent v1 LMS API).
 
 Routes (bound to HttpApi with Cognito JWT authorizer):
-  GET  /api/my-profile       -> profile card data
-  GET  /api/my-loans/active  -> active loan with balance / due date / status
-  GET  /api/my-loans/activity -> recent activity (empty until loan/transactions wired)
-  GET  /api/my-loans/documents -> list signed documents for ?loanId=X
-  GET  /api/my-loans/documents/{docId}/download -> stream document binary
-  POST /api/my-loan/new      -> returns handoff URL into Vergent loan-application UI
+  GET  /api/my-profile                        -> profile card + addresses + phones
+  PUT  /api/my-profile/email                  -> update Vergent email + notification
+  PUT  /api/my-profile/address                -> update primary mailing address
+  POST /api/my-profile/phone/start-verify     -> Vergent SMS PIN to new phone
+  POST /api/my-profile/phone/confirm          -> verify SMS PIN + save phone
+  GET  /api/my-loans/active                   -> active loan with balance / due date / status
+  GET  /api/my-loans/activity                 -> recent activity for ?loanId=X
+  GET  /api/my-loans/documents                -> list signed documents for ?loanId=X
+  GET  /api/my-loans/documents/{docId}/download -> stream document binary (?format=pdf for PDF)
+  POST /api/my-loan/new                       -> returns handoff URL into Vergent loan-application UI
 
 Auth model:
   - API Gateway's Cognito JWT authorizer validates the ID token; claims
@@ -258,6 +262,30 @@ def _v1_get(path: str) -> Tuple[int, Optional[Any]]:
     return status, body
 
 
+def _v1_request(method: str, path: str,
+                body: Optional[Dict[str, Any]] = None) -> Tuple[int, Optional[Any]]:
+    """Generic v1 call with method override. Used by profile-edit
+    endpoints (PUT/POST) — _v1_get only handles GETs. Same token
+    refresh-on-401 behaviour."""
+    token = _get_v1_token()
+    if not token:
+        return 0, None
+    status, resp, _raw = _http(
+        f"{V1_BASE}{path}", method,
+        body=body, headers={"Token": token},
+    )
+    if status in (401, 403):
+        global _v1_token_exp
+        _v1_token_exp = 0
+        tok2 = _get_v1_token()
+        if tok2:
+            status, resp, _raw = _http(
+                f"{V1_BASE}{path}", method,
+                body=body, headers={"Token": tok2},
+            )
+    return status, resp
+
+
 # ─────────────────────────────────────────
 # Shape helpers
 # ─────────────────────────────────────────
@@ -494,20 +522,241 @@ def get_my_profile(event: Dict[str, Any]) -> Dict[str, Any]:
         profile["isSecurityQuestionsSetup"] = bool(body.get("SecurityQuestionId"))
         profile["source"] = "vergent"
 
-    # v1 customer data — includes addresses + phones with masked numbers
+    # v1 customer data — includes addresses + phones. We surface both
+    # in full (not just a hint) because the profile-edit page reads
+    # them. Numbers are full E.164/raw values; the dashboard masks
+    # for its summary card via vergentPhoneHint, the profile page
+    # uses the full versions for editing context.
     status2, data = _v1_get(f"/V1/GetCustomerData/{cid}")
     if status2 == 200 and isinstance(data, dict):
         phones = data.get("custPhones") or []
-        if isinstance(phones, list) and phones:
-            # v1 returns snake_case keys: is_primary, number, type_name.
+        addresses = data.get("custAddresses") or []
+        if isinstance(phones, list):
+            # v1 returns snake_case keys: is_primary, number, type_name, type_id.
             primary_phone = next(
                 (p for p in phones if isinstance(p, dict) and p.get("is_primary")),
-                phones[0] if isinstance(phones[0], dict) else None,
+                next((p for p in phones if isinstance(p, dict)), None),
             )
             if primary_phone:
                 profile["vergentPhoneHint"] = _mask_phone(primary_phone.get("number"))
+                profile["vergentPhone"] = primary_phone.get("number")
+                profile["vergentPhoneTypeId"] = primary_phone.get("type_id")
+            profile["vergentPhones"] = [
+                {
+                    "id": p.get("id"),
+                    "number": p.get("number"),
+                    "typeId": p.get("type_id"),
+                    "typeName": p.get("type_name"),
+                    "isPrimary": bool(p.get("is_primary")),
+                }
+                for p in phones if isinstance(p, dict)
+            ]
+        if isinstance(addresses, list):
+            primary_addr = next(
+                (a for a in addresses if isinstance(a, dict) and a.get("IsPrimary")),
+                next((a for a in addresses if isinstance(a, dict)), None),
+            )
+            if primary_addr:
+                profile["vergentAddress"] = {
+                    "id": primary_addr.get("id"),
+                    "addr1": primary_addr.get("addr1"),
+                    "addr2": primary_addr.get("addr2"),
+                    "city": primary_addr.get("city"),
+                    "state": primary_addr.get("abbrev") or primary_addr.get("state"),
+                    "stateId": primary_addr.get("state_id"),
+                    "zip": primary_addr.get("zip"),
+                    "typeId": primary_addr.get("type_id"),
+                }
 
     return _json_response(200, profile)
+
+
+# ─────────────────────────────────────────
+# Profile editing helpers
+# ─────────────────────────────────────────
+def _digits_only(s: str) -> str:
+    return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
+def _normalize_us_phone(raw: str) -> Optional[str]:
+    """Returns 10-digit US phone or None. Strips formatting,
+    removes leading '1' country code if present."""
+    d = _digits_only(raw)
+    if len(d) == 11 and d.startswith("1"):
+        d = d[1:]
+    if len(d) == 10:
+        return d
+    return None
+
+
+def _validate_email(s: str) -> bool:
+    if not s or len(s) > 254 or "@" not in s:
+        return False
+    local, _, domain = s.rpartition("@")
+    return bool(local) and bool(domain) and "." in domain and " " not in s
+
+
+def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
+    """PUT /api/my-profile/email — update Vergent's on-file email
+    and trigger Vergent's emailchanged notification.
+
+    Note: this updates the customer's Vergent record only. The
+    Cognito sign-in email stays the same. Customers who want to
+    change their sign-in email must contact support — that's a
+    sensitive Cognito Admin operation outside the v1 portal scope.
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "no_customer_id"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+    new_email = (body.get("email") or "").strip().lower()
+    if not _validate_email(new_email):
+        return _json_response(400, {"error": "invalid_email"})
+
+    status, resp = _v1_request("PUT", "/V1/PutCustomerEmail",
+                               body={"customerId": int(cid), "EmailAddr": new_email})
+    if status not in (200, 204):
+        log.warning("PutCustomerEmail status=%s cid=%s", status, cid)
+        return _json_response(502, {"error": "upstream_unavailable"})
+
+    # Trigger Vergent's notification to the new address (best-effort).
+    enc = urllib.parse.quote(new_email, safe="")
+    _v1_request("POST", f"/V1/customer/{cid}/communication/trigger/emailchanged/{enc}")
+
+    return _json_response(200, {"ok": True, "email": new_email})
+
+
+def update_address(event: Dict[str, Any]) -> Dict[str, Any]:
+    """PUT /api/my-profile/address — update primary mailing address."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "no_customer_id"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+
+    addr1 = (body.get("addr1") or "").strip()
+    addr2 = (body.get("addr2") or "").strip()
+    city = (body.get("city") or "").strip()
+    state = (body.get("state") or "").strip().upper()
+    zip_code = _digits_only(body.get("zip") or "")[:9]
+
+    if not addr1 or len(addr1) > 120:
+        return _json_response(400, {"error": "addr1_invalid"})
+    if not city or len(city) > 80:
+        return _json_response(400, {"error": "city_invalid"})
+    if len(state) != 2:
+        return _json_response(400, {"error": "state_invalid"})
+    if len(zip_code) not in (5, 9):
+        return _json_response(400, {"error": "zip_invalid"})
+
+    payload = {
+        "customerId": int(cid),
+        "addr1": addr1,
+        "addr2": addr2 or None,
+        "city": city,
+        "abbrev": state,
+        "zip": zip_code,
+        "IsPrimary": True,
+        "status": 1,
+    }
+    status, resp = _v1_request("PUT", "/V1/PutCustomerAddress", body=payload)
+    if status not in (200, 204):
+        log.warning("PutCustomerAddress status=%s cid=%s", status, cid)
+        return _json_response(502, {"error": "upstream_unavailable"})
+
+    return _json_response(200, {"ok": True})
+
+
+def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-profile/phone/start-verify — kick off Vergent's
+    SMS PIN flow against the new phone. Customer enters the code in
+    the next step (confirm_phone_verify) before we save the change.
+
+    This is the security boundary that keeps a stolen session from
+    pivoting to MFA-takeover: changing the phone requires control of
+    the new phone first.
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "no_customer_id"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+
+    phone = _normalize_us_phone(body.get("phone") or "")
+    if not phone:
+        return _json_response(400, {"error": "invalid_phone"})
+
+    status, resp = _v1_request(
+        "POST", f"/V1/customer/{cid}/communication/sms/validate/{phone}")
+    if status not in (200, 204):
+        log.warning("phone validate-start status=%s cid=%s", status, cid)
+        return _json_response(502, {"error": "sms_send_failed"})
+
+    return _json_response(200, {"ok": True, "maskedPhone": _mask_phone(phone)})
+
+
+def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-profile/phone/confirm — verify the SMS PIN AND
+    save the phone as the customer's primary."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "no_customer_id"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+
+    phone = _normalize_us_phone(body.get("phone") or "")
+    code = _digits_only(body.get("code") or "")
+    if not phone:
+        return _json_response(400, {"error": "invalid_phone"})
+    if len(code) < 4 or len(code) > 8:
+        return _json_response(400, {"error": "invalid_code"})
+
+    # Step 1: verify the PIN with Vergent. They typically auto-record
+    # the phone as verified when this returns success.
+    status, resp = _v1_request(
+        "POST", f"/V1/customer/{cid}/communication/sms/validate/{phone}/confirm/{code}")
+    if status not in (200, 204):
+        log.warning("phone validate-confirm status=%s cid=%s", status, cid)
+        return _json_response(400, {"error": "code_invalid_or_expired"})
+
+    # Step 2: save the phone as primary on the customer record. Some
+    # Vergent tenants auto-do this on confirm — if so this PUT is a
+    # no-op. If not, this stitches the verified number into the
+    # customer's contact methods.
+    save_payload = {
+        "customerId": int(cid),
+        "number": phone,
+        "type_id": 1,        # 1 = mobile (typical Vergent default)
+        "is_primary": True,
+        "IsPrimary": True,
+        "status": 1,
+    }
+    status2, _resp2 = _v1_request("POST", "/V1/PostCustomerPhone", body=save_payload)
+    if status2 not in (200, 201, 204):
+        log.warning("save phone after verify status=%s cid=%s", status2, cid)
+        # Verified but not saved — return partial success so the UI can
+        # surface "verified but contact us to finish saving".
+        return _json_response(200, {"ok": True, "savedToProfile": False})
+
+    return _json_response(200, {"ok": True, "savedToProfile": True,
+                                 "maskedPhone": _mask_phone(phone)})
 
 
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1027,6 +1276,14 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
         if path.endswith("/my-profile") and method == "GET":
             return get_my_profile(event)
+        if path.endswith("/my-profile/email") and method == "PUT":
+            return update_email(event)
+        if path.endswith("/my-profile/address") and method == "PUT":
+            return update_address(event)
+        if path.endswith("/my-profile/phone/start-verify") and method == "POST":
+            return start_phone_verify(event)
+        if path.endswith("/my-profile/phone/confirm") and method == "POST":
+            return confirm_phone_verify(event)
         if path.endswith("/my-loan/new") and method == "POST":
             return request_new_loan_handoff(event)
         if path.endswith("/my-loans/active") and method == "GET":

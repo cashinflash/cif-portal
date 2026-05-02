@@ -48,11 +48,21 @@ before making any changes:
 backend/
   handlers/            # One Lambda per .py file (plus a couple of
                        # helpers that get bundled as a single zip).
-    loans.py           # GET /api/my-profile, /api/my-loans/active,
-                       #   /api/my-loans/activity (?loanId=N optional),
-                       #   /api/my-loans/documents (?loanId=N),
-                       #   /api/my-loans/documents/{docId}/download
-                       #     (?format=pdf invokes the doc-pdf Lambda)
+    loans.py           # GET  /api/my-profile (now also returns
+                       #        addresses + phones for editing),
+                       #      /api/my-loans/active,
+                       #      /api/my-loans/activity (?loanId=N),
+                       #      /api/my-loans/documents (?loanId=N),
+                       #      /api/my-loans/documents/{docId}/download
+                       #        (?format=pdf invokes the doc-pdf Lambda)
+                       # PUT  /api/my-profile/email (updates Vergent
+                       #        email + triggers change notification)
+                       # PUT  /api/my-profile/address (updates primary
+                       #        mailing address)
+                       # POST /api/my-profile/phone/start-verify
+                       #        (Vergent SMS PIN to new number)
+                       # POST /api/my-profile/phone/confirm
+                       #        (verify PIN + save phone as primary)
                        # POST /api/my-loan/new (handoff to Vergent)
   doc_pdf/             # Node.js 20 Lambda — HTML → PDF conversion via
                        #   puppeteer-core + @sparticuz/chromium.
@@ -288,6 +298,68 @@ organic blobs).
 ## Recent work log
 
 Update this section at the end of each session. Newest first.
+
+### 2026-05-01 — Phase C: profile self-edit (email / phone / address)
+- New /profile.html page (sidebar + header nav now have a Profile
+  link on dashboard / loans / payments / request-loan). Three
+  read+edit sections: Email, Mobile phone, Mailing address.
+- Backend (loans.py):
+    PUT  /api/my-profile/email             — update Vergent email
+                                               + trigger Vergent's
+                                               emailchanged notification.
+    PUT  /api/my-profile/address           — update primary mailing
+                                               address (street/apt/city/
+                                               state/zip).
+    POST /api/my-profile/phone/start-verify — Vergent SMS PIN to the
+                                               candidate new phone.
+    POST /api/my-profile/phone/confirm     — verify PIN + save the
+                                               phone as primary.
+  All authed via the JWT-claim customer id (no trust of body cid).
+  Phone change is two-step (PIN before save) so a stolen session
+  can't pivot to MFA-takeover by changing the contact number.
+- get_my_profile extended to return vergentPhones[] and
+  vergentAddress (in addition to the existing summary fields). The
+  profile-edit page reads these for pre-fill.
+- New _v1_request() helper for PUT/POST in loans.py (parallels the
+  existing _v1_get GET helper).
+- Phase C v1 deliberately does NOT sync changes to Cognito
+  (sign-in email / phone). The customer's Cognito record stays as
+  it was at sign-up. Sign-in-email changes still require contacting
+  support. The Profile page updates Vergent's records (the source
+  of truth for loan notifications); when the customer next signs
+  in they'll see the new values surfaced from Vergent.
+
+### 2026-05-01 — Phase B: idle-based session timeout (online-banking style)
+- session.js converted from token-expiry timer to industry-standard
+  10-min idle timer + 1-min warning. Activity (click / keydown /
+  scroll / mousemove / touchstart) resets the clock. Silent
+  background refresh of the Cognito IdToken when it nears expiry
+  AND the customer is still active. Activity is ignored while the
+  warning modal is showing so a passing mouse-twitch doesn't
+  auto-extend.
+- Forced logouts redirect to /start.html?reason=session_expired
+  (or signed_out) and start.html now surfaces a friendly inline
+  banner explaining what happened.
+
+### 2026-05-01 — Phase A: CORS lockdown + security headers + cleanup
+- CORS Access-Control-Allow-Origin moved from '*' to env-driven
+  PORTAL_ORIGIN (defaults to dev CloudFront). Affects all 5 entry
+  points (loans, auth_mfa, if_submit, loans_v1, layer responses).
+- Baseline security response headers on every Lambda response:
+  Strict-Transport-Security, X-Content-Type-Options, Referrer-
+  Policy, Permissions-Policy.
+- New set-portal-origin.yml workflow flips the allowed origin
+  without code deploys.
+- Bug fix: ClientError caught in loans._render_html_to_pdf but
+  never imported.
+- Cleanup: ?debug=1 mode removed from /api/my-loans/documents,
+  _v1_get_binary deleted, ~150 lines of unreachable POST
+  /api/my-cards block deleted, three diagnostic probe logs
+  removed.
+- Trust signal: DFPI license #214840 now in every signed-in
+  page footer.
+- Infra: deploy-doc-pdf.yml now applies a 30-day S3 lifecycle
+  policy on the artifact bucket.
 
 ### 2026-05-01 — Server-side PDF for loan documents (doc-pdf Lambda)
 - New Node.js 20 Lambda `cif-portal-doc-pdf-dev` converts Vergent's

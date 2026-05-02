@@ -57,6 +57,10 @@ jobs:
 
           ROUTES=(
             "GET /api/my-profile"
+            "PUT /api/my-profile/email"
+            "PUT /api/my-profile/address"
+            "POST /api/my-profile/phone/start-verify"
+            "POST /api/my-profile/phone/confirm"
             "GET /api/my-loans/active"
             "GET /api/my-loans/activity"
             "GET /api/my-loans/documents"
