@@ -211,12 +211,13 @@
     apiFetch(EMAIL_ENDPOINT, { method: 'PUT', body: { email: email } }).then(function (r) {
       btns.forEach(function (b) { b.disabled = false; });
       if (r.status === 200) {
-        banner('ok', 'Email updated. We sent a confirmation to your new address.');
-        if (_profile) _profile.vergentEmail = email;
-        renderProfile(_profile);
+        banner('ok', 'Email change submitted. Our team will review and confirm with you shortly.');
         closeEdit('email');
+      } else if (r.status === 400 && r.data && r.data.error === 'no_change') {
+        err.textContent = 'That’s the same email we have on file.';
+        err.hidden = false;
       } else {
-        err.textContent = 'We couldn’t update your email right now. Please try again.';
+        err.textContent = 'We couldn’t submit your request right now. Please try again.';
         err.hidden = false;
       }
     }).catch(function (e) {
@@ -292,13 +293,7 @@
     }).then(function (r) {
       btns.forEach(function (b) { b.disabled = false; });
       if (r.status === 200 && r.data && r.data.ok) {
-        if (r.data.savedToProfile === false) {
-          banner('warn', "We verified your number but couldn't save it to your account. Please call (747) 270-7121 to finish.");
-        } else {
-          banner('ok', 'Phone updated. New sign-in codes will go to ' + fmtPhone(_pendingPhone) + '.');
-        }
-        if (_profile) _profile.vergentPhone = _pendingPhone;
-        renderProfile(_profile);
+        banner('ok', 'Phone verified and submitted for review. Our team will confirm before it becomes your sign-in number.');
         _pendingPhone = null;
         closeEdit('phone-code');
       } else {
@@ -334,17 +329,10 @@
     apiFetch(ADDRESS_ENDPOINT, { method: 'PUT', body: payload }).then(function (r) {
       btns.forEach(function (b) { b.disabled = false; });
       if (r.status === 200) {
-        banner('ok', 'Mailing address updated.');
-        if (_profile) {
-          _profile.vergentAddress = {
-            addr1: payload.addr1, addr2: payload.addr2,
-            city: payload.city, state: payload.state, zip: payload.zip,
-          };
-        }
-        renderProfile(_profile);
+        banner('ok', 'Address change submitted for review. We’ll update it once our team confirms.');
         closeEdit('address');
       } else {
-        err.textContent = "We couldn't update your address right now. Please try again.";
+        err.textContent = "We couldn't submit your request right now. Please try again.";
         err.hidden = false;
       }
     }).catch(function (e) {

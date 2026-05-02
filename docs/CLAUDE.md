@@ -55,14 +55,16 @@ backend/
                        #      /api/my-loans/documents (?loanId=N),
                        #      /api/my-loans/documents/{docId}/download
                        #        (?format=pdf invokes the doc-pdf Lambda)
-                       # PUT  /api/my-profile/email (updates Vergent
-                       #        email + triggers change notification)
-                       # PUT  /api/my-profile/address (updates primary
-                       #        mailing address)
+                       # PUT  /api/my-profile/email (queues a change
+                       #        request for admin review; does NOT
+                       #        write to Vergent directly)
+                       # PUT  /api/my-profile/address (queues a change
+                       #        request for admin review)
                        # POST /api/my-profile/phone/start-verify
                        #        (Vergent SMS PIN to new number)
                        # POST /api/my-profile/phone/confirm
-                       #        (verify PIN + save phone as primary)
+                       #        (verify PIN + queue change request for
+                       #        admin review)
                        # POST /api/my-loan/new (handoff to Vergent)
   doc_pdf/             # Node.js 20 Lambda — HTML → PDF conversion via
                        #   puppeteer-core + @sparticuz/chromium.
@@ -299,35 +301,50 @@ organic blobs).
 
 Update this section at the end of each session. Newest first.
 
-### 2026-05-01 — Phase C: profile self-edit (email / phone / address)
-- New /profile.html page (sidebar + header nav now have a Profile
-  link on dashboard / loans / payments / request-loan). Three
-  read+edit sections: Email, Mobile phone, Mailing address.
-- Backend (loans.py):
-    PUT  /api/my-profile/email             — update Vergent email
-                                               + trigger Vergent's
-                                               emailchanged notification.
-    PUT  /api/my-profile/address           — update primary mailing
-                                               address (street/apt/city/
-                                               state/zip).
-    POST /api/my-profile/phone/start-verify — Vergent SMS PIN to the
-                                               candidate new phone.
-    POST /api/my-profile/phone/confirm     — verify PIN + save the
-                                               phone as primary.
-  All authed via the JWT-claim customer id (no trust of body cid).
-  Phone change is two-step (PIN before save) so a stolen session
-  can't pivot to MFA-takeover by changing the contact number.
-- get_my_profile extended to return vergentPhones[] and
-  vergentAddress (in addition to the existing summary fields). The
-  profile-edit page reads these for pre-fill.
-- New _v1_request() helper for PUT/POST in loans.py (parallels the
-  existing _v1_get GET helper).
-- Phase C v1 deliberately does NOT sync changes to Cognito
-  (sign-in email / phone). The customer's Cognito record stays as
-  it was at sign-up. Sign-in-email changes still require contacting
-  support. The Profile page updates Vergent's records (the source
-  of truth for loan notifications); when the customer next signs
-  in they'll see the new values surfaced from Vergent.
+### 2026-05-02 — Phase D: profile change-requests via admin-approval queue
+- Architecture pivot from the original Phase C plan. Profile edits
+  on /profile.html (email / phone / address) no longer write to
+  Vergent directly. Customers submit a *change request* that lands
+  in a DDB queue and fires an admin-notification email; an admin
+  reviews and applies the change in Vergent admin (or, eventually,
+  a CIF internal admin portal). Sidesteps the v1 UpdateCustomer*
+  body-shape unknowns and matches how traditional banks gate KYC
+  field updates.
+- New DDB table `cif-portal-profile-change-requests-dev`:
+  PK=requestId (S), pay-per-request, TTL on `expiresAt`
+  (90-day audit-trail retention). Items carry customerId, field
+  ('email'|'phone'|'address'), currentValue, requestedValue,
+  status='pending', requestedAt, requestedByEmail, plus optional
+  meta (e.g. `phoneVerified=true` once the SMS PIN passes).
+- New env vars on the loans Lambda:
+    PROFILE_REQUESTS_TABLE   — DDB table name
+    ADMIN_NOTIFY_EMAIL       — where SES sends the alert (default
+                                 support@cashinflash.com)
+    SES_SENDER_EMAIL         — Source on the SES SendEmail call
+                                 (default no-reply@cashinflash.com)
+- New IAM grants on the loans Lambda execution role (via
+  provision-loans.yml inline policy `cif-portal-loans-profile-requests`):
+    dynamodb:PutItem|GetItem|UpdateItem|Query on the table
+    ses:SendEmail|SendRawEmail (Resource: *)
+- Helpers added in loans.py:
+    _create_change_request(cid, claims, field, current, requested,
+                            extra_meta) — DDB write + email
+    _send_admin_notification(...) — SES text+HTML message with
+                                     current vs requested + UUID
+- Phone change still has the two-step SMS PIN flow (security
+  boundary — a stolen session can't queue a fake number for the
+  admin to approve later). The PIN start/confirm calls DO go to
+  Vergent directly; only the field-mutation step is queued.
+- Frontend (profile.js): banners reworded "submitted for review";
+  local cache no longer updates the displayed value (waits for
+  admin approval).
+- "Need to change your name?" footer block removed from
+  profile.html (CIF doesn't advertise self-service for that even
+  via phone).
+- _v1_request() helper still present (used by the SMS PIN flow).
+- Out of scope for Phase D: an admin-approval UI; Cognito sign-in
+  email/phone sync; a "pending review" badge on /profile.html
+  showing the customer's queued requests. All deferrable to Phase E.
 
 ### 2026-05-01 — Phase B: idle-based session timeout (online-banking style)
 - session.js converted from token-expiry timer to industry-standard

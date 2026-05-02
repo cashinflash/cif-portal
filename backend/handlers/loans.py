@@ -51,6 +51,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -72,7 +73,15 @@ HANDOFF_AUTHORITY = os.environ.get("VERGENT_HANDOFF_AUTHORITY", "cashinflash.app
 
 _secrets = boto3.client("secretsmanager")
 _lambda_client = boto3.client("lambda", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+_dynamo = boto3.client("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+_ses = boto3.client("ses", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 DOC_PDF_FN_NAME = os.environ.get("DOC_PDF_FN_NAME", "")  # set by provision-doc-pdf.yml
+PROFILE_REQUESTS_TABLE = os.environ.get(
+    "PROFILE_REQUESTS_TABLE", "cif-portal-profile-change-requests-dev"
+)
+ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "support@cashinflash.com")
+SES_SENDER_EMAIL = os.environ.get("SES_SENDER_EMAIL", "no-reply@cashinflash.com")
+PORTAL_PUBLIC_URL = os.environ.get("PORTAL_PUBLIC_URL", "https://d1zucrj1ouu3c.cloudfront.net")
 _creds_cache: Optional[Dict[str, str]] = None
 
 # v1 service Token (GUID) — used on every v1 LMS call.
@@ -596,14 +605,181 @@ def _validate_email(s: str) -> bool:
     return bool(local) and bool(domain) and "." in domain and " " not in s
 
 
-def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
-    """PUT /api/my-profile/email — update Vergent's on-file email
-    and trigger Vergent's emailchanged notification.
+def _create_change_request(cid: str, claims: Dict[str, Any],
+                           field: str,
+                           current_value: Any,
+                           requested_value: Any,
+                           extra_meta: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+    """Queue a customer's profile-change request for admin review.
 
-    Note: this updates the customer's Vergent record only. The
-    Cognito sign-in email stays the same. Customers who want to
-    change their sign-in email must contact support — that's a
-    sensitive Cognito Admin operation outside the v1 portal scope.
+    Writes a record to the profile-change-requests DDB table and emails
+    the admin notification address with the details. Returns (ok, reason)
+    where reason is empty on success or a short error code on failure.
+
+    No call to Vergent here — that happens out-of-band when an admin
+    reviews the request and applies it via Vergent admin UI (or a
+    future admin portal).
+
+    `extra_meta` carries field-specific bits (e.g. phone-verified flag)
+    that the email rendering uses to give the admin context.
+    """
+    import time
+    import uuid
+
+    request_id = str(uuid.uuid4())
+    now_iso = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ttl = int(time.time()) + 90 * 24 * 60 * 60  # 90-day audit-trail retention
+
+    extra = extra_meta or {}
+
+    def _ddb_value(v):
+        if v is None:
+            return {"NULL": True}
+        if isinstance(v, bool):
+            return {"BOOL": v}
+        if isinstance(v, (int, float)):
+            return {"N": str(v)}
+        if isinstance(v, dict):
+            return {"S": json.dumps(v, default=str)}
+        return {"S": str(v)}
+
+    item = {
+        "requestId":      {"S": request_id},
+        "customerId":     {"S": str(cid)},
+        "field":          {"S": field},
+        "currentValue":   _ddb_value(current_value),
+        "requestedValue": _ddb_value(requested_value),
+        "status":         {"S": "pending"},
+        "requestedAt":    {"S": now_iso},
+        "requestedByEmail": {"S": (claims.get("email") or "").strip()},
+        "expiresAt":      {"N": str(ttl)},
+    }
+    if extra:
+        item["meta"] = {"S": json.dumps(extra, default=str)}
+
+    try:
+        _dynamo.put_item(TableName=PROFILE_REQUESTS_TABLE, Item=item)
+    except ClientError as e:
+        log.error("DDB put_item failed for change request: %s",
+                  e.response.get("Error", {}).get("Code"))
+        return False, "queue_unavailable"
+    except Exception as e:
+        log.error("DDB put_item unexpected: %s", type(e).__name__)
+        return False, "queue_unavailable"
+
+    # Send admin email best-effort. Even if email fails, the request
+    # IS in DDB so an admin reviewing the queue still sees it.
+    _send_admin_notification(request_id, cid, claims, field,
+                              current_value, requested_value, extra)
+    return True, ""
+
+
+def _send_admin_notification(request_id: str, cid: str, claims: Dict[str, Any],
+                              field: str, current: Any, requested: Any,
+                              extra: Dict[str, Any]) -> None:
+    """Send a plaintext+HTML notification to ADMIN_NOTIFY_EMAIL with
+    the change-request details. Best effort — failures are logged but
+    do not propagate to the customer."""
+    customer_name = (
+        ((claims.get("given_name") or "") + " " + (claims.get("family_name") or "")).strip()
+        or claims.get("email")
+        or "Unknown customer"
+    )
+    customer_email = (claims.get("email") or "").strip()
+
+    field_labels = {
+        "email":   "Email address",
+        "phone":   "Mobile phone (SMS-verified)",
+        "address": "Mailing address",
+    }
+    field_label = field_labels.get(field, field)
+
+    def _fmt(v):
+        if v is None or v == "":
+            return "(not set)"
+        if isinstance(v, dict):
+            return ", ".join(f"{k}: {vv}" for k, vv in v.items() if vv)
+        return str(v)
+
+    cur_str = _fmt(current)
+    new_str = _fmt(requested)
+
+    extra_lines = []
+    if field == "phone" and extra.get("phoneVerified"):
+        extra_lines.append("✓ Customer entered the SMS verification code we sent to the new phone.")
+
+    body_text = (
+        f"Profile change request — pending admin review\n\n"
+        f"Customer:\n"
+        f"  Name:           {customer_name}\n"
+        f"  Customer ID:    {cid}\n"
+        f"  Sign-in email:  {customer_email}\n\n"
+        f"Change requested:\n"
+        f"  Field:          {field_label}\n"
+        f"  Current value:  {cur_str}\n"
+        f"  Requested:      {new_str}\n"
+        + ("".join(f"  {line}\n" for line in extra_lines))
+        + f"\nRequest ID:       {request_id}\n"
+        f"Submitted at:     {datetime.utcnow().isoformat(timespec='seconds')} UTC\n\n"
+        f"To approve, log into Vergent admin and apply the change there.\n"
+        f"To deny, contact the customer at {customer_email}.\n\n"
+        f"---\n"
+        f"This is an automated notification from the Cash in Flash customer portal.\n"
+    )
+
+    body_html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:24px 12px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;">
+        <tr><td style="background:#0E8741;padding:20px 24px;color:#fff;">
+          <h2 style="margin:0;font-size:18px;font-weight:700;">Profile change request — pending review</h2>
+        </td></tr>
+        <tr><td style="padding:24px 28px;font-size:14px;line-height:1.55;">
+          <p style="margin:0 0 16px;"><strong>Customer:</strong> {customer_name} (ID {cid}) &middot; <a href="mailto:{customer_email}" style="color:#0E8741;">{customer_email}</a></p>
+          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+            <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;width:140px;">Field</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-weight:600;">{field_label}</td></tr>
+            <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;">Current</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;">{cur_str}</td></tr>
+            <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;">Requested</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#0E8741;font-weight:600;">{new_str}</td></tr>
+            {('<tr><td style="padding:8px 0;color:#6b7280;">Verified</td><td style="padding:8px 0;color:#0E8741;">' + extra_lines[0] + '</td></tr>') if extra_lines else ''}
+          </table>
+          <p style="margin:0 0 8px;font-size:13px;color:#6b7280;">Request ID: <code style="font-size:12px;">{request_id}</code></p>
+          <p style="margin:0;font-size:13px;color:#6b7280;">Submitted at {datetime.utcnow().isoformat(timespec='seconds')} UTC.</p>
+          <p style="margin:20px 0 0;font-size:13px;color:#1a1a2e;"><strong>To approve:</strong> log into Vergent admin and apply the change manually.<br><strong>To deny:</strong> contact the customer.</p>
+        </td></tr>
+        <tr><td style="padding:16px 28px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:11px;">
+          Cash in Flash — internal admin notification
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+    subject = f"Profile change request: {field_label} — {customer_name}"
+
+    try:
+        _ses.send_email(
+            Source=SES_SENDER_EMAIL,
+            Destination={"ToAddresses": [ADMIN_NOTIFY_EMAIL]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {
+                    "Text": {"Data": body_text, "Charset": "UTF-8"},
+                    "Html": {"Data": body_html, "Charset": "UTF-8"},
+                },
+            },
+        )
+    except ClientError as e:
+        log.error("SES admin notification failed: %s",
+                  e.response.get("Error", {}).get("Code"))
+    except Exception as e:
+        log.error("SES admin notification unexpected: %s", type(e).__name__)
+
+
+def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
+    """PUT /api/my-profile/email — queue an email-change REQUEST for
+    admin review. We don't push to Vergent directly; an admin reviews
+    the queued request and applies it via Vergent admin UI.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -618,21 +794,29 @@ def update_email(event: Dict[str, Any]) -> Dict[str, Any]:
     if not _validate_email(new_email):
         return _json_response(400, {"error": "invalid_email"})
 
-    status, resp = _v1_request("PUT", "/V1/PutCustomerEmail",
-                               body={"customerId": int(cid), "EmailAddr": new_email})
-    if status not in (200, 204):
-        log.warning("PutCustomerEmail status=%s cid=%s", status, cid)
-        return _json_response(502, {"error": "upstream_unavailable"})
+    # Look up current Vergent email so the admin sees old vs new.
+    current_email = ""
+    status, prof = _v1_get(f"/V1/GetCustomer/{cid}")
+    if status == 200 and isinstance(prof, dict):
+        current_email = (prof.get("EmailAddr") or "").strip()
 
-    # Trigger Vergent's notification to the new address (best-effort).
-    enc = urllib.parse.quote(new_email, safe="")
-    _v1_request("POST", f"/V1/customer/{cid}/communication/trigger/emailchanged/{enc}")
+    if current_email and current_email.lower() == new_email:
+        return _json_response(400, {"error": "no_change"})
 
-    return _json_response(200, {"ok": True, "email": new_email})
+    ok, reason = _create_change_request(
+        cid, claims, "email",
+        current_value=current_email or None,
+        requested_value=new_email,
+    )
+    if not ok:
+        return _json_response(502, {"error": reason})
+
+    return _json_response(200, {"ok": True, "status": "pending_review"})
 
 
 def update_address(event: Dict[str, Any]) -> Dict[str, Any]:
-    """PUT /api/my-profile/address — update primary mailing address."""
+    """PUT /api/my-profile/address — queue an address-change REQUEST
+    for admin review. Validation only; no Vergent write."""
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
@@ -658,22 +842,39 @@ def update_address(event: Dict[str, Any]) -> Dict[str, Any]:
     if len(zip_code) not in (5, 9):
         return _json_response(400, {"error": "zip_invalid"})
 
-    payload = {
-        "customerId": int(cid),
-        "addr1": addr1,
-        "addr2": addr2 or None,
-        "city": city,
-        "abbrev": state,
-        "zip": zip_code,
-        "IsPrimary": True,
-        "status": 1,
-    }
-    status, resp = _v1_request("PUT", "/V1/PutCustomerAddress", body=payload)
-    if status not in (200, 204):
-        log.warning("PutCustomerAddress status=%s cid=%s", status, cid)
-        return _json_response(502, {"error": "upstream_unavailable"})
+    # Look up current address so the admin sees old vs new.
+    current = None
+    status, data = _v1_get(f"/V1/GetCustomerData/{cid}")
+    if status == 200 and isinstance(data, dict):
+        addrs = data.get("custAddresses") or []
+        if isinstance(addrs, list):
+            primary = next(
+                (a for a in addrs if isinstance(a, dict) and a.get("IsPrimary")),
+                next((a for a in addrs if isinstance(a, dict)), None),
+            )
+            if primary:
+                current = {
+                    "addr1": primary.get("addr1"),
+                    "addr2": primary.get("addr2"),
+                    "city": primary.get("city"),
+                    "state": primary.get("abbrev") or primary.get("state"),
+                    "zip": primary.get("zip"),
+                }
 
-    return _json_response(200, {"ok": True})
+    requested = {
+        "addr1": addr1, "addr2": addr2 or None,
+        "city": city, "state": state, "zip": zip_code,
+    }
+
+    ok, reason = _create_change_request(
+        cid, claims, "address",
+        current_value=current,
+        requested_value=requested,
+    )
+    if not ok:
+        return _json_response(502, {"error": reason})
+
+    return _json_response(200, {"ok": True, "status": "pending_review"})
 
 
 def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -709,8 +910,10 @@ def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/my-profile/phone/confirm — verify the SMS PIN AND
-    save the phone as the customer's primary."""
+    """POST /api/my-profile/phone/confirm — verify the SMS PIN, then
+    QUEUE the phone change for admin review (we don't push to Vergent
+    directly). The PIN check guarantees the customer controls the new
+    number before it ever lands in the admin queue."""
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
@@ -728,34 +931,38 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if len(code) < 4 or len(code) > 8:
         return _json_response(400, {"error": "invalid_code"})
 
-    # Step 1: verify the PIN with Vergent. They typically auto-record
-    # the phone as verified when this returns success.
+    # Verify the PIN with Vergent. This is the security boundary that
+    # keeps a stolen session from queueing a fake phone for the admin
+    # to approve later.
     status, resp = _v1_request(
         "POST", f"/V1/customer/{cid}/communication/sms/validate/{phone}/confirm/{code}")
     if status not in (200, 204):
         log.warning("phone validate-confirm status=%s cid=%s", status, cid)
         return _json_response(400, {"error": "code_invalid_or_expired"})
 
-    # Step 2: save the phone as primary on the customer record. Some
-    # Vergent tenants auto-do this on confirm — if so this PUT is a
-    # no-op. If not, this stitches the verified number into the
-    # customer's contact methods.
-    save_payload = {
-        "customerId": int(cid),
-        "number": phone,
-        "type_id": 1,        # 1 = mobile (typical Vergent default)
-        "is_primary": True,
-        "IsPrimary": True,
-        "status": 1,
-    }
-    status2, _resp2 = _v1_request("POST", "/V1/PostCustomerPhone", body=save_payload)
-    if status2 not in (200, 201, 204):
-        log.warning("save phone after verify status=%s cid=%s", status2, cid)
-        # Verified but not saved — return partial success so the UI can
-        # surface "verified but contact us to finish saving".
-        return _json_response(200, {"ok": True, "savedToProfile": False})
+    # Look up current phone so admin sees old vs new.
+    current_phone = None
+    st2, data = _v1_get(f"/V1/GetCustomerData/{cid}")
+    if st2 == 200 and isinstance(data, dict):
+        phones = data.get("custPhones") or []
+        if isinstance(phones, list):
+            primary = next(
+                (p for p in phones if isinstance(p, dict) and p.get("is_primary")),
+                next((p for p in phones if isinstance(p, dict)), None),
+            )
+            if primary:
+                current_phone = primary.get("number")
 
-    return _json_response(200, {"ok": True, "savedToProfile": True,
+    ok, reason = _create_change_request(
+        cid, claims, "phone",
+        current_value=current_phone,
+        requested_value=phone,
+        extra_meta={"phoneVerified": True},
+    )
+    if not ok:
+        return _json_response(502, {"error": reason})
+
+    return _json_response(200, {"ok": True, "status": "pending_review",
                                  "maskedPhone": _mask_phone(phone)})
 
 
