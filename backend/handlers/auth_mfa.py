@@ -300,23 +300,41 @@ def _find_vergent_customer_id_by_email(email: str) -> Optional[str]:
 def _find_cognito_user_by_vergent_id(vergent_cid: str) -> Optional[Dict[str, Any]]:
     """Find the single Cognito user whose custom:vergentCustomerId
     attribute matches. Returns the same shape as _admin_get_user, or
-    None if no match."""
+    None if no match.
+
+    Cognito's ListUsers filter only supports a fixed set of standard
+    attributes (email, phone_number, sub, etc.) — custom attributes
+    can't be filtered server-side. So we paginate through the user
+    pool and match client-side. OK for small pools (< ~10k users).
+    """
     if not vergent_cid:
         return None
-    try:
-        resp = cognito.list_users(
-            UserPoolId=USER_POOL_ID,
-            Filter=f'"custom:vergentCustomerId" = "{vergent_cid}"',
-            Limit=2,
-        )
-    except ClientError:
-        return None
-    users = resp.get("Users") or []
-    if not users:
-        return None
-    u = users[0]
-    attrs = {a["Name"]: a["Value"] for a in u.get("Attributes", [])}
-    return {"Username": u.get("Username"), "Attrs": attrs, "Status": u.get("UserStatus")}
+    target = str(vergent_cid)
+    pagination_token: Optional[str] = None
+    scanned = 0
+    while True:
+        kwargs: Dict[str, Any] = {"UserPoolId": USER_POOL_ID, "Limit": 60}
+        if pagination_token:
+            kwargs["PaginationToken"] = pagination_token
+        try:
+            resp = cognito.list_users(**kwargs)
+        except ClientError as e:
+            log.warning("list_users failed code=%s",
+                        e.response.get("Error", {}).get("Code", "?"))
+            return None
+        users = resp.get("Users", []) or []
+        for u in users:
+            attrs = {a["Name"]: a["Value"] for a in u.get("Attributes", [])}
+            if attrs.get("custom:vergentCustomerId") == target:
+                log.info("found cognito user for vergent_cid=%s (scanned=%d)",
+                         target, scanned + len(users))
+                return {"Username": u.get("Username"), "Attrs": attrs, "Status": u.get("UserStatus")}
+        scanned += len(users)
+        pagination_token = resp.get("PaginationToken")
+        if not pagination_token:
+            break
+    log.info("no cognito user for vergent_cid=%s (scanned=%d)", target, scanned)
+    return None
 
 
 def _admin_set_email(username: str, new_email: str) -> bool:
@@ -575,12 +593,19 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     # email so the next login uses it. Then re-authenticate to get
     # tokens whose JWT email claim matches what they typed.
     if not tokens and err in ("UserNotFoundException", "NotAuthorizedException"):
+        log.info("login fallback start email=%s err=%s", _mask_email(email), err)
         vergent_cid = _find_vergent_customer_id_by_email(email)
+        log.info("login fallback vergent lookup email=%s -> cid=%s",
+                 _mask_email(email), vergent_cid or "(none)")
         if vergent_cid:
             cognito_user = _find_cognito_user_by_vergent_id(vergent_cid)
             old_email = (cognito_user or {}).get("Attrs", {}).get("email") or ""
+            log.info("login fallback cognito lookup cid=%s -> old_email=%s",
+                     vergent_cid, _mask_email(old_email) if old_email else "(none)")
             if old_email and old_email.lower() != email:
                 retry_tokens, retry_err = _admin_initiate_password_auth(old_email, password)
+                log.info("login fallback retry-auth old=%s -> %s",
+                         _mask_email(old_email), "ok" if retry_tokens else f"err:{retry_err}")
                 if retry_tokens:
                     username = cognito_user.get("Username") or ""
                     if _admin_set_email(username, email):
@@ -595,7 +620,10 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
                             # tokens (which work, just with the old email
                             # claim — the next /api/my-profile call will
                             # re-sync if needed).
+                            log.info("login post-sync re-auth not ready (%s); using retry tokens", err)
                             tokens, err = retry_tokens, None
+                        else:
+                            log.info("login post-sync re-auth ok email=%s", _mask_email(email))
 
     if not tokens:
         log.info("login failed for %s: %s", _mask_email(email), err)
