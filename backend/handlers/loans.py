@@ -57,6 +57,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 
+# Telnyx Verify — used for SMS-PIN flow on profile-page phone
+# changes. Same module that powers login MFA in auth_mfa.py.
+from handlers import telnyx_verify
+
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
@@ -301,49 +305,6 @@ def _v1_request(method: str, path: str,
     if return_raw:
         return status, resp, raw
     return status, resp
-
-
-def _communication_pin_request(path: str,
-                                body: Dict[str, Any]) -> Tuple[int, Optional[Any], str, str]:
-    """POST to a /Communication/* endpoint (e.g. RequestPinByText,
-    VerifyPin). Tries the APIM host first (where the standalone
-    Communication controller actually lives — confirmed by v1 host
-    returning 404 'No type was found that matches the controller'),
-    then falls back to the v1 host with the service Token only if
-    APIM auth fails.
-
-    Returns (status, parsed, raw, used_host) where used_host is
-    'apim' or 'v1' or 'none' (if no auth available).
-    """
-    creds = _get_creds()
-    api_key = creds.get("xApiKey") if isinstance(creds, dict) else None
-
-    # APIM first — the Communication controller is only deployed there.
-    apim_tok = _get_apim_token()
-    if apim_tok:
-        url = f"{APIM_BASE}{path}"
-        headers = {"Authorization": f"Bearer {apim_tok}"}
-        if api_key:
-            headers["x-api-key"] = api_key
-        status, parsed, raw = _http(url, "POST", body=body, headers=headers)
-        # If APIM accepts the request (any non-auth-failure status —
-        # including 200, 400, 500), trust it and return.
-        if status not in (401, 403, 0):
-            return status, parsed, raw, "apim"
-
-    # v1 fallback (kept just in case APIM auth is rejected for this
-    # endpoint specifically and v1 picks it up — unlikely given the
-    # 404 we saw, but harmless).
-    v1_tok = _get_v1_token()
-    if v1_tok:
-        url = f"{V1_BASE}{path}"
-        headers = {"Token": v1_tok}
-        if api_key:
-            headers["x-api-key"] = api_key
-        status, parsed, raw = _http(url, "POST", body=body, headers=headers)
-        return status, parsed, raw, "v1"
-
-    return 0, None, "", "none"
 
 
 # ─────────────────────────────────────────
@@ -1061,35 +1022,18 @@ def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if not phone:
         return _json_response(400, {"error": "invalid_phone"})
 
-    # Use Vergent's standalone Communication controller — takes the
-    # phone in the body and doesn't require it to already be on the
-    # customer's record (unlike the V1 customer-communication path,
-    # which is for re-verifying an existing phone). Tries v1 host
-    # first, falls back to APIM on 401/403.
+    # Telnyx Verify — generic OTP-by-SMS, no phone-on-record
+    # dependency. Same provider already powers login MFA. Vergent's
+    # SBT path is gated on tenant-side provisioning we don't have.
     last4 = phone[-4:] if len(phone) >= 4 else phone
-    trigger_type = int(os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1"))
-    group_type = int(os.environ.get("VERGENT_PHONE_VERIFY_GROUP", "0"))
-    status, parsed, raw, host = _communication_pin_request(
-        "/api/Communication/RequestPinByText",
-        {"phoneNumber": phone, "type": trigger_type, "groupType": group_type},
-    )
-    log.info("phone request-pin type=%s group=%s status=%s host=%s cid=%s last4=%s body=%s",
-             trigger_type, group_type, status, host, cid, last4, (raw or "")[:400])
+    ok, detail = telnyx_verify.start_sms(phone)
+    log.info("phone verify-start ok=%s cid=%s last4=%s detail=%s",
+             ok, cid, last4, detail)
 
-    # Vergent returns PhoneVerificationResponseModel: {result, errorCode, message}
-    # Treat HTTP 200 + result==false as a soft failure with diagnostic.
-    result_ok = isinstance(parsed, dict) and bool(parsed.get("result"))
-
-    if status != 200 or not result_ok:
-        log.warning("phone request-pin failed status=%s host=%s cid=%s last4=%s",
-                    status, host, cid, last4)
+    if not ok:
         return _json_response(502, {
             "error": "sms_send_failed",
-            "upstreamStatus": status,
-            "upstreamBody": (raw or "")[:400],
-            "triedHost": host,
-            "type": trigger_type,
-            "groupType": group_type,
+            "detail": detail,
         })
 
     return _json_response(200, {"ok": True, "maskedPhone": _mask_phone(phone)})
@@ -1117,29 +1061,16 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if len(code) < 4 or len(code) > 8:
         return _json_response(400, {"error": "invalid_code"})
 
-    # Verify the PIN via Vergent's Communication controller. Same
-    # type/groupType values as start-verify; phone + pin in body.
+    # Verify the PIN via Telnyx (matches start-verify's provider).
     last4 = phone[-4:] if len(phone) >= 4 else phone
-    trigger_type = int(os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1"))
-    group_type = int(os.environ.get("VERGENT_PHONE_VERIFY_GROUP", "0"))
-    status, parsed, raw, host = _communication_pin_request(
-        "/api/Communication/VerifyPin",
-        {"phoneNumber": phone, "pin": code,
-         "type": trigger_type, "groupType": group_type},
-    )
-    log.info("phone verify-pin type=%s group=%s status=%s host=%s cid=%s last4=%s body=%s",
-             trigger_type, group_type, status, host, cid, last4, (raw or "")[:400])
+    approved, status_str = telnyx_verify.check(phone, code)
+    log.info("phone verify-confirm approved=%s status=%s cid=%s last4=%s",
+             approved, status_str, cid, last4)
 
-    result_ok = isinstance(parsed, dict) and bool(parsed.get("result"))
-
-    if status != 200 or not result_ok:
-        log.warning("phone verify-pin failed status=%s host=%s cid=%s last4=%s",
-                    status, host, cid, last4)
+    if not approved:
         return _json_response(400, {
             "error": "code_invalid_or_expired",
-            "upstreamStatus": status,
-            "upstreamBody": (raw or "")[:400],
-            "triedHost": host,
+            "detail": status_str,
         })
 
     # Look up current phone so admin sees old vs new.

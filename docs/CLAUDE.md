@@ -301,6 +301,32 @@ organic blobs).
 
 Update this section at the end of each session. Newest first.
 
+### 2026-05-02 — Phase G: phone verify pivots to Telnyx Verify
+- After exhausting Vergent's SMS surfaces (Phase F's SBT path
+  returned `result:false, message:"SKIP"` — provider not
+  provisioned for our company; CustomerCommunication validate
+  requires phone-on-file; CustomerPortal/Phones requires the
+  broken AuthenticateCognito), pivoted phone verify to Telnyx.
+- `start_phone_verify` / `confirm_phone_verify` now call
+  `telnyx_verify.start_sms()` / `.check()` (same module that
+  powers login MFA in `auth_mfa.py`). Imported from
+  `handlers.telnyx_verify`.
+- Architecture unchanged: SMS verifies via Telnyx → admin queue
+  records the request with phoneVerified=true → admin promotes
+  in Vergent admin UI. Customer + admin confirmation emails fire
+  the same way.
+- Dropped the `_communication_pin_request` helper as dead code.
+- `provision-loans.yml` extended:
+    - Inline IAM policy now includes
+      `secretsmanager:GetSecretValue` on the Telnyx secret
+      (`cif-portal/telnyx/credentials`).
+    - Env vars now include `TELNYX_SECRET_ARN`.
+- USER ACTION: re-run `provision-loans.yml` once after this
+  commit so the new IAM grant + env var land on the loans Lambda.
+- Telnyx defaults match login MFA: 6-digit code, toll-free
+  sender. Vergent SBT can be enabled later via support ticket if
+  desired; swapping back is a one-line revert.
+
 ### 2026-05-02 — Phase F: phone verify pivots to /api/Communication
 - Phase E's diagnostic showed Vergent's V1 customer-communication
   endpoint is for re-verifying an EXISTING phone (rejected with
