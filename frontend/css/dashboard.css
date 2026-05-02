@@ -946,6 +946,13 @@ button.dash-doc-download:disabled {
   background: #f7f7f5;
   z-index: 2;
 }
+/* Specificity override: the rule above (0,2,0) beats the browser
+   default `[hidden] { display: none }` (0,1,0), so `loading.hidden=true`
+   in JS would set the attribute but the panel kept showing. This rule
+   restores the expected hide behavior. */
+.dash-doc-modal-body .dash-loading[hidden] {
+  display: none;
+}
 #docModalFrame {
   width: 100%;
   height: 100%;
