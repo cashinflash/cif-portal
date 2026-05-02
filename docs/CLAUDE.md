@@ -301,6 +301,30 @@ organic blobs).
 
 Update this section at the end of each session. Newest first.
 
+### 2026-05-02 — Phase F: phone verify pivots to /api/Communication
+- Phase E's diagnostic showed Vergent's V1 customer-communication
+  endpoint is for re-verifying an EXISTING phone (rejected with
+  "Phone X did not match for customer Y"), not for sending a code
+  to a new phone.
+- Switched `start_phone_verify` and `confirm_phone_verify` to
+  Vergent's standalone Communication controller:
+    POST /api/Communication/RequestPinByText  →  send code
+    POST /api/Communication/VerifyPin         →  verify code
+  Both take phone in BODY, no customerId needed — designed for
+  arbitrary new phones. Body: {phoneNumber, type, groupType[, pin]}.
+- New `_communication_pin_request` helper tries v1 host first
+  (service Token + x-api-key), falls back to APIM host with
+  Bearer auth on 401/403. Diagnostic 502 response surfaces
+  upstreamStatus, upstreamBody, and triedHost so we can iterate.
+- `type` and `groupType` are env-overridable via
+  VERGENT_PHONE_VERIFY_TYPE (default 1) and
+  VERGENT_PHONE_VERIFY_GROUP (default 0) in case the defaults
+  aren't right for our tenant.
+- Vergent returns PhoneVerificationResponseModel
+  {result, errorCode, message}; we treat HTTP 200 + result==false
+  as a soft failure with the diagnostic so the customer-facing
+  error stays generic but DevTools shows the actual reason.
+
 ### 2026-05-02 — Phase E: customer confirmations + phone-verify diagnostic
 - New `_send_customer_confirmation()` in loans.py fires a banking-
   style "we received your request" SES email to the customer's

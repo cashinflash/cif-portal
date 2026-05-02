@@ -303,6 +303,40 @@ def _v1_request(method: str, path: str,
     return status, resp
 
 
+def _communication_pin_request(path: str,
+                                body: Dict[str, Any]) -> Tuple[int, Optional[Any], str, str]:
+    """POST to a /Communication/* endpoint (e.g. RequestPinByText,
+    VerifyPin). Tries the v1 host first with the service Token, then
+    falls back to the APIM host with Bearer + x-api-key on 401/403.
+
+    Returns (status, parsed, raw, used_host) where used_host is
+    'v1' or 'apim' or 'none' (if no auth available).
+    """
+    creds = _get_creds()
+    api_key = creds.get("xApiKey") if isinstance(creds, dict) else None
+
+    v1_tok = _get_v1_token()
+    if v1_tok:
+        url = f"{V1_BASE}{path}"
+        headers = {"Token": v1_tok}
+        if api_key:
+            headers["x-api-key"] = api_key
+        status, parsed, raw = _http(url, "POST", body=body, headers=headers)
+        if status not in (401, 403):
+            return status, parsed, raw, "v1"
+
+    apim_tok = _get_apim_token()
+    if apim_tok:
+        url = f"{APIM_BASE}{path}"
+        headers = {"Authorization": f"Bearer {apim_tok}"}
+        if api_key:
+            headers["x-api-key"] = api_key
+        status, parsed, raw = _http(url, "POST", body=body, headers=headers)
+        return status, parsed, raw, "apim"
+
+    return 0, None, "", "none"
+
+
 # ─────────────────────────────────────────
 # Shape helpers
 # ─────────────────────────────────────────
@@ -1018,31 +1052,35 @@ def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if not phone:
         return _json_response(400, {"error": "invalid_phone"})
 
-    # Vergent's V1 endpoint binds the URL {type} segment to a
-    # TriggerCategory enum (integer 0-3, namespace
-    # Vergent.Common.Enums.Sql.Marketing.TriggerCategory). The
-    # documented placeholder "sms"/"SMS" is a doc bug — passing a
-    # string returns 400 with parameter-null. Pass the integer.
-    # 1 is the most likely "verification" value in a marketing-
-    # style enum; if that fails, iterate via diagnostic body.
+    # Use Vergent's standalone Communication controller — takes the
+    # phone in the body and doesn't require it to already be on the
+    # customer's record (unlike the V1 customer-communication path,
+    # which is for re-verifying an existing phone). Tries v1 host
+    # first, falls back to APIM on 401/403.
     last4 = phone[-4:] if len(phone) >= 4 else phone
-    trigger_category = os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1")
-    status, _resp, raw = _v1_request(
-        "POST",
-        f"/V1/customer/{cid}/communication/{trigger_category}/validate/{phone}",
-        return_raw=True,
+    trigger_type = int(os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1"))
+    group_type = int(os.environ.get("VERGENT_PHONE_VERIFY_GROUP", "0"))
+    status, parsed, raw, host = _communication_pin_request(
+        "/Communication/RequestPinByText",
+        {"phoneNumber": phone, "type": trigger_type, "groupType": group_type},
     )
-    log.info("phone validate-start type=%s status=%s cid=%s last4=%s body=%s",
-             trigger_category, status, cid, last4, (raw or "")[:400])
+    log.info("phone request-pin type=%s group=%s status=%s host=%s cid=%s last4=%s body=%s",
+             trigger_type, group_type, status, host, cid, last4, (raw or "")[:400])
 
-    if status not in (200, 204):
-        log.warning("phone validate-start failed status=%s cid=%s last4=%s type=%s",
-                    status, cid, last4, trigger_category)
+    # Vergent returns PhoneVerificationResponseModel: {result, errorCode, message}
+    # Treat HTTP 200 + result==false as a soft failure with diagnostic.
+    result_ok = isinstance(parsed, dict) and bool(parsed.get("result"))
+
+    if status != 200 or not result_ok:
+        log.warning("phone request-pin failed status=%s host=%s cid=%s last4=%s",
+                    status, host, cid, last4)
         return _json_response(502, {
             "error": "sms_send_failed",
             "upstreamStatus": status,
             "upstreamBody": (raw or "")[:400],
-            "triedType": trigger_category,
+            "triedHost": host,
+            "type": trigger_type,
+            "groupType": group_type,
         })
 
     return _json_response(200, {"ok": True, "maskedPhone": _mask_phone(phone)})
@@ -1070,25 +1108,29 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if len(code) < 4 or len(code) > 8:
         return _json_response(400, {"error": "invalid_code"})
 
-    # Verify the PIN with Vergent — must use the same TriggerCategory
-    # integer as start-verify (see start_phone_verify for context).
+    # Verify the PIN via Vergent's Communication controller. Same
+    # type/groupType values as start-verify; phone + pin in body.
     last4 = phone[-4:] if len(phone) >= 4 else phone
-    trigger_category = os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1")
-    status, _resp, raw = _v1_request(
-        "POST",
-        f"/V1/customer/{cid}/communication/{trigger_category}/validate/{phone}/confirm/{code}",
-        return_raw=True,
+    trigger_type = int(os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1"))
+    group_type = int(os.environ.get("VERGENT_PHONE_VERIFY_GROUP", "0"))
+    status, parsed, raw, host = _communication_pin_request(
+        "/Communication/VerifyPin",
+        {"phoneNumber": phone, "pin": code,
+         "type": trigger_type, "groupType": group_type},
     )
-    log.info("phone validate-confirm type=%s status=%s cid=%s last4=%s body=%s",
-             trigger_category, status, cid, last4, (raw or "")[:400])
+    log.info("phone verify-pin type=%s group=%s status=%s host=%s cid=%s last4=%s body=%s",
+             trigger_type, group_type, status, host, cid, last4, (raw or "")[:400])
 
-    if status not in (200, 204):
-        log.warning("phone validate-confirm failed status=%s cid=%s last4=%s",
-                    status, cid, last4)
+    result_ok = isinstance(parsed, dict) and bool(parsed.get("result"))
+
+    if status != 200 or not result_ok:
+        log.warning("phone verify-pin failed status=%s host=%s cid=%s last4=%s",
+                    status, host, cid, last4)
         return _json_response(400, {
             "error": "code_invalid_or_expired",
             "upstreamStatus": status,
             "upstreamBody": (raw or "")[:400],
+            "triedHost": host,
         })
 
     # Look up current phone so admin sees old vs new.
