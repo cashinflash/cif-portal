@@ -1070,7 +1070,7 @@ def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     trigger_type = int(os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1"))
     group_type = int(os.environ.get("VERGENT_PHONE_VERIFY_GROUP", "0"))
     status, parsed, raw, host = _communication_pin_request(
-        "/Communication/RequestPinByText",
+        "/api/Communication/RequestPinByText",
         {"phoneNumber": phone, "type": trigger_type, "groupType": group_type},
     )
     log.info("phone request-pin type=%s group=%s status=%s host=%s cid=%s last4=%s body=%s",
@@ -1123,7 +1123,7 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     trigger_type = int(os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1"))
     group_type = int(os.environ.get("VERGENT_PHONE_VERIFY_GROUP", "0"))
     status, parsed, raw, host = _communication_pin_request(
-        "/Communication/VerifyPin",
+        "/api/Communication/VerifyPin",
         {"phoneNumber": phone, "pin": code,
          "type": trigger_type, "groupType": group_type},
     )
