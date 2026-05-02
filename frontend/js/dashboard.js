@@ -67,7 +67,7 @@
     }).then(function (res) {
       if (res.status === 401 || res.status === 403) {
         sessionStorage.removeItem(TOKEN_KEY);
-        window.location.replace(LOGIN_URL);
+        window.location.replace(LOGIN_URL + '?reason=session_expired');
         throw new Error('unauthorized');
       }
       if (!res.ok) {
@@ -86,7 +86,7 @@
   const claims = token ? decodeJwt(token) : null;
   if (!token || !claims || isExpired(claims)) {
     sessionStorage.removeItem(TOKEN_KEY);
-    window.location.replace(LOGIN_URL);
+    window.location.replace(LOGIN_URL + '?reason=session_expired');
     return;
   }
 
@@ -486,7 +486,7 @@
       sessionStorage.removeItem(TOKEN_KEY);
       sessionStorage.removeItem('cif_access_token');
       sessionStorage.removeItem('cif_refresh_token');
-      window.location.replace(LOGIN_URL);
+      window.location.replace(LOGIN_URL + '?reason=session_expired');
     }
     const btn = qs('#signOutBtn');
     const btnMobile = qs('#signOutBtnMobile');

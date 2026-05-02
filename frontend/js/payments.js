@@ -33,7 +33,7 @@
 
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) {
-    window.location.replace(LOGIN_URL);
+    window.location.replace(LOGIN_URL + '?reason=session_expired');
     return;
   }
 
@@ -62,7 +62,7 @@
           const isLambdaErr = body && typeof body === 'object' && ('error' in body);
           if (!isLambdaErr) {
             sessionStorage.removeItem(TOKEN_KEY);
-            window.location.replace(LOGIN_URL);
+            window.location.replace(LOGIN_URL + '?reason=session_expired');
             throw new Error('unauthorized');
           }
           // Lambda-returned auth error — throw with the body attached.

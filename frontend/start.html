@@ -8,6 +8,21 @@
 <link rel="stylesheet" href="/css/cif-brand.css">
 <link rel="stylesheet" href="/css/portal.css">
 <link rel="icon" href="/images/favicon.png">
+<style>
+  /* Inline so we don't depend on portal.css (S3-only). Surfaces the
+     forced-logout reason from session.js. */
+  .start-reason-banner {
+    margin: 0 0 18px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: rgba(14, 135, 65, 0.08);
+    border: 1px solid rgba(14, 135, 65, 0.24);
+    color: #0E5C30;
+    font-size: 0.95rem;
+    text-align: left;
+    line-height: 1.5;
+  }
+</style>
 </head>
 <body>
 
@@ -71,6 +86,7 @@
   <span class="gate-blob gate-blob-2"></span>
   <div class="gate-inner">
     <div class="gate-card">
+      <div id="startReasonBanner" class="start-reason-banner" hidden role="status" aria-live="polite"></div>
       <h1 class="page-title">Let's get started.</h1>
       <p class="page-sub">Manage your loan, make a payment, or apply for a new one — all in one place.</p>
 
@@ -131,6 +147,27 @@
   document.querySelectorAll('.mobile-nav-item.has-sub > a').forEach(a => {
     a.addEventListener('click', (e) => { e.preventDefault(); a.parentElement.classList.toggle('open'); });
   });
+
+  // Surface the reason for a forced logout so the customer doesn't
+  // wonder why they ended up here. session.js redirects with a
+  // ?reason=... query when the IdToken expires or they click
+  // "Sign out" on the timeout warning modal.
+  var reason = new URLSearchParams(window.location.search).get('reason');
+  if (reason) {
+    var banner = document.getElementById('startReasonBanner');
+    if (banner) {
+      var msg = '';
+      if (reason === 'session_expired') {
+        msg = 'Your session timed out for security. Please sign in again.';
+      } else if (reason === 'signed_out') {
+        msg = "You're signed out. Sign in any time to manage your loan.";
+      }
+      if (msg) {
+        banner.textContent = msg;
+        banner.hidden = false;
+      }
+    }
+  }
 })();
 </script>
 

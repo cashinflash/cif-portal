@@ -970,6 +970,72 @@ button.dash-doc-download:disabled {
   .dash-doc-modal-actions .btn-login { padding: 8px 12px; font-size: .82rem; }
 }
 
+/* ---------- SESSION TIMEOUT WARNING MODAL ---------- */
+/* Sits above the doc viewer modal (z-index 9999) so a session
+   warning is never hidden behind another modal. Backdrop click is
+   deliberately not bound so the customer must make a choice. */
+.cif-session-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cif-session-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, .65);
+}
+.cif-session-modal-card {
+  position: relative;
+  z-index: 1;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, .35);
+  width: min(480px, calc(100vw - 32px));
+  padding: 28px 28px 24px;
+  text-align: center;
+}
+.cif-session-modal-card h3 {
+  margin: 0 0 12px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--cif-navy);
+}
+.cif-session-modal-card p {
+  margin: 0 0 12px;
+  color: var(--cif-muted);
+  font-size: .96rem;
+  line-height: 1.5;
+}
+.cif-session-countdown {
+  font-variant-numeric: tabular-nums;
+  color: var(--cif-navy) !important;
+  font-weight: 600;
+  margin-bottom: 24px !important;
+}
+.cif-session-countdown strong {
+  font-weight: 800;
+  color: #0E8741;
+  font-size: 1.05rem;
+}
+.cif-session-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.cif-session-actions .btn-login,
+.cif-session-actions .btn-apply {
+  min-width: 140px;
+}
+@media (max-width: 480px) {
+  .cif-session-modal-card { padding: 22px 18px 18px; }
+  .cif-session-actions .btn-login,
+  .cif-session-actions .btn-apply { flex: 1; min-width: 0; }
+}
+
 /* ---------- PAYMENTS PAGE ---------- */
 .pay-summary-row {
   display: flex;
