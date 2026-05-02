@@ -191,14 +191,17 @@ jobs:
           # Merge new vars with existing env so we don't drop anything.
           CURRENT=$(aws lambda get-function-configuration --function-name "$FN" \
             --query 'Environment.Variables' --output json)
-          MERGED=$(echo "$CURRENT" | jq \
+          ENV_JSON=$(echo "$CURRENT" | jq \
             --arg t "$PROFILE_REQUESTS_TABLE" \
             --arg a "$ADMIN_NOTIFY_EMAIL" \
             --arg s "$SES_SENDER_EMAIL" \
-            '. + {PROFILE_REQUESTS_TABLE: $t, ADMIN_NOTIFY_EMAIL: $a, SES_SENDER_EMAIL: $s}')
+            '{Variables: (. + {PROFILE_REQUESTS_TABLE: $t, ADMIN_NOTIFY_EMAIL: $a, SES_SENDER_EMAIL: $s})}')
+          # AWS CLI's --environment expects JSON like {"Variables":{...}}, NOT
+          # the shorthand "Variables={...}" form (the latter only works with
+          # CLI shorthand key=value syntax, not JSON values).
           aws lambda update-function-configuration \
             --function-name "$FN" \
-            --environment "Variables=$MERGED" \
+            --environment "$ENV_JSON" \
             --no-cli-pager >/dev/null
           echo "Updated env vars on $FN:"
           echo "  PROFILE_REQUESTS_TABLE=$PROFILE_REQUESTS_TABLE"
