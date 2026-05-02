@@ -1,19 +1,19 @@
 /* ═══════════════════════════════════════
    CASH IN FLASH — CUSTOMER PORTAL SESSION MANAGER
 
-   Token-expiry-based session timeout with a "stay signed in?"
-   warning modal that fires 2 minutes before expiry. Refreshes
-   Cognito IdToken via REFRESH_TOKEN_AUTH using the refresh token
-   already stored from the MFA flow.
+   Industry-standard online-banking session timeout: 10 minutes of
+   inactivity with a 1-minute warning. Activity is any click,
+   keypress, scroll, mousemove, or touch. The moment the customer
+   interacts with the page, the idle clock resets.
 
-   Loaded on every signed-in page (dashboard, loans, payments,
-   request-loan). Self-contained — no dependency on portal.js
-   (which lives only in S3).
+   Cognito IdToken is silently refreshed in the background while
+   the customer is active (via REFRESH_TOKEN_AUTH using the
+   refresh token stored from MFA). This means the customer can use
+   the portal continuously for as long as they want; only sustained
+   inactivity logs them out.
 
-   Without this module: when the IdToken hits its expiry, the
-   first 401 on any API call dumps the customer at /start.html
-   with no explanation. With it: customer sees a warning + one-
-   click "stay signed in" before that ever happens.
+   Loaded on every signed-in page. Self-contained — no dependency
+   on portal.js (which lives only in S3).
    ═══════════════════════════════════════ */
 (function () {
   'use strict';
@@ -22,20 +22,31 @@
   var ACCESS_KEY = 'cif_access_token';
   var REFRESH_KEY = 'cif_refresh_token';
   var LOGIN_URL = '/start.html';
-  var WARN_BEFORE_MS = 2 * 60 * 1000;       // show modal 2 min before exp
   var COGNITO_REGION = 'us-east-1';
   var COGNITO_CLIENT_ID = '1mddi61n19hftaldt9t3r622b';
 
-  // Dev override: set sessionStorage.cif_session_test_warn_in to a
-  // millisecond count to force the warning to fire that many ms from
-  // page load (regardless of actual token expiry). Useful for
-  // verifying the modal without waiting an hour.
-  var TEST_WARN_OVERRIDE_KEY = 'cif_session_test_warn_in';
+  // Industry-standard banking timeouts (Chase, BofA, Wells Fargo,
+  // Capital One, Citi all use ~10 min idle).
+  var IDLE_TIMEOUT_MS = 10 * 60 * 1000;       // 10 min idle → logout
+  var WARN_BEFORE_LOGOUT_MS = 1 * 60 * 1000;  //  1 min warning before logout
+  var IDLE_CHECK_INTERVAL_MS = 5 * 1000;      // check idle state every 5s
+  var TOKEN_REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // refresh token when < 5 min remain
 
-  var _warnTimer = null;
-  var _expireTimer = null;
+  // Dev override: set sessionStorage.cif_idle_timeout_test_ms to a
+  // millisecond count and reload to use a shorter idle timeout for
+  // testing (e.g. 30000 = 30s idle instead of 10 min).
+  var TEST_OVERRIDE_KEY = 'cif_idle_timeout_test_ms';
+
+  var _lastActivity = Date.now();
+  var _idleCheckInterval = null;
+  var _refreshing = false;
   var _modalEl = null;
   var _countdownInterval = null;
+
+  function effectiveIdleTimeout() {
+    var override = parseInt(sessionStorage.getItem(TEST_OVERRIDE_KEY) || '', 10);
+    return (override > 0) ? override : IDLE_TIMEOUT_MS;
+  }
 
   // ─────────────────────────────────────────
   // Helpers
@@ -53,18 +64,16 @@
     } catch (e) { return null; }
   }
 
-  function getExpMs() {
+  function tokenRemainingMs() {
     var t = sessionStorage.getItem(TOKEN_KEY);
     if (!t) return 0;
     var c = decodeJwt(t);
-    return (c && c.exp) ? c.exp * 1000 : 0;
+    if (!c || !c.exp) return 0;
+    return Math.max(0, c.exp * 1000 - Date.now());
   }
 
-  function clearTimers() {
-    if (_warnTimer) clearTimeout(_warnTimer);
-    if (_expireTimer) clearTimeout(_expireTimer);
-    _warnTimer = null;
-    _expireTimer = null;
+  function idleMs() {
+    return Date.now() - _lastActivity;
   }
 
   // ─────────────────────────────────────────
@@ -73,7 +82,8 @@
   function refreshIdToken() {
     var refresh = sessionStorage.getItem(REFRESH_KEY);
     if (!refresh) return Promise.reject(new Error('no_refresh_token'));
-    return fetch('https://cognito-idp.' + COGNITO_REGION + '.amazonaws.com/', {
+    if (_refreshing) return _refreshing;
+    _refreshing = fetch('https://cognito-idp.' + COGNITO_REGION + '.amazonaws.com/', {
       method: 'POST',
       headers: {
         'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth',
@@ -96,14 +106,22 @@
         // expiry (default 30 days).
         return auth.IdToken;
       });
+    }).then(function (token) {
+      _refreshing = false;
+      return token;
+    }).catch(function (err) {
+      _refreshing = false;
+      throw err;
     });
+    return _refreshing;
   }
 
   // ─────────────────────────────────────────
   // Forced logout
   // ─────────────────────────────────────────
   function forceLogout(reason) {
-    clearTimers();
+    if (_idleCheckInterval) clearInterval(_idleCheckInterval);
+    _idleCheckInterval = null;
     closeModal();
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(ACCESS_KEY);
@@ -111,6 +129,25 @@
     var url = LOGIN_URL;
     if (reason) url += '?reason=' + encodeURIComponent(reason);
     window.location.replace(url);
+  }
+
+  // ─────────────────────────────────────────
+  // Activity tracking
+  // ─────────────────────────────────────────
+  function recordActivity() {
+    // Ignore activity while warning modal is showing — the customer
+    // must explicitly click "Stay signed in" to extend, otherwise
+    // mouse-twitch would reset the timer right after the modal
+    // appeared, defeating the point.
+    if (_modalEl) return;
+    _lastActivity = Date.now();
+  }
+
+  function startActivityTracking() {
+    var events = ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'];
+    events.forEach(function (evt) {
+      document.addEventListener(evt, recordActivity, { passive: true, capture: true });
+    });
   }
 
   // ─────────────────────────────────────────
@@ -126,9 +163,9 @@
       + '<div class="cif-session-modal-backdrop" aria-hidden="true"></div>'
       + '<div class="cif-session-modal-card">'
       +   '<h3 id="cifSessionTitle">Stay signed in?</h3>'
-      +   '<p>For your security, we’ll sign you out soon due to inactivity.</p>'
+      +   '<p>For your security, we’ll sign you out due to inactivity.</p>'
       +   '<p class="cif-session-countdown" aria-live="polite">'
-      +     'Sign-out in <strong id="cifSessionCountdown">2:00</strong>'
+      +     'Sign-out in <strong id="cifSessionCountdown">1:00</strong>'
       +   '</p>'
       +   '<div class="cif-session-actions">'
       +     '<button type="button" class="btn-login" id="cifSessionLogout">Sign out</button>'
@@ -146,14 +183,21 @@
     stayBtn.addEventListener('click', function () {
       stayBtn.disabled = true;
       logoutBtn.disabled = true;
-      stayBtn.textContent = 'Refreshing…';
-      refreshIdToken().then(function () {
+      stayBtn.textContent = 'Staying signed in…';
+
+      // Reset the idle clock so the customer gets a fresh window.
+      _lastActivity = Date.now();
+
+      // If the Cognito token is about to expire (or already has),
+      // refresh it. Otherwise just close the modal — the existing
+      // token is still good and the idle timer is now reset.
+      var promise = (tokenRemainingMs() < TOKEN_REFRESH_THRESHOLD_MS)
+        ? refreshIdToken()
+        : Promise.resolve();
+
+      promise.then(function () {
         closeModal();
-        scheduleTimers();
       }).catch(function () {
-        // Refresh failed (token expired, network, etc.) — fall back
-        // to a hard logout. Customer sees session_expired banner on
-        // /start.html and signs in fresh.
         forceLogout('session_expired');
       });
     });
@@ -165,7 +209,6 @@
     if (_modalEl) return;
     _modalEl = buildModal();
     document.body.appendChild(_modalEl);
-    // Auto-focus the primary action so keyboard users land on it.
     var stay = _modalEl.querySelector('#cifSessionStay');
     if (stay) {
       try { stay.focus(); } catch (e) { /* ignore */ }
@@ -186,8 +229,8 @@
 
   function startCountdown() {
     function tick() {
-      var exp = getExpMs();
-      var remaining = Math.max(0, exp - Date.now());
+      var idle = idleMs();
+      var remaining = Math.max(0, effectiveIdleTimeout() - idle);
       var el = _modalEl && _modalEl.querySelector('#cifSessionCountdown');
       if (el) {
         var m = Math.floor(remaining / 60000);
@@ -201,39 +244,38 @@
   }
 
   // ─────────────────────────────────────────
-  // Scheduling
+  // Idle check loop
   // ─────────────────────────────────────────
-  function scheduleTimers() {
-    clearTimers();
-    var exp = getExpMs();
-    if (!exp) return;
-    var now = Date.now();
+  function checkIdle() {
+    var idle = idleMs();
+    var timeout = effectiveIdleTimeout();
 
-    // Dev override for testing: force the warning to fire N ms from
-    // page load instead of from token exp. Stored in sessionStorage
-    // so it survives a reload but not a sign-out/sign-in.
-    var override = parseInt(sessionStorage.getItem(TEST_WARN_OVERRIDE_KEY) || '', 10);
-    var warnAt;
-    if (override > 0) {
-      warnAt = now + override;
-    } else {
-      warnAt = exp - WARN_BEFORE_MS;
-    }
-
-    // If we're already past the warning point but not yet expired,
-    // show immediately. If already expired, log out immediately.
-    if (exp <= now) {
+    // Logged out due to total inactivity.
+    if (idle >= timeout) {
       forceLogout('session_expired');
       return;
     }
-    if (warnAt <= now) {
+
+    // Show warning modal at idle - WARN_BEFORE_LOGOUT_MS.
+    if (idle >= timeout - WARN_BEFORE_LOGOUT_MS && !_modalEl) {
       showModal();
-    } else {
-      _warnTimer = setTimeout(showModal, warnAt - now);
+      return;
     }
-    _expireTimer = setTimeout(function () {
-      forceLogout('session_expired');
-    }, exp - now);
+
+    // Silent background refresh: if customer is active and the
+    // Cognito token is approaching its expiry, refresh now so a
+    // long active session never gets booted by token-exp alone.
+    if (!_modalEl
+        && idle < timeout - WARN_BEFORE_LOGOUT_MS
+        && tokenRemainingMs() < TOKEN_REFRESH_THRESHOLD_MS
+        && tokenRemainingMs() > 0
+        && !_refreshing) {
+      refreshIdToken().catch(function () {
+        // If refresh fails, force logout so the customer doesn't
+        // discover the failure mid-action with a 401.
+        forceLogout('session_expired');
+      });
+    }
   }
 
   // ─────────────────────────────────────────
@@ -241,7 +283,14 @@
   // ─────────────────────────────────────────
   function init() {
     if (!sessionStorage.getItem(TOKEN_KEY)) return;  // not signed in
-    scheduleTimers();
+    // If the token is already expired on load, log out cleanly.
+    if (tokenRemainingMs() <= 0) {
+      forceLogout('session_expired');
+      return;
+    }
+    _lastActivity = Date.now();
+    startActivityTracking();
+    _idleCheckInterval = setInterval(checkIdle, IDLE_CHECK_INTERVAL_MS);
   }
 
   if (document.readyState === 'loading') {
@@ -250,13 +299,12 @@
     init();
   }
 
-  // Expose a tiny API for other modules to nudge us (e.g. when a
-  // page-specific api() helper sees a successful 200, reset timers
-  // in case the response carried a new token — currently it doesn't,
-  // but the hook is here).
+  // Tiny API for debugging / external triggers.
   window.CIF_SESSION = {
-    refreshNow: function () { return refreshIdToken().then(scheduleTimers); },
-    rescheduleTimers: scheduleTimers,
+    refreshNow: function () { return refreshIdToken(); },
     forceLogout: forceLogout,
+    getIdleMs: idleMs,
+    getTokenRemainingMs: tokenRemainingMs,
+    bumpActivity: recordActivity,  // for programmatic resets
   };
 })();
