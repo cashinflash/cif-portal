@@ -319,7 +319,7 @@ Update this section at the end of each session. Newest first.
 - New env vars on the loans Lambda:
     PROFILE_REQUESTS_TABLE   — DDB table name
     ADMIN_NOTIFY_EMAIL       — where SES sends the alert (default
-                                 support@cashinflash.com)
+                                 info@cashinflash.com)
     SES_SENDER_EMAIL         — Source on the SES SendEmail call
                                  (default no-reply@cashinflash.com)
 - New IAM grants on the loans Lambda execution role (via

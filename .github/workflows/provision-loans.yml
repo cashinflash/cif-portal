@@ -20,7 +20,7 @@ env:
   AUTHORIZER_ID: ppc9vg
   FN: cif-portal-loans-dev
   PROFILE_REQUESTS_TABLE: cif-portal-profile-change-requests-dev
-  ADMIN_NOTIFY_EMAIL: support@cashinflash.com
+  ADMIN_NOTIFY_EMAIL: info@cashinflash.com
   SES_SENDER_EMAIL: no-reply@cashinflash.com
 
 jobs:

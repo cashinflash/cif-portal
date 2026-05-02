@@ -79,7 +79,7 @@ DOC_PDF_FN_NAME = os.environ.get("DOC_PDF_FN_NAME", "")  # set by provision-doc-
 PROFILE_REQUESTS_TABLE = os.environ.get(
     "PROFILE_REQUESTS_TABLE", "cif-portal-profile-change-requests-dev"
 )
-ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "support@cashinflash.com")
+ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "info@cashinflash.com")
 SES_SENDER_EMAIL = os.environ.get("SES_SENDER_EMAIL", "no-reply@cashinflash.com")
 PORTAL_PUBLIC_URL = os.environ.get("PORTAL_PUBLIC_URL", "https://d1zucrj1ouu3c.cloudfront.net")
 _creds_cache: Optional[Dict[str, str]] = None
