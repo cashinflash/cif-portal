@@ -1360,6 +1360,157 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
                                  "maskedPhone": _mask_phone(phone)})
 
 
+# ─────────────────────────────────────────
+# Change password
+# ─────────────────────────────────────────
+COGNITO_APP_CLIENT_ID = os.environ.get("COGNITO_APP_CLIENT_ID", "")
+
+
+def _validate_new_password(pw: str) -> Optional[str]:
+    """Returns an error code if the password fails policy, else None.
+    Mirror of typical Cognito default policy + sensible minimums."""
+    if not pw or len(pw) < 12:
+        return "too_short"
+    if len(pw) > 128:
+        return "too_long"
+    if not any(c.isupper() for c in pw):
+        return "needs_uppercase"
+    if not any(c.islower() for c in pw):
+        return "needs_lowercase"
+    if not any(c.isdigit() for c in pw):
+        return "needs_digit"
+    return None
+
+
+def _send_password_changed_alert(claims: Dict[str, Any]) -> None:
+    """Email the customer that their password was just changed.
+    Best-effort: failures log but don't propagate."""
+    customer_email = (claims.get("email") or "").strip()
+    if not customer_email:
+        return
+    first_name = (claims.get("given_name") or "").strip() or "there"
+    when = datetime.utcnow().strftime("%b %d, %Y at %I:%M %p UTC")
+
+    text = (
+        f"Hi {first_name},\n\n"
+        f"Your Cash in Flash account password was just changed at {when}.\n\n"
+        f"If this was you, no further action is needed.\n\n"
+        f"If you did NOT change your password, your account may be at risk. "
+        f"Please call us immediately at (747) 270-7121 and we'll secure your account.\n\n"
+        f"---\n"
+        f"Cash in Flash · Licensed by the California Department of "
+        f"Financial Protection and Innovation #214840\n"
+        f"This is an automated security notification. Please do not reply.\n"
+    )
+    html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,'SF Pro Text','Segoe UI',Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:36px 12px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
+        <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+        </td></tr>
+        <tr><td style="padding:36px 36px 8px;">
+          <p style="margin:0 0 6px;font-size:12px;color:#0E8741;letter-spacing:.08em;text-transform:uppercase;font-weight:700;">Security alert</p>
+          <h1 style="margin:0 0 18px;font-size:22px;font-weight:700;color:#1a1a2e;letter-spacing:-0.01em;line-height:1.25;">Your password was changed</h1>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#1a1a2e;">Hi {first_name}, this is a confirmation that your Cash in Flash account password was changed on <strong>{when}</strong>.</p>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#1a1a2e;">If this was you, no further action is needed.</p>
+          <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0;margin:6px 0 22px;background:#fef3f2;border-radius:10px;border-left:4px solid #dc2626;">
+            <tr><td style="padding:14px 18px;color:#991b1b;font-size:14px;line-height:1.55;">
+              <strong>Didn't change your password?</strong> Your account may be at risk.
+              Call us right away at <a href="tel:+17472707121" style="color:#991b1b;font-weight:700;text-decoration:underline;">(747) 270-7121</a> and we'll secure it.
+            </td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:22px 36px 32px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.6;">
+          <p style="margin:0 0 6px;">Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840</p>
+          <p style="margin:0;">This email was sent by Cash in Flash &middot; 13937B Van Nuys Blvd, Arleta, CA 91331. Please do not reply to this email.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+
+    ok, err_code, err_msg = resend_email.send(
+        to=customer_email,
+        subject="Your Cash in Flash password was changed",
+        text=text,
+        html=html,
+    )
+    if not ok:
+        log.warning("password-changed alert send failed code=%s msg=%s",
+                    err_code, (err_msg or "")[:200])
+
+
+def change_password(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-profile/password — change the customer's portal
+    password. Verifies the current password by re-authenticating
+    against Cognito, then sets the new password admin-side, then
+    fires a security-alert email so the customer sees the change
+    even if it wasn't them."""
+    claims = _claims(event)
+    if not claims.get("sub") or not claims.get("email"):
+        return _json_response(401, {"error": "no_claims"})
+
+    if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
+        log.warning("change_password called but Cognito env not configured")
+        return _json_response(503, {"error": "not_configured"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+
+    current_pw = body.get("currentPassword") or ""
+    new_pw = body.get("newPassword") or ""
+    if not current_pw or not new_pw:
+        return _json_response(400, {"error": "missing_fields"})
+    if current_pw == new_pw:
+        return _json_response(400, {"error": "same_password"})
+    pw_err = _validate_new_password(new_pw)
+    if pw_err:
+        return _json_response(400, {"error": pw_err})
+
+    email = (claims.get("email") or "").strip()
+    sub = claims.get("sub") or claims.get("cognito:username")
+
+    # Step 1: verify the current password by re-authenticating.
+    try:
+        _cognito.admin_initiate_auth(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            ClientId=COGNITO_APP_CLIENT_ID,
+            AuthFlow="ADMIN_USER_PASSWORD_AUTH",
+            AuthParameters={"USERNAME": email, "PASSWORD": current_pw},
+        )
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        log.info("change_password reauth failed sub=%s code=%s", sub, code)
+        if code in ("NotAuthorizedException", "UserNotFoundException"):
+            return _json_response(401, {"error": "current_password_incorrect"})
+        return _json_response(502, {"error": "auth_check_failed"})
+
+    # Step 2: set the new password as permanent.
+    try:
+        _cognito.admin_set_user_password(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=sub,
+            Password=new_pw,
+            Permanent=True,
+        )
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        log.warning("admin_set_user_password failed sub=%s code=%s", sub, code)
+        if code == "InvalidPasswordException":
+            return _json_response(400, {"error": "policy_violation"})
+        return _json_response(502, {"error": "password_set_failed"})
+
+    # Step 3: best-effort security-alert email.
+    _send_password_changed_alert(claims)
+
+    log.info("password changed sub=%s", sub)
+    return _json_response(200, {"ok": True})
+
+
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -1889,6 +2040,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return start_phone_verify(event)
         if path.endswith("/my-profile/phone/confirm") and method == "POST":
             return confirm_phone_verify(event)
+        if path.endswith("/my-profile/password") and method == "POST":
+            return change_password(event)
         if path.endswith("/my-loan/new") and method == "POST":
             return request_new_loan_handoff(event)
         if path.endswith("/my-loans/active") and method == "GET":

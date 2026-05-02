@@ -13,6 +13,7 @@
   var EMAIL_ENDPOINT = API_BASE + '/my-profile/email';
   var EMAIL_START_ENDPOINT = API_BASE + '/my-profile/email/start-verify';
   var EMAIL_CONFIRM_ENDPOINT = API_BASE + '/my-profile/email/confirm';
+  var PASSWORD_ENDPOINT = API_BASE + '/my-profile/password';
   var ADDRESS_ENDPOINT = API_BASE + '/my-profile/address';
   var PHONE_START_ENDPOINT = API_BASE + '/my-profile/phone/start-verify';
   var PHONE_CONFIRM_ENDPOINT = API_BASE + '/my-profile/phone/confirm';
@@ -203,6 +204,10 @@
       title.textContent = 'Update home address';
       body.innerHTML = renderAddressForm();
       bindAddressForm();
+    } else if (which === 'password') {
+      title.textContent = 'Change password';
+      body.innerHTML = renderPasswordForm();
+      bindPasswordForm();
     } else {
       return;
     }
@@ -614,6 +619,120 @@
       if (e && e.message === 'unauthorized') return;
       err.textContent = 'Network error. Please try again.';
       err.hidden = false;
+    });
+  }
+
+  // ---------- Change password modal ----------
+  function renderPasswordForm() {
+    return [
+      '<p class="profile-modal-intro">For your security, enter your current password before choosing a new one. We\'ll email you a confirmation as soon as the change is applied.</p>',
+      '<form class="profile-modal-form" id="profilePasswordForm" novalidate>',
+      '  <label class="profile-modal-field">',
+      '    <span class="profile-modal-field-label">Current password</span>',
+      '    <input type="password" name="currentPassword" id="profilePasswordCurrent" autocomplete="current-password" required maxlength="128">',
+      '  </label>',
+      '  <label class="profile-modal-field">',
+      '    <span class="profile-modal-field-label">New password</span>',
+      '    <input type="password" name="newPassword" id="profilePasswordNew" autocomplete="new-password" required maxlength="128">',
+      '    <span class="profile-modal-field-hint">12+ characters with at least one uppercase letter, lowercase letter, and number.</span>',
+      '  </label>',
+      '  <label class="profile-modal-field">',
+      '    <span class="profile-modal-field-label">Confirm new password</span>',
+      '    <input type="password" name="confirmPassword" id="profilePasswordConfirm" autocomplete="new-password" required maxlength="128">',
+      '  </label>',
+      '  <div class="profile-modal-error" id="profilePasswordError" hidden></div>',
+      '  <div class="profile-modal-secure">',
+      '    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+      '    Your other active sign-ins are not affected. We\'ll email you a confirmation.',
+      '  </div>',
+      '  <div class="profile-modal-actions">',
+      '    <button type="button" class="btn-text" data-modal-action="close">Cancel</button>',
+      '    <button type="submit" class="btn-apply">Update password</button>',
+      '  </div>',
+      '</form>',
+    ].join('');
+  }
+
+  function bindPasswordForm() {
+    qs('#profilePasswordForm').addEventListener('submit', submitPassword);
+  }
+
+  function submitPassword(ev) {
+    ev.preventDefault();
+    var current = qs('#profilePasswordCurrent').value || '';
+    var next = qs('#profilePasswordNew').value || '';
+    var confirm = qs('#profilePasswordConfirm').value || '';
+    var err = qs('#profilePasswordError');
+    var btns = qsa('button', qs('#profilePasswordForm'));
+
+    function fail(msg) {
+      err.textContent = msg;
+      err.hidden = false;
+    }
+
+    if (!current || !next || !confirm) {
+      fail('Please fill in all three fields.');
+      return;
+    }
+    if (next !== confirm) {
+      fail("New password and confirmation don't match.");
+      return;
+    }
+    if (current === next) {
+      fail('Your new password must be different from the current one.');
+      return;
+    }
+    if (next.length < 12) {
+      fail('New password must be at least 12 characters long.');
+      return;
+    }
+    if (!/[A-Z]/.test(next)) {
+      fail('New password must include an uppercase letter.');
+      return;
+    }
+    if (!/[a-z]/.test(next)) {
+      fail('New password must include a lowercase letter.');
+      return;
+    }
+    if (!/[0-9]/.test(next)) {
+      fail('New password must include a number.');
+      return;
+    }
+
+    err.hidden = true;
+    btns.forEach(function (b) { b.disabled = true; });
+
+    apiFetch(PASSWORD_ENDPOINT, {
+      method: 'POST',
+      body: { currentPassword: current, newPassword: next },
+    }).then(function (r) {
+      btns.forEach(function (b) { b.disabled = false; });
+      if (r.status === 200 && r.data && r.data.ok) {
+        banner('ok', 'Password updated. We just emailed you a confirmation.');
+        closeModal();
+      } else if (r.status === 401 && r.data && r.data.error === 'current_password_incorrect') {
+        fail('That current password isn\'t right. Try again.');
+      } else if (r.status === 400 && r.data && r.data.error === 'same_password') {
+        fail('Your new password must be different from the current one.');
+      } else if (r.status === 400 && r.data && r.data.error === 'policy_violation') {
+        fail('That password doesn\'t meet our requirements. Try a longer one with mixed characters.');
+      } else if (r.status === 400 && r.data && (r.data.error || '').indexOf('needs_') === 0) {
+        // map server-side rule violations back to the user
+        var map = {
+          too_short: 'New password must be at least 12 characters long.',
+          too_long: 'New password is too long.',
+          needs_uppercase: 'New password must include an uppercase letter.',
+          needs_lowercase: 'New password must include a lowercase letter.',
+          needs_digit: 'New password must include a number.',
+        };
+        fail(map[r.data.error] || 'Please choose a stronger password.');
+      } else {
+        fail("We couldn't update your password right now. Please try again.");
+      }
+    }).catch(function (e) {
+      btns.forEach(function (b) { b.disabled = false; });
+      if (e && e.message === 'unauthorized') return;
+      fail('Network error. Please try again.');
     });
   }
 

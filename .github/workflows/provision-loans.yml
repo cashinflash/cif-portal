@@ -25,6 +25,7 @@ env:
   SES_SENDER_EMAIL: no-reply@cashinflash.com
   TELNYX_SECRET_NAME: cif-portal/telnyx/credentials
   COGNITO_USER_POOL_ID: us-east-1_U508xOs95
+  COGNITO_APP_CLIENT_ID: 1mddi61n19hftaldt9t3r622b
 
 jobs:
   provision:
@@ -69,6 +70,7 @@ jobs:
             "PUT /api/my-profile/address"
             "POST /api/my-profile/phone/start-verify"
             "POST /api/my-profile/phone/confirm"
+            "POST /api/my-profile/password"
             "GET /api/my-loans/active"
             "GET /api/my-loans/activity"
             "GET /api/my-loans/documents"
@@ -196,6 +198,15 @@ jobs:
                   "cognito-idp:AdminGetUser"
                 ],
                 "Resource": "$USER_POOL_ARN"
+              },
+              {
+                "Sid": "CognitoChangePassword",
+                "Effect": "Allow",
+                "Action": [
+                  "cognito-idp:AdminInitiateAuth",
+                  "cognito-idp:AdminSetUserPassword"
+                ],
+                "Resource": "$USER_POOL_ARN"
               }
             ]
           }
@@ -223,7 +234,8 @@ jobs:
             --arg s "$SES_SENDER_EMAIL" \
             --arg x "$TELNYX_SECRET_ARN" \
             --arg c "$COGNITO_USER_POOL_ID" \
-            '{Variables: (. + {PROFILE_REQUESTS_TABLE: $t, ADMIN_NOTIFY_EMAIL: $a, SES_SENDER_EMAIL: $s, TELNYX_SECRET_ARN: $x, COGNITO_USER_POOL_ID: $c})}')
+            --arg p "$COGNITO_APP_CLIENT_ID" \
+            '{Variables: (. + {PROFILE_REQUESTS_TABLE: $t, ADMIN_NOTIFY_EMAIL: $a, SES_SENDER_EMAIL: $s, TELNYX_SECRET_ARN: $x, COGNITO_USER_POOL_ID: $c, COGNITO_APP_CLIENT_ID: $p})}')
           # AWS CLI's --environment expects JSON like {"Variables":{...}}, NOT
           # the shorthand "Variables={...}" form (the latter only works with
           # CLI shorthand key=value syntax, not JSON values).
@@ -236,6 +248,7 @@ jobs:
           echo "  ADMIN_NOTIFY_EMAIL=$ADMIN_NOTIFY_EMAIL"
           echo "  SES_SENDER_EMAIL=$SES_SENDER_EMAIL"
           echo "  COGNITO_USER_POOL_ID=$COGNITO_USER_POOL_ID"
+          echo "  COGNITO_APP_CLIENT_ID=$COGNITO_APP_CLIENT_ID"
           echo "  TELNYX_SECRET_ARN=$TELNYX_SECRET_ARN"
 
       - name: Summary
