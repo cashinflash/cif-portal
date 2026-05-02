@@ -306,25 +306,19 @@ def _v1_request(method: str, path: str,
 def _communication_pin_request(path: str,
                                 body: Dict[str, Any]) -> Tuple[int, Optional[Any], str, str]:
     """POST to a /Communication/* endpoint (e.g. RequestPinByText,
-    VerifyPin). Tries the v1 host first with the service Token, then
-    falls back to the APIM host with Bearer + x-api-key on 401/403.
+    VerifyPin). Tries the APIM host first (where the standalone
+    Communication controller actually lives — confirmed by v1 host
+    returning 404 'No type was found that matches the controller'),
+    then falls back to the v1 host with the service Token only if
+    APIM auth fails.
 
     Returns (status, parsed, raw, used_host) where used_host is
-    'v1' or 'apim' or 'none' (if no auth available).
+    'apim' or 'v1' or 'none' (if no auth available).
     """
     creds = _get_creds()
     api_key = creds.get("xApiKey") if isinstance(creds, dict) else None
 
-    v1_tok = _get_v1_token()
-    if v1_tok:
-        url = f"{V1_BASE}{path}"
-        headers = {"Token": v1_tok}
-        if api_key:
-            headers["x-api-key"] = api_key
-        status, parsed, raw = _http(url, "POST", body=body, headers=headers)
-        if status not in (401, 403):
-            return status, parsed, raw, "v1"
-
+    # APIM first — the Communication controller is only deployed there.
     apim_tok = _get_apim_token()
     if apim_tok:
         url = f"{APIM_BASE}{path}"
@@ -332,7 +326,22 @@ def _communication_pin_request(path: str,
         if api_key:
             headers["x-api-key"] = api_key
         status, parsed, raw = _http(url, "POST", body=body, headers=headers)
-        return status, parsed, raw, "apim"
+        # If APIM accepts the request (any non-auth-failure status —
+        # including 200, 400, 500), trust it and return.
+        if status not in (401, 403, 0):
+            return status, parsed, raw, "apim"
+
+    # v1 fallback (kept just in case APIM auth is rejected for this
+    # endpoint specifically and v1 picks it up — unlikely given the
+    # 404 we saw, but harmless).
+    v1_tok = _get_v1_token()
+    if v1_tok:
+        url = f"{V1_BASE}{path}"
+        headers = {"Token": v1_tok}
+        if api_key:
+            headers["x-api-key"] = api_key
+        status, parsed, raw = _http(url, "POST", body=body, headers=headers)
+        return status, parsed, raw, "v1"
 
     return 0, None, "", "none"
 
