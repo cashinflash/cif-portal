@@ -1485,8 +1485,16 @@ def change_password(event: Dict[str, Any]) -> Dict[str, Any]:
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
         log.info("change_password reauth failed sub=%s code=%s", sub, code)
+        # Use 400 (not 401) so the frontend's generic apiFetch
+        # auto-logout-on-401 handler doesn't trigger. This is a
+        # validation failure of the request body, not a session
+        # auth failure — the customer's JWT is still valid.
         if code in ("NotAuthorizedException", "UserNotFoundException"):
-            return _json_response(401, {"error": "current_password_incorrect"})
+            return _json_response(400, {"error": "current_password_incorrect"})
+        if code == "PasswordResetRequiredException":
+            return _json_response(400, {"error": "reset_required"})
+        if code == "TooManyRequestsException":
+            return _json_response(429, {"error": "rate_limited"})
         return _json_response(502, {"error": "auth_check_failed"})
 
     # Step 2: set the new password as permanent.

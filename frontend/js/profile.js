@@ -623,38 +623,115 @@
   }
 
   // ---------- Change password modal ----------
+  // Banking-style flow: live requirement checklist, show/hide toggles,
+  // server-side re-auth + policy enforcement, security alert email
+  // on success.
+  function passwordFieldHtml(opts) {
+    // opts: { id, name, label, autocomplete, hint }
+    return [
+      '<label class="profile-modal-field">',
+      '  <span class="profile-modal-field-label">' + escape(opts.label) + '</span>',
+      '  <span class="pw-input-wrap">',
+      '    <input type="password" name="' + opts.name + '" id="' + opts.id + '" autocomplete="' + (opts.autocomplete || 'off') + '" required maxlength="128">',
+      '    <button type="button" class="pw-toggle" data-pw-toggle="' + opts.id + '" aria-label="Show password" aria-pressed="false">',
+      '      <svg class="pw-eye" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+      '    </button>',
+      '  </span>',
+      (opts.hint ? '  <span class="profile-modal-field-hint">' + escape(opts.hint) + '</span>' : ''),
+      '</label>',
+    ].join('');
+  }
+
   function renderPasswordForm() {
     return [
       '<p class="profile-modal-intro">For your security, enter your current password before choosing a new one. We\'ll email you a confirmation as soon as the change is applied.</p>',
       '<form class="profile-modal-form" id="profilePasswordForm" novalidate>',
-      '  <label class="profile-modal-field">',
-      '    <span class="profile-modal-field-label">Current password</span>',
-      '    <input type="password" name="currentPassword" id="profilePasswordCurrent" autocomplete="current-password" required maxlength="128">',
-      '  </label>',
-      '  <label class="profile-modal-field">',
-      '    <span class="profile-modal-field-label">New password</span>',
-      '    <input type="password" name="newPassword" id="profilePasswordNew" autocomplete="new-password" required maxlength="128">',
-      '    <span class="profile-modal-field-hint">12+ characters with at least one uppercase letter, lowercase letter, and number.</span>',
-      '  </label>',
-      '  <label class="profile-modal-field">',
-      '    <span class="profile-modal-field-label">Confirm new password</span>',
-      '    <input type="password" name="confirmPassword" id="profilePasswordConfirm" autocomplete="new-password" required maxlength="128">',
-      '  </label>',
-      '  <div class="profile-modal-error" id="profilePasswordError" hidden></div>',
-      '  <div class="profile-modal-secure">',
-      '    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
-      '    Your other active sign-ins are not affected. We\'ll email you a confirmation.',
-      '  </div>',
-      '  <div class="profile-modal-actions">',
+      passwordFieldHtml({
+        id: 'profilePasswordCurrent',
+        name: 'currentPassword',
+        label: 'Current password',
+        autocomplete: 'current-password',
+      }),
+      passwordFieldHtml({
+        id: 'profilePasswordNew',
+        name: 'newPassword',
+        label: 'New password',
+        autocomplete: 'new-password',
+      }),
+      '<ul class="pw-checklist" id="profilePasswordChecklist" aria-live="polite">',
+      '  <li data-rule="length"><span class="pw-check-dot" aria-hidden="true"></span>At least 12 characters</li>',
+      '  <li data-rule="upper"><span class="pw-check-dot" aria-hidden="true"></span>One uppercase letter</li>',
+      '  <li data-rule="lower"><span class="pw-check-dot" aria-hidden="true"></span>One lowercase letter</li>',
+      '  <li data-rule="digit"><span class="pw-check-dot" aria-hidden="true"></span>One number</li>',
+      '  <li data-rule="different"><span class="pw-check-dot" aria-hidden="true"></span>Different from your current password</li>',
+      '</ul>',
+      passwordFieldHtml({
+        id: 'profilePasswordConfirm',
+        name: 'confirmPassword',
+        label: 'Confirm new password',
+        autocomplete: 'new-password',
+      }),
+      '<div class="profile-modal-error" id="profilePasswordError" hidden></div>',
+      '<div class="profile-modal-secure">',
+      '  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+      '  Your other active sign-ins stay active. We\'ll email a confirmation as soon as the change applies.',
+      '</div>',
+      '<div class="profile-modal-actions profile-modal-actions--split">',
+      '  <a href="/forgot.html" class="btn-text">Forgot current password?</a>',
+      '  <div class="profile-modal-actions-right">',
       '    <button type="button" class="btn-text" data-modal-action="close">Cancel</button>',
-      '    <button type="submit" class="btn-apply">Update password</button>',
+      '    <button type="submit" class="btn-apply" id="profilePasswordSubmit" disabled>Update password</button>',
       '  </div>',
+      '</div>',
       '</form>',
     ].join('');
   }
 
+  function pwRules(current, next) {
+    return {
+      length:    next.length >= 12,
+      upper:     /[A-Z]/.test(next),
+      lower:     /[a-z]/.test(next),
+      digit:     /[0-9]/.test(next),
+      different: !!next && next !== current,
+    };
+  }
+
+  function updatePasswordChecklist() {
+    var current = (qs('#profilePasswordCurrent') || {}).value || '';
+    var next = (qs('#profilePasswordNew') || {}).value || '';
+    var confirm = (qs('#profilePasswordConfirm') || {}).value || '';
+    var rules = pwRules(current, next);
+    qsa('#profilePasswordChecklist li').forEach(function (li) {
+      var rule = li.getAttribute('data-rule');
+      if (rules[rule]) li.classList.add('is-met');
+      else li.classList.remove('is-met');
+    });
+    var allRulesMet = rules.length && rules.upper && rules.lower && rules.digit && rules.different;
+    var matchOk = next && next === confirm;
+    var btn = qs('#profilePasswordSubmit');
+    if (btn) btn.disabled = !(current && allRulesMet && matchOk);
+  }
+
   function bindPasswordForm() {
     qs('#profilePasswordForm').addEventListener('submit', submitPassword);
+    ['profilePasswordCurrent', 'profilePasswordNew', 'profilePasswordConfirm'].forEach(function (id) {
+      var el = qs('#' + id);
+      if (el) el.addEventListener('input', updatePasswordChecklist);
+    });
+    qsa('[data-pw-toggle]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var targetId = btn.getAttribute('data-pw-toggle');
+        var input = qs('#' + targetId);
+        if (!input) return;
+        var showing = input.type === 'text';
+        input.type = showing ? 'password' : 'text';
+        btn.setAttribute('aria-pressed', showing ? 'false' : 'true');
+        btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+        btn.classList.toggle('is-on', !showing);
+      });
+    });
+    updatePasswordChecklist();
   }
 
   function submitPassword(ev) {
@@ -663,7 +740,7 @@
     var next = qs('#profilePasswordNew').value || '';
     var confirm = qs('#profilePasswordConfirm').value || '';
     var err = qs('#profilePasswordError');
-    var btns = qsa('button', qs('#profilePasswordForm'));
+    var btns = qsa('button[type="submit"], button[type="button"][data-modal-action="close"]', qs('#profilePasswordForm'));
 
     function fail(msg) {
       err.textContent = msg;
@@ -678,26 +755,12 @@
       fail("New password and confirmation don't match.");
       return;
     }
-    if (current === next) {
-      fail('Your new password must be different from the current one.');
-      return;
-    }
-    if (next.length < 12) {
-      fail('New password must be at least 12 characters long.');
-      return;
-    }
-    if (!/[A-Z]/.test(next)) {
-      fail('New password must include an uppercase letter.');
-      return;
-    }
-    if (!/[a-z]/.test(next)) {
-      fail('New password must include a lowercase letter.');
-      return;
-    }
-    if (!/[0-9]/.test(next)) {
-      fail('New password must include a number.');
-      return;
-    }
+    var rules = pwRules(current, next);
+    if (!rules.different) { fail('Your new password must be different from the current one.'); return; }
+    if (!rules.length) { fail('New password must be at least 12 characters long.'); return; }
+    if (!rules.upper) { fail('New password must include an uppercase letter.'); return; }
+    if (!rules.lower) { fail('New password must include a lowercase letter.'); return; }
+    if (!rules.digit) { fail('New password must include a number.'); return; }
 
     err.hidden = true;
     btns.forEach(function (b) { b.disabled = true; });
@@ -707,17 +770,24 @@
       body: { currentPassword: current, newPassword: next },
     }).then(function (r) {
       btns.forEach(function (b) { b.disabled = false; });
+      updatePasswordChecklist();
       if (r.status === 200 && r.data && r.data.ok) {
         banner('ok', 'Password updated. We just emailed you a confirmation.');
         closeModal();
-      } else if (r.status === 401 && r.data && r.data.error === 'current_password_incorrect') {
-        fail('That current password isn\'t right. Try again.');
-      } else if (r.status === 400 && r.data && r.data.error === 'same_password') {
+        return;
+      }
+      var code = (r.data && r.data.error) || '';
+      if (r.status === 400 && code === 'current_password_incorrect') {
+        fail("That current password isn't right. Try again.");
+        var cur = qs('#profilePasswordCurrent');
+        if (cur) { cur.value = ''; cur.focus(); }
+      } else if (r.status === 400 && code === 'same_password') {
         fail('Your new password must be different from the current one.');
-      } else if (r.status === 400 && r.data && r.data.error === 'policy_violation') {
-        fail('That password doesn\'t meet our requirements. Try a longer one with mixed characters.');
-      } else if (r.status === 400 && r.data && (r.data.error || '').indexOf('needs_') === 0) {
-        // map server-side rule violations back to the user
+      } else if (r.status === 400 && code === 'policy_violation') {
+        fail("That password doesn't meet our requirements. Try a longer one with mixed characters.");
+      } else if (r.status === 400 && code === 'reset_required') {
+        fail('Your account requires a password reset. Use the "Forgot current password?" link.');
+      } else if (r.status === 400 && code.indexOf('needs_') === 0 || code.indexOf('too_') === 0) {
         var map = {
           too_short: 'New password must be at least 12 characters long.',
           too_long: 'New password is too long.',
@@ -725,7 +795,9 @@
           needs_lowercase: 'New password must include a lowercase letter.',
           needs_digit: 'New password must include a number.',
         };
-        fail(map[r.data.error] || 'Please choose a stronger password.');
+        fail(map[code] || 'Please choose a stronger password.');
+      } else if (r.status === 429) {
+        fail('Too many attempts. Please wait a few minutes and try again.');
       } else {
         fail("We couldn't update your password right now. Please try again.");
       }

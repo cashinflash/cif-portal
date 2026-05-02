@@ -1276,6 +1276,96 @@ button.dash-doc-download:disabled {
   line-height: 1.45;
   margin-top: 4px;
 }
+
+/* Password input + show/hide toggle */
+.pw-input-wrap {
+  position: relative;
+  display: block;
+}
+.pw-input-wrap input {
+  padding-right: 44px !important;
+}
+.pw-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: var(--cif-muted);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.pw-toggle:hover { background: #f1f5f9; color: var(--cif-navy); }
+.pw-toggle.is-on { color: #0E8741; }
+
+/* Live requirement checklist */
+.pw-checklist {
+  list-style: none;
+  margin: -4px 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.pw-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .82rem;
+  color: var(--cif-muted);
+  transition: color .12s ease;
+}
+.pw-check-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  flex-shrink: 0;
+  position: relative;
+  transition: background .12s ease;
+}
+.pw-checklist li.is-met {
+  color: #086c33;
+}
+.pw-checklist li.is-met .pw-check-dot {
+  background: #0E8741;
+}
+.pw-checklist li.is-met .pw-check-dot::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(45deg);
+}
+
+/* Split modal actions: forgot link on left, primary actions on right */
+.profile-modal-actions--split {
+  justify-content: space-between;
+  align-items: center;
+}
+.profile-modal-actions--split a.btn-text {
+  text-decoration: underline;
+  font-size: .85rem;
+}
+.profile-modal-actions-right {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.btn-apply[disabled] {
+  opacity: .55;
+  cursor: not-allowed;
+}
 .profile-modal-field input,
 .profile-modal-field select {
   padding: 12px 14px;
