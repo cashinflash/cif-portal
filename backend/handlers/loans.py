@@ -1018,39 +1018,31 @@ def start_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if not phone:
         return _json_response(400, {"error": "invalid_phone"})
 
-    # Try documented lowercase 'sms' first, fall back to uppercase 'SMS'
-    # on 404 — Vergent's docs show {type} as a placeholder, casing
-    # convention isn't pinned down. Capture the upstream status + body
-    # on every attempt so we can iterate from CloudWatch / DevTools.
+    # Vergent's V1 endpoint binds the URL {type} segment to a
+    # TriggerCategory enum (integer 0-3, namespace
+    # Vergent.Common.Enums.Sql.Marketing.TriggerCategory). The
+    # documented placeholder "sms"/"SMS" is a doc bug — passing a
+    # string returns 400 with parameter-null. Pass the integer.
+    # 1 is the most likely "verification" value in a marketing-
+    # style enum; if that fails, iterate via diagnostic body.
     last4 = phone[-4:] if len(phone) >= 4 else phone
+    trigger_category = os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1")
     status, _resp, raw = _v1_request(
         "POST",
-        f"/V1/customer/{cid}/communication/sms/validate/{phone}",
+        f"/V1/customer/{cid}/communication/{trigger_category}/validate/{phone}",
         return_raw=True,
     )
-    log.info("phone validate-start type=sms status=%s cid=%s last4=%s body=%s",
-             status, cid, last4, (raw or "")[:400])
-    used_type = "sms"
-
-    if status == 404:
-        status2, _resp2, raw2 = _v1_request(
-            "POST",
-            f"/V1/customer/{cid}/communication/SMS/validate/{phone}",
-            return_raw=True,
-        )
-        log.info("phone validate-start type=SMS status=%s cid=%s last4=%s body=%s",
-                 status2, cid, last4, (raw2 or "")[:400])
-        if status2 in (200, 204):
-            status, raw, used_type = status2, raw2, "SMS"
+    log.info("phone validate-start type=%s status=%s cid=%s last4=%s body=%s",
+             trigger_category, status, cid, last4, (raw or "")[:400])
 
     if status not in (200, 204):
         log.warning("phone validate-start failed status=%s cid=%s last4=%s type=%s",
-                    status, cid, last4, used_type)
+                    status, cid, last4, trigger_category)
         return _json_response(502, {
             "error": "sms_send_failed",
             "upstreamStatus": status,
             "upstreamBody": (raw or "")[:400],
-            "triedType": used_type,
+            "triedType": trigger_category,
         })
 
     return _json_response(200, {"ok": True, "maskedPhone": _mask_phone(phone)})
@@ -1078,30 +1070,17 @@ def confirm_phone_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     if len(code) < 4 or len(code) > 8:
         return _json_response(400, {"error": "invalid_code"})
 
-    # Verify the PIN with Vergent. This is the security boundary that
-    # keeps a stolen session from queueing a fake phone for the admin
-    # to approve later. Mirrors the lowercase-then-uppercase casing
-    # fallback we use for start-verify so both paths work the same
-    # way.
+    # Verify the PIN with Vergent — must use the same TriggerCategory
+    # integer as start-verify (see start_phone_verify for context).
     last4 = phone[-4:] if len(phone) >= 4 else phone
+    trigger_category = os.environ.get("VERGENT_PHONE_VERIFY_TYPE", "1")
     status, _resp, raw = _v1_request(
         "POST",
-        f"/V1/customer/{cid}/communication/sms/validate/{phone}/confirm/{code}",
+        f"/V1/customer/{cid}/communication/{trigger_category}/validate/{phone}/confirm/{code}",
         return_raw=True,
     )
-    log.info("phone validate-confirm type=sms status=%s cid=%s last4=%s body=%s",
-             status, cid, last4, (raw or "")[:400])
-
-    if status == 404:
-        status2, _resp2, raw2 = _v1_request(
-            "POST",
-            f"/V1/customer/{cid}/communication/SMS/validate/{phone}/confirm/{code}",
-            return_raw=True,
-        )
-        log.info("phone validate-confirm type=SMS status=%s cid=%s last4=%s body=%s",
-                 status2, cid, last4, (raw2 or "")[:400])
-        if status2 in (200, 204):
-            status, raw = status2, raw2
+    log.info("phone validate-confirm type=%s status=%s cid=%s last4=%s body=%s",
+             trigger_category, status, cid, last4, (raw or "")[:400])
 
     if status not in (200, 204):
         log.warning("phone validate-confirm failed status=%s cid=%s last4=%s",
