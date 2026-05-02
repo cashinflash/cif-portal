@@ -1117,6 +1117,7 @@ button.dash-doc-download:disabled {
   font-size: .78rem;
   font-weight: 600;
 }
+.profile-row-pending[hidden] { display: none; }
 .profile-row-pending svg { width: 14px; height: 14px; }
 .profile-row-chevron {
   color: #cbd5e1;
