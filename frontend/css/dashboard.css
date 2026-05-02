@@ -2430,6 +2430,7 @@ body.has-sidebar .site-header { display: none; }
   flex-direction: column;
   gap: 8px;
   align-items: flex-start;
+  margin-top: 18px;
 }
 .btn-profile-edit {
   display: inline-flex;
