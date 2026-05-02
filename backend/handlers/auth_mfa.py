@@ -47,6 +47,7 @@ import os
 import secrets
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
@@ -260,6 +261,81 @@ def _get_vergent_phone(customer_id: str) -> Optional[str]:
     raw = (primary or {}).get("number") or ""
     digits = "".join(c for c in raw if c.isdigit())
     return digits if len(digits) >= 10 else None
+
+
+def _find_vergent_customer_id_by_email(email: str) -> Optional[str]:
+    """Search Vergent for a customer with the given email address.
+    Returns the Vergent customer ID (string) or None.
+
+    Used by the login flow as a fallback when Cognito doesn't recognize
+    the email — admin may have just changed the email in Vergent and
+    the customer's Cognito record hasn't been synced yet.
+    """
+    if not email:
+        return None
+    tok = _get_v1_token()
+    if not tok:
+        return None
+    # Vergent v1 GetCustomers supports filtering by email.
+    status, body, _raw = _http(
+        f"{V1_BASE}/V1/GetCustomers?email={urllib.parse.quote(email)}",
+        "GET",
+        headers={"Token": tok},
+    )
+    if status != 200:
+        return None
+    # Response can be a list or a wrapped {Items:[...]} or {Customers:[...]}.
+    items = body if isinstance(body, list) else None
+    if isinstance(body, dict):
+        items = body.get("Items") or body.get("Customers") or body.get("customers")
+    if not isinstance(items, list) or not items:
+        return None
+    first = items[0] if isinstance(items[0], dict) else None
+    if not first:
+        return None
+    cid = first.get("id") or first.get("Id") or first.get("customer_id") or first.get("CustomerId")
+    return str(cid) if cid is not None else None
+
+
+def _find_cognito_user_by_vergent_id(vergent_cid: str) -> Optional[Dict[str, Any]]:
+    """Find the single Cognito user whose custom:vergentCustomerId
+    attribute matches. Returns the same shape as _admin_get_user, or
+    None if no match."""
+    if not vergent_cid:
+        return None
+    try:
+        resp = cognito.list_users(
+            UserPoolId=USER_POOL_ID,
+            Filter=f'"custom:vergentCustomerId" = "{vergent_cid}"',
+            Limit=2,
+        )
+    except ClientError:
+        return None
+    users = resp.get("Users") or []
+    if not users:
+        return None
+    u = users[0]
+    attrs = {a["Name"]: a["Value"] for a in u.get("Attributes", [])}
+    return {"Username": u.get("Username"), "Attrs": attrs, "Status": u.get("UserStatus")}
+
+
+def _admin_set_email(username: str, new_email: str) -> bool:
+    """Update a Cognito user's email attribute and mark verified.
+    Returns True on success."""
+    try:
+        cognito.admin_update_user_attributes(
+            UserPoolId=USER_POOL_ID,
+            Username=username,
+            UserAttributes=[
+                {"Name": "email", "Value": new_email},
+                {"Name": "email_verified", "Value": "true"},
+            ],
+        )
+        return True
+    except ClientError as e:
+        log.warning("admin_update_user_attributes failed code=%s sub=%s",
+                    e.response.get("Error", {}).get("Code", "?"), username)
+        return False
 
 
 # (Vergent SMS helpers removed — Communication/RequestPinByText returned
@@ -489,6 +565,38 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
         return _resp(400, {"error": "missing_credentials"})
 
     tokens, err = _admin_initiate_password_auth(email, password)
+
+    # Email-change instant-sync fallback (Phase H follow-up):
+    # If Cognito doesn't recognize this email but Vergent does, the
+    # customer most likely just had their email updated by an admin
+    # and Cognito hasn't been synced yet. Find their Cognito user by
+    # Vergent customer ID, retry password auth with their current
+    # (old) Cognito email, and on success update Cognito to the new
+    # email so the next login uses it. Then re-authenticate to get
+    # tokens whose JWT email claim matches what they typed.
+    if not tokens and err in ("UserNotFoundException", "NotAuthorizedException"):
+        vergent_cid = _find_vergent_customer_id_by_email(email)
+        if vergent_cid:
+            cognito_user = _find_cognito_user_by_vergent_id(vergent_cid)
+            old_email = (cognito_user or {}).get("Attrs", {}).get("email") or ""
+            if old_email and old_email.lower() != email:
+                retry_tokens, retry_err = _admin_initiate_password_auth(old_email, password)
+                if retry_tokens:
+                    username = cognito_user.get("Username") or ""
+                    if _admin_set_email(username, email):
+                        log.info("login email synced cid=%s old=%s new=%s",
+                                 vergent_cid, _mask_email(old_email), _mask_email(email))
+                        # Re-auth with the new email so the JWT carries
+                        # the correct email claim.
+                        tokens, err = _admin_initiate_password_auth(email, password)
+                        if not tokens:
+                            # Cognito sometimes needs a moment to propagate
+                            # the alias change. Fall back to the retry
+                            # tokens (which work, just with the old email
+                            # claim — the next /api/my-profile call will
+                            # re-sync if needed).
+                            tokens, err = retry_tokens, None
+
     if not tokens:
         log.info("login failed for %s: %s", _mask_email(email), err)
         return _resp(401, {"error": "invalid_credentials"})
