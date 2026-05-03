@@ -1091,43 +1091,60 @@ def _push_email_to_vergent(cid: str, new_email: str) -> Tuple[bool, List[Dict[st
     """Best-effort attempt to update the customer's email in Vergent
     after we've verified the customer owns the new address. Returns
     (ok, attempts) where attempts is a list of dicts describing each
-    shape we tried — used for DDB diagnostic logging so future
-    failures are easy to debug without redeploying.
+    step we ran — used for DDB diagnostic logging so future failures
+    are easy to debug without redeploying.
 
-    The first attempt to return 2xx wins. On all-failure the caller
-    falls back to the existing admin-queue flow.
+    Vergent's PutCustomer endpoint expects the FULL customer record;
+    sending just `{id, EmailAddr}` is rejected with a 400 because
+    other required fields (FirstName, BirthDate, etc.) come back
+    null. So this is a read-modify-write: GET the current record,
+    mutate EmailAddr only, PUT it back.
 
-    Variants tried, in order:
-      1. PUT  /V1/PutCustomer/{id}         body: {id, EmailAddr}
-      2. PUT  /V1/PutCustomerEmail/{id}    body: {EmailAddr}
-      3. POST /V1/PostCustomer             body: {id, EmailAddr}
+    Falls through to the admin-queue path on any error.
     """
     try:
         cid_int = int(cid)
     except (TypeError, ValueError):
         return False, [{"error": "bad_cid", "cid": str(cid)}]
 
-    variants: List[Tuple[str, str, Dict[str, Any]]] = [
-        ("PUT",  f"/V1/PutCustomer/{cid_int}",         {"id": cid_int, "EmailAddr": new_email}),
-        ("PUT",  f"/V1/PutCustomerEmail/{cid_int}",    {"EmailAddr": new_email}),
-        ("POST", "/V1/PostCustomer",                   {"id": cid_int, "EmailAddr": new_email}),
-    ]
-
     attempts: List[Dict[str, Any]] = []
-    for method, path, body in variants:
-        status, _resp, raw = _v1_request(method, path, body=body, return_raw=True)
-        snippet = (raw or "")[:300]
-        attempts.append({
-            "method": method,
-            "path":   path,
-            "status": status,
-            "snippet": snippet,
-        })
-        log.info("vergent push-email try=%s %s status=%s cid=%s body=%s",
-                 method, path, status, cid, snippet)
-        if status in (200, 204):
-            return True, attempts
-    return False, attempts
+
+    # Step 1: read the full current customer record.
+    get_status, current = _v1_get(f"/V1/GetCustomer/{cid_int}")
+    attempts.append({
+        "step": "get",
+        "method": "GET",
+        "path": f"/V1/GetCustomer/{cid_int}",
+        "status": get_status,
+    })
+    if get_status != 200 or not isinstance(current, dict):
+        log.warning("vergent push-email get-customer failed status=%s cid=%s",
+                    get_status, cid)
+        return False, attempts
+
+    # Step 2: mutate just the EmailAddr field; keep every other field
+    # at its current value. Vergent likely also expects EmailAddr to
+    # be lowercase/normalized — we already store the verified value
+    # that way upstream.
+    body = dict(current)
+    body["EmailAddr"] = new_email
+
+    # Step 3: PUT the full record back.
+    put_status, _resp, raw = _v1_request(
+        "PUT", f"/V1/PutCustomer/{cid_int}",
+        body=body, return_raw=True,
+    )
+    snippet = (raw or "")[:300]
+    attempts.append({
+        "step": "put",
+        "method": "PUT",
+        "path": f"/V1/PutCustomer/{cid_int}",
+        "status": put_status,
+        "snippet": snippet,
+    })
+    log.info("vergent push-email put status=%s cid=%s body=%s",
+             put_status, cid, snippet)
+    return put_status in (200, 204), attempts
 
 
 def _send_email_applied_alert(claims: Dict[str, Any], new_email: str) -> None:
