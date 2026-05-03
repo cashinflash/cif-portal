@@ -366,6 +366,15 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     amount_due = _to_number(hdr.get("AmountDue"))
     min_due = _to_number(hdr.get("MinAmountDue"))
 
+    # Entry-trace log for diagnosing the loan-fee issue. Always fires.
+    # Together with the fee probe below, lets us tell whether
+    # _shape_v1_loan ran at all vs whether fees was set successfully.
+    log.info("shape-loan-entry hdr_id=%s loan_amount=%r outstanding=%s "
+             "hdr_keys=%d has_detail=%s",
+             hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id"),
+             hdr.get("LoanAmount"), is_outstanding,
+             len(hdr.keys()), bool(detail))
+
     # "Amount due" on the UI should be what the customer actually owes on
     # the due date — principal + fees. For a payday loan that's AmountDue
     # (total) or PayoffAmount. MinAmountDue can be just the fee portion
