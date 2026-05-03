@@ -1087,32 +1087,47 @@ def start_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
-def _push_email_to_vergent(cid: str, new_email: str) -> Tuple[bool, int, str]:
-    """Best-effort PUT to Vergent's PutCustomerEmail endpoint after we've
-    verified the customer owns the new address. Returns
-    (ok, upstream_status, raw_body_snippet) for logging/diagnostics.
+def _push_email_to_vergent(cid: str, new_email: str) -> Tuple[bool, List[Dict[str, Any]]]:
+    """Best-effort attempt to update the customer's email in Vergent
+    after we've verified the customer owns the new address. Returns
+    (ok, attempts) where attempts is a list of dicts describing each
+    shape we tried — used for DDB diagnostic logging so future
+    failures are easy to debug without redeploying.
 
-    On success the customer's email is live in Vergent immediately; on
-    failure the caller should fall back to the existing admin-queue
-    notification path so an admin can apply the change manually.
+    The first attempt to return 2xx wins. On all-failure the caller
+    falls back to the existing admin-queue flow.
+
+    Variants tried, in order:
+      1. PUT  /V1/PutCustomer/{id}         body: {id, EmailAddr}
+      2. PUT  /V1/PutCustomerEmail/{id}    body: {EmailAddr}
+      3. POST /V1/PostCustomer             body: {id, EmailAddr}
     """
     try:
         cid_int = int(cid)
     except (TypeError, ValueError):
-        return False, 0, "bad_cid"
+        return False, [{"error": "bad_cid", "cid": str(cid)}]
 
-    # Most-likely body shape based on GetCustomer's response field
-    # ("EmailAddr"). If Vergent rejects with a 400 about a missing
-    # parameter we'll see exactly what to swap in CloudWatch.
-    body = {"id": cid_int, "EmailAddr": new_email}
-    status, _resp, raw = _v1_request(
-        "PUT", "/V1/PutCustomerEmail", body=body, return_raw=True,
-    )
-    log.info("vergent put-email status=%s cid=%s body=%s",
-             status, cid, (raw or "")[:300])
-    if status in (200, 204):
-        return True, status, ""
-    return False, status, (raw or "")[:300]
+    variants: List[Tuple[str, str, Dict[str, Any]]] = [
+        ("PUT",  f"/V1/PutCustomer/{cid_int}",         {"id": cid_int, "EmailAddr": new_email}),
+        ("PUT",  f"/V1/PutCustomerEmail/{cid_int}",    {"EmailAddr": new_email}),
+        ("POST", "/V1/PostCustomer",                   {"id": cid_int, "EmailAddr": new_email}),
+    ]
+
+    attempts: List[Dict[str, Any]] = []
+    for method, path, body in variants:
+        status, _resp, raw = _v1_request(method, path, body=body, return_raw=True)
+        snippet = (raw or "")[:300]
+        attempts.append({
+            "method": method,
+            "path":   path,
+            "status": status,
+            "snippet": snippet,
+        })
+        log.info("vergent push-email try=%s %s status=%s cid=%s body=%s",
+                 method, path, status, cid, snippet)
+        if status in (200, 204):
+            return True, attempts
+    return False, attempts
 
 
 def _send_email_applied_alert(claims: Dict[str, Any], new_email: str) -> None:
@@ -1244,14 +1259,18 @@ def confirm_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     current_email = item.get("currentValue", {}).get("S", "") or None
     long_ttl = int(time.time()) + 90 * 24 * 60 * 60  # 90-day audit retention
 
-    pushed_ok, push_status, push_raw = _push_email_to_vergent(str(cid), new_email)
+    pushed_ok, push_attempts = _push_email_to_vergent(str(cid), new_email)
     final_status = "applied_auto" if pushed_ok else "pending"
-    meta = {
+    last_attempt = push_attempts[-1] if push_attempts else {}
+    meta: Dict[str, Any] = {
         "emailVerified": True,
-        "vergentPushStatus": push_status,
+        # Backward-compatible single-attempt fields (last attempt wins).
+        "vergentPushStatus": last_attempt.get("status", 0),
+        # Full audit trail: which paths were tried and what each said.
+        "vergentPushAttempts": push_attempts,
     }
-    if not pushed_ok and push_raw:
-        meta["vergentPushBody"] = push_raw[:200]
+    if not pushed_ok and last_attempt.get("snippet"):
+        meta["vergentPushBody"] = last_attempt["snippet"][:200]
 
     try:
         _dynamo.update_item(
@@ -1287,8 +1306,8 @@ def confirm_email_verify(event: Dict[str, Any]) -> Dict[str, Any]:
 
     # Vergent rejected the push — fall back to the existing admin
     # queue flow so a human can apply it.
-    log.warning("vergent push failed status=%s falling back to admin queue cid=%s",
-                push_status, cid)
+    log.warning("vergent push failed last_status=%s attempts=%d falling back to admin queue cid=%s",
+                last_attempt.get("status", 0), len(push_attempts), cid)
     _send_admin_notification(
         request_id, str(cid), claims, "email",
         current_email, new_email,
