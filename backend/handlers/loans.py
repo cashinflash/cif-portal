@@ -514,6 +514,20 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "numberOfPayments": hdr.get("NumberOfPayments"),
         "autopay": autopay,
         "scheduledPaymentDate": _format_iso(scheduled_date),
+        # TEMPORARY: surface every fee/amount/charge/finance-shaped
+        # header field with its raw value so we can identify the
+        # right field name from DevTools without digging through
+        # CloudWatch. Remove after fee detection is locked.
+        "_debugFeeFields": {
+            k: hdr.get(k) for k in hdr.keys()
+            if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
+                                             "finance", "charge", "principal", "paid", "total"))
+        },
+        "_debugDetailFeeFields": {
+            k: detail.get(k) for k in (detail.keys() if isinstance(detail, dict) else [])
+            if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
+                                             "finance", "charge", "principal", "paid", "total"))
+        },
     }
 
 
