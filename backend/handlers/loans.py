@@ -373,61 +373,88 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     next_due = amount_due if amount_due is not None else (payoff if payoff is not None else min_due)
 
     # Fee amount — Vergent uses different field names across products
-    # and lifecycle stages. Try many variants on both the header and
-    # the detail sub-record. Fall back to peak/payoff/due minus
-    # principal when those values are higher than the principal.
+    # and lifecycle stages. On a PAID-OFF loan, "current" fee fields
+    # (e.g. `Fees`) often return 0 because nothing is currently owing.
+    # We need the ORIGINAL fee amount, so we:
+    #   1. Search "Original*" prefixed fields first.
+    #   2. Search general fee field names but ONLY accept non-zero values
+    #      (a zero from a "current owing fees" field would be misleading).
+    #   3. Fall back to peak/payoff/due minus principal where the math
+    #      gives a positive value.
+    #   4. If we still end up with None or 0 on a real (non-zero) loan,
+    #      log a probe so we can see exactly which keys Vergent returns.
     fees = None
-    HDR_FEE_KEYS = (
-        "OriginalFees", "Fees", "LoanFees", "FeeAmount",
-        "OriginalFeeAmount", "FinanceCharge", "TotalFees",
-        "OriginalFinanceCharge", "OriginalCharges", "OriginalCharge",
+    ORIGINAL_FEE_KEYS = (
+        "OriginalFees", "OriginalFeeAmount", "OriginalFinanceCharge",
+        "OriginalCharges", "OriginalCharge",
+    )
+    OTHER_FEE_KEYS = (
+        "Fees", "LoanFees", "FeeAmount", "FinanceCharge", "TotalFees",
         "TotalFinanceCharge", "FeesTotal", "TotalCharge",
     )
-    for fk in HDR_FEE_KEYS:
-        v = hdr.get(fk)
-        if v is not None:
-            fees = _to_number(v)
-            if fees is not None:
-                break
+
+    def _try_keys(source: Dict[str, Any], keys, accept_zero: bool) -> Optional[float]:
+        for k in keys:
+            v = source.get(k)
+            if v is None:
+                continue
+            n = _to_number(v)
+            if n is None:
+                continue
+            if n == 0 and not accept_zero:
+                continue
+            return n
+        return None
+
+    # Pass 1: Original* fields on hdr, accept zero (an explicit
+    # original-fees=0 means it really was a $0-fee loan).
+    fees = _try_keys(hdr, ORIGINAL_FEE_KEYS, accept_zero=True)
     if fees is None and isinstance(detail, dict):
-        for fk in HDR_FEE_KEYS:
-            v = detail.get(fk)
-            if v is not None:
-                fees = _to_number(v)
-                if fees is not None:
-                    break
+        fees = _try_keys(detail, ORIGINAL_FEE_KEYS, accept_zero=True)
+
+    # Pass 2: general fee names on hdr/detail, IGNORE zero values
+    # (those are usually "currently owing", which is 0 after payoff).
     if fees is None:
-        # MaxAmountDue (peak balance) is principal + total fees for an
-        # untouched payday loan; works for paid-off loans too because
-        # it's the max-ever balance, not the current balance.
+        fees = _try_keys(hdr, OTHER_FEE_KEYS, accept_zero=False)
+    if fees is None and isinstance(detail, dict):
+        fees = _try_keys(detail, OTHER_FEE_KEYS, accept_zero=False)
+
+    # Pass 3: peak balance (MaxAmountDue) minus principal — works for
+    # paid-off loans because it's max-ever, not current.
+    if fees is None:
         max_due = _to_number(hdr.get("MaxAmountDue"))
         if max_due is not None and loan_amount is not None and max_due > loan_amount:
             fees = round(max_due - loan_amount, 2)
+
+    # Pass 4: original/originated total minus principal.
     if fees is None:
-        # OriginalAmount sometimes stores principal + fees on funded loans.
         for ak in ("OriginalAmount", "OriginalLoanAmount", "OriginatedAmount"):
             v = _to_number(hdr.get(ak))
             if v is not None and loan_amount is not None and v > loan_amount:
                 fees = round(v - loan_amount, 2)
                 break
+
+    # Pass 5: payoff/amount-due minus principal — only useful for
+    # outstanding loans (zeros for paid-off, so this is mostly a
+    # backstop).
     if fees is None:
         if payoff is not None and loan_amount is not None and payoff > loan_amount:
             fees = round(payoff - loan_amount, 2)
         elif amount_due is not None and loan_amount is not None and amount_due > loan_amount:
             fees = round(amount_due - loan_amount, 2)
-    if fees is None:
-        # Final fallback: dump candidate-key values to CloudWatch so we
-        # can see what Vergent actually returns for this loan and add
-        # the right key to the search list. Limited to numeric-looking
-        # fields to keep the log small.
+
+    # Probe — fires whenever we ended up empty-handed OR with a 0
+    # on a real (non-zero) loan. Lets us see exactly what Vergent
+    # returns for this loan and lock the search to the right key.
+    if (fees is None or fees == 0) and loan_amount and loan_amount > 0:
         candidate = {
             k: hdr.get(k) for k in hdr.keys()
             if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
                                              "finance", "charge", "principal"))
         }
-        log.info("loan-fees probe hdr_id=%s loan_amount=%s candidate_fields=%s",
+        log.info("loan-fees probe hdr_id=%s loan_amount=%s fees=%s candidate_fields=%s",
                  hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id"),
-                 loan_amount, candidate)
+                 loan_amount, fees, candidate)
 
     # Autopay pill — disabled until we verify which Vergent v1 field
     # actually means "a payment is scheduled right now" for our tenant.
