@@ -372,31 +372,62 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     # in Vergent's model and is NOT what we want to display.
     next_due = amount_due if amount_due is not None else (payoff if payoff is not None else min_due)
 
-    # Fee amount — try several field names Vergent may use, then fall
-    # back to (balance - principal) which is exact for an untouched
-    # payday loan. Becomes inaccurate once partial payments shrink the
-    # balance; we'll lock this to a specific field once the full key
-    # probe below shows us the real one.
+    # Fee amount — Vergent uses different field names across products
+    # and lifecycle stages. Try many variants on both the header and
+    # the detail sub-record. Fall back to peak/payoff/due minus
+    # principal when those values are higher than the principal.
     fees = None
-    for fk in ("OriginalFees", "Fees", "LoanFees", "FeeAmount",
-               "OriginalFeeAmount", "FinanceCharge", "TotalFees"):
+    HDR_FEE_KEYS = (
+        "OriginalFees", "Fees", "LoanFees", "FeeAmount",
+        "OriginalFeeAmount", "FinanceCharge", "TotalFees",
+        "OriginalFinanceCharge", "OriginalCharges", "OriginalCharge",
+        "TotalFinanceCharge", "FeesTotal", "TotalCharge",
+    )
+    for fk in HDR_FEE_KEYS:
         v = hdr.get(fk)
         if v is not None:
             fees = _to_number(v)
             if fees is not None:
                 break
     if fees is None and isinstance(detail, dict):
-        for fk in ("OriginalFees", "Fees", "FeeAmount", "FinanceCharge"):
+        for fk in HDR_FEE_KEYS:
             v = detail.get(fk)
             if v is not None:
                 fees = _to_number(v)
                 if fees is not None:
                     break
     if fees is None:
+        # MaxAmountDue (peak balance) is principal + total fees for an
+        # untouched payday loan; works for paid-off loans too because
+        # it's the max-ever balance, not the current balance.
+        max_due = _to_number(hdr.get("MaxAmountDue"))
+        if max_due is not None and loan_amount is not None and max_due > loan_amount:
+            fees = round(max_due - loan_amount, 2)
+    if fees is None:
+        # OriginalAmount sometimes stores principal + fees on funded loans.
+        for ak in ("OriginalAmount", "OriginalLoanAmount", "OriginatedAmount"):
+            v = _to_number(hdr.get(ak))
+            if v is not None and loan_amount is not None and v > loan_amount:
+                fees = round(v - loan_amount, 2)
+                break
+    if fees is None:
         if payoff is not None and loan_amount is not None and payoff > loan_amount:
             fees = round(payoff - loan_amount, 2)
         elif amount_due is not None and loan_amount is not None and amount_due > loan_amount:
             fees = round(amount_due - loan_amount, 2)
+    if fees is None:
+        # Final fallback: dump candidate-key values to CloudWatch so we
+        # can see what Vergent actually returns for this loan and add
+        # the right key to the search list. Limited to numeric-looking
+        # fields to keep the log small.
+        candidate = {
+            k: hdr.get(k) for k in hdr.keys()
+            if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
+                                             "finance", "charge", "principal"))
+        }
+        log.info("loan-fees probe hdr_id=%s loan_amount=%s candidate_fields=%s",
+                 hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id"),
+                 loan_amount, candidate)
 
     # Autopay pill — disabled until we verify which Vergent v1 field
     # actually means "a payment is scheduled right now" for our tenant.
