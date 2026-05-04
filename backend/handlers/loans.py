@@ -560,53 +560,92 @@ def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
         store_id = loan.get("storeId")
         if not principal or not hdr_id or principal <= 0:
             continue
+
+        # Direct raw v1 call so we can inspect every transaction field
+        # by name (the shaped helper drops fields we haven't named).
+        if _v1_user_id is None:
+            _get_v1_token()
+        uid = _v1_user_id or 0
+        params = urllib.parse.urlencode({
+            "custId": cid,
+            "HdrId": hdr_id,
+            "companyId": VERGENT_COMPANY_ID,
+            "storeId": store_id or 0,
+            "userId": uid,
+        })
         try:
-            history = _fetch_loan_history(cid, hdr_id, store_id, limit=200)
+            status, body = _v1_get(f"/V1/GetCustomerLoanHistory?{params}")
         except Exception as e:
             log.warning("patch-fees history error hdr_id=%s err=%s",
                         hdr_id, type(e).__name__)
             continue
-        if not history:
-            log.info("patch-fees no history hdr_id=%s", hdr_id)
-            # Surface the raw history call diagnostics directly on the
-            # loan record so we can see what's there in DevTools.
-            loan["_patchFeesDebug"] = {"reason": "empty_history"}
+        if status != 200:
+            loan["_patchFeesDebug"] = {"reason": "history_status", "status": status}
             continue
-        credits = 0.0
-        debits = 0.0
-        directions: Dict[str, int] = {}
-        for t in history:
-            d = t.get("direction") or "?"
-            directions[d] = directions.get(d, 0) + 1
-            amt = t.get("amount")
-            if amt is None:
-                continue
-            if d == "credit":
-                credits += float(amt)
-            elif d == "debit":
-                debits += float(amt)
-        log.info("patch-fees history hdr_id=%s count=%d credits=%.2f debits=%.2f directions=%s",
-                 hdr_id, len(history), credits, debits, directions)
-        if credits > principal:
-            loan["fees"] = round(credits - principal, 2)
-            log.info("patched fees from history hdr_id=%s credits=%.2f principal=%.2f fees=%.2f",
-                     hdr_id, credits, principal, loan["fees"])
+        rows: List[Dict[str, Any]] = []
+        if isinstance(body, list):
+            rows = [r for r in body if isinstance(r, dict)]
+        elif isinstance(body, dict):
+            for key in ("Items", "Transactions", "History", "LoanHistory"):
+                v = body.get(key)
+                if isinstance(v, list):
+                    rows = [r for r in v if isinstance(r, dict)]
+                    break
+        if not rows:
+            loan["_patchFeesDebug"] = {"reason": "no_rows"}
+            continue
+
+        # Try to identify the right amount field name by scanning
+        # every numeric-looking value across all rows. The field with
+        # the highest sum that includes positive non-zero values is
+        # almost certainly the dollar-amount column.
+        AMOUNT_KEY_CANDIDATES = (
+            "Amount", "Amt", "TransactionAmount", "TransAmount",
+            "PaymentAmount", "AmountPaid", "TotalAmount", "DollarAmount",
+            "PrincipalAmount", "PrincipalPaid", "FeesPaid",
+        )
+        # Sum each candidate across all "payment-like" rows. We use
+        # the description to identify payments because direction +
+        # is_payment didn't work.
+        candidate_sums: Dict[str, float] = {}
+        for k in AMOUNT_KEY_CANDIDATES:
+            s = 0.0
+            for r in rows:
+                v = _to_number(r.get(k))
+                if v is None:
+                    continue
+                desc = (r.get("TransactionType") or r.get("Description") or "").lower()
+                if "payment" in desc or "paid" in desc:
+                    s += abs(v)
+            if s > 0:
+                candidate_sums[k] = round(s, 2)
+
+        # Best candidate: the one whose payment-row sum is closest to
+        # principal-or-larger. Pick the first that exceeds principal
+        # and is the smallest such value (i.e., the tightest fit).
+        best_key: Optional[str] = None
+        best_sum: Optional[float] = None
+        for k, s in candidate_sums.items():
+            if s > principal:
+                if best_sum is None or s < best_sum:
+                    best_key = k
+                    best_sum = s
+
+        if best_key and best_sum is not None:
+            loan["fees"] = round(best_sum - principal, 2)
+            log.info("patched fees hdr_id=%s key=%s payments=%.2f principal=%.2f fees=%.2f",
+                     hdr_id, best_key, best_sum, principal, loan["fees"])
         else:
-            # Surface diagnostics in the response so we can read them
-            # in DevTools without digging CloudWatch.
+            # Surface raw first row so we can see every field/value
+            # combination available and lock the right key in the
+            # next commit.
+            sample = dict(list(rows[0].items())[:30]) if rows else {}
             loan["_patchFeesDebug"] = {
-                "count": len(history),
-                "credits": credits,
-                "debits": debits,
-                "directions": directions,
+                "rows_count": len(rows),
+                "candidate_sums": candidate_sums,
                 "principal": principal,
-                "first3": [
-                    {"description": t.get("description"),
-                     "amount": t.get("amount"),
-                     "direction": t.get("direction"),
-                     "date": t.get("date")}
-                    for t in history[:3]
-                ],
+                "first_row_raw_keys": list(rows[0].keys()) if rows else [],
+                "first_row_raw_sample": sample,
             }
 
 
