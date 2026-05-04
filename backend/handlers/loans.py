@@ -2092,21 +2092,14 @@ def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
         tx_id = tx.get("Id")
         if not tx_id:
             continue
-        # Filter to payment transactions only — receipts only attach
-        # to credits-from-customer, never to origination/accrual/fee
-        # rows. Use structural signals (IsPayment flag, amount sign)
-        # rather than label matching since Vergent's transaction
-        # labels vary ("Payment", "ACH Payment", "Partial",
-        # "Settlement"...). Skipping non-payment rows cuts Vergent
-        # round trips in half on a typical paid-off loan.
-        is_payment = tx.get("IsPayment")
-        if is_payment is None:
-            amt_raw = (tx.get("Amount") if tx.get("Amount") is not None
-                       else tx.get("TransactionAmount"))
-            amt_num = _to_number(amt_raw)
-            is_payment = amt_num is not None and amt_num < 0
-        if not is_payment:
-            continue
+        # Try every non-void transaction. Vergent's history rows use
+        # positive amounts (Prin/Fee/Total columns rather than signed
+        # totals) and don't reliably expose an IsPayment flag, so any
+        # filter that pre-selects "payment-like" rows ends up skipping
+        # the actual payments. Empty/404 from the per-tx docs endpoint
+        # is normal for accrual / origination rows — we just move on.
+        # With ?loanId scoping on the download path this stays fast
+        # enough; at most one loan's worth of tx calls per click.
         tx_type = str(tx.get("Type")
                       or tx.get("TransactionType")
                       or tx.get("Description") or "")
