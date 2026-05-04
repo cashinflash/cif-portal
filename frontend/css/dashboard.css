@@ -374,7 +374,7 @@
   padding: 26px 0;
   border-top: 1px solid var(--cif-hairline);
   border-bottom: 1px solid var(--cif-hairline);
-  margin-bottom: 48px;
+  margin-bottom: 32px;
 }
 .dash-loan-stat-label {
   font-size: .72rem;
@@ -2875,11 +2875,35 @@ body.has-sidebar .site-header { display: none; }
 }
 .dash-stats-grid[hidden] { display: none; }
 .dash-stat-card {
+  position: relative;
   background: #fff;
   border-radius: 18px;
-  padding: 20px 22px;
+  padding: 22px 24px;
   box-shadow: 0 1px 3px rgba(15,23,42,.04), 0 6px 18px rgba(15,23,42,.05);
   border: 1px solid rgba(15,23,42,.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100%;
+  overflow: hidden;
+}
+/* Member-since accent: soft golden gradient washes from the
+   top-right corner so the card feels warmer / more premium. */
+.dash-stat-card--member {
+  background:
+    radial-gradient(circle at 100% 0%, rgba(217,168,14,.10) 0%, rgba(217,168,14,0) 55%),
+    #fff;
+}
+.dash-stat-card--member::after {
+  content: '';
+  position: absolute;
+  right: -32px;
+  bottom: -32px;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(217,168,14,.08) 0%, rgba(217,168,14,0) 70%);
+  pointer-events: none;
 }
 
 /* Quick actions card — replaces "Total borrowed" stat card.
@@ -3079,7 +3103,7 @@ body.has-sidebar .site-header { display: none; }
     grid-template-columns: 1fr 1fr;
     gap: 18px 20px;
     padding: 22px 0;
-    margin-bottom: 36px;
+    margin-bottom: 24px;
   }
   .dash-loan-amount { font-size: clamp(2.2rem, 9vw, 3rem); }
   .dash-loan-cta-row { flex-direction: column; align-items: stretch; }

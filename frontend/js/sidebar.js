@@ -56,9 +56,49 @@
       links[i].classList.toggle('is-active', href === path);
     }
 
+    // Hide "Request a new loan" sidebar link if the customer already
+    // has an active loan (per CA law, customers can't carry two
+    // concurrent payday loans). Reads sessionStorage cache first to
+    // avoid duplicate API calls on pages that already fetch loan
+    // data; otherwise hits /api/my-loans/active itself.
+    if (token) toggleNewLoanLink(token);
+
     // Footer year
     var year = document.getElementById('footerYear');
     if (year) year.textContent = String(new Date().getFullYear());
+  }
+
+  function setNewLoanLinkVisibility(hasActive) {
+    var newLoanLinks = document.querySelectorAll('.dash-sidebar-link[href="/request-loan.html"]');
+    for (var i = 0; i < newLoanLinks.length; i++) {
+      newLoanLinks[i].style.display = hasActive ? 'none' : '';
+    }
+  }
+
+  function toggleNewLoanLink(token) {
+    // Cache valid for 60s so we don't hammer the API on rapid nav.
+    var cached = sessionStorage.getItem('cif_has_active_loan');
+    var cachedAt = parseInt(sessionStorage.getItem('cif_has_active_loan_at') || '0', 10);
+    var now = Date.now();
+    if (cached !== null && (now - cachedAt) < 60000) {
+      setNewLoanLinkVisibility(cached === 'true');
+      return;
+    }
+    fetch('/api/my-loans/active', {
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json',
+      },
+      credentials: 'omit',
+    }).then(function (r) {
+      if (!r.ok) return null;
+      return r.json();
+    }).then(function (data) {
+      var hasActive = !!(data && data.loan);
+      sessionStorage.setItem('cif_has_active_loan', String(hasActive));
+      sessionStorage.setItem('cif_has_active_loan_at', String(Date.now()));
+      setNewLoanLinkVisibility(hasActive);
+    }).catch(function () { /* silent — leave link as-is on network error */ });
   }
 
   if (document.readyState === 'loading') {

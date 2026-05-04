@@ -304,6 +304,19 @@
     const allLoans = (data && data.allLoans) || [];
     const hasActive = !!(data && data.loan);
 
+    // Cache active-loan status for sidebar.js to read without
+    // duplicating the API call. Used to hide the "Request a new
+    // loan" sidebar link when there's already one outstanding.
+    try {
+      sessionStorage.setItem('cif_has_active_loan', String(hasActive));
+      sessionStorage.setItem('cif_has_active_loan_at', String(Date.now()));
+      // Also hide the link on this page right away.
+      var newLoanLinks = document.querySelectorAll('.dash-sidebar-link[href="/request-loan.html"]');
+      for (var i = 0; i < newLoanLinks.length; i++) {
+        newLoanLinks[i].style.display = hasActive ? 'none' : '';
+      }
+    } catch (e) { /* sessionStorage disabled — fall back to sidebar.js fetch */ }
+
     // Branch: active loan → show the loan card; otherwise → show
     // the "Up to $X if approved" hero. Never both.
     if (hasActive) {
@@ -353,12 +366,23 @@
       }
     });
     if (sinceEl) {
-      sinceEl.textContent = earliest ? String(earliest.getFullYear()) : '—';
+      if (earliest) {
+        // "April 2026" — month name + year reads richer than year alone.
+        sinceEl.textContent = earliest.toLocaleDateString('en-US', {
+          month: 'long', year: 'numeric',
+        });
+      } else {
+        sinceEl.textContent = '—';
+      }
     }
     if (sinceMeta) {
-      sinceMeta.textContent = count > 1
-        ? 'Returning customer ✓'
-        : (count === 1 ? 'Welcome aboard' : '');
+      if (count > 1) {
+        sinceMeta.textContent = count + ' loans · returning customer';
+      } else if (count === 1) {
+        sinceMeta.textContent = '1 loan · welcome back';
+      } else {
+        sinceMeta.textContent = '';
+      }
     }
   }
 
