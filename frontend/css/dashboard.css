@@ -369,13 +369,12 @@
 }
 .dash-loan-stats {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 22px 28px;
-  padding: 24px 26px;
-  background: linear-gradient(180deg, #f9fafb 0%, #f4f6f9 100%);
-  border-radius: 16px;
-  border: 1px solid var(--cif-hairline);
-  margin: 8px 0 28px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px 28px;
+  padding: 26px 0;
+  border-top: 1px solid var(--cif-hairline);
+  border-bottom: 1px solid var(--cif-hairline);
+  margin-bottom: 48px;
 }
 .dash-loan-stat-label {
   font-size: .72rem;
@@ -386,19 +385,18 @@
   margin-bottom: 6px;
 }
 .dash-loan-stat-value {
-  font-size: 1.3rem;
+  font-size: 1.25rem;
   font-weight: 800;
   letter-spacing: -.01em;
   color: var(--cif-navy);
   font-variant-numeric: tabular-nums;
-  line-height: 1.15;
 }
 .dash-loan-cta-row {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
-  padding-top: 6px;
+  padding-top: 8px;
 }
 .dash-loan-cta-row .btn-apply,
 .dash-loan-cta-row .btn-login {
@@ -3006,16 +3004,15 @@ body.has-sidebar .site-header { display: none; }
   .dash-stat-card { padding: 18px 18px; }
   .dash-recent-activity-row { padding: 14px 18px; gap: 12px; }
 
-  /* Active-loan card on mobile: tighter padding, stacked stats */
+  /* Active-loan card on mobile: tighter padding, 2x2 stats */
   .dash-loan-header { padding: 18px 20px 0; }
   .dash-loan-body-content { padding: 16px 20px 22px; }
   .dash-loan-stats {
     grid-template-columns: 1fr 1fr;
     gap: 18px 20px;
-    padding: 18px 18px;
-    margin: 6px 0 22px;
+    padding: 22px 0;
+    margin-bottom: 36px;
   }
-  .dash-loan-stat-value { font-size: 1.15rem; }
   .dash-loan-amount { font-size: clamp(2.2rem, 9vw, 3rem); }
   .dash-loan-cta-row { flex-direction: column; align-items: stretch; }
   .dash-loan-cta-row .btn-apply,

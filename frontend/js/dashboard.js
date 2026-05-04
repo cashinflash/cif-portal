@@ -501,7 +501,7 @@
     const captionEl = qs('[data-loan-caption]', card);
     if (captionEl) {
       if (loan.nextDueDate && loan.nextDueAmount) {
-        captionEl.textContent = 'Next payment of ' + formatCurrencyPrecise(loan.nextDueAmount) +
+        captionEl.textContent = 'Payment of ' + formatCurrencyPrecise(loan.nextDueAmount) +
                                 ' is due ' + formatDate(loan.nextDueDate) + '.';
       } else {
         captionEl.textContent = 'Current balance remaining on your loan.';
