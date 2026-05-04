@@ -2049,14 +2049,19 @@ def _extract_doc_rows(status: int, body: Any) -> List[Dict[str, Any]]:
 
 def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
                                  include_data: bool,
-                                 seen: set) -> List[Dict[str, Any]]:
+                                 seen: set,
+                                 target_doc_id: Optional[str] = None
+                                 ) -> List[Dict[str, Any]]:
     """For each Payment-type transaction on this loan, fetch its
     attached receipt document via
     /V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}.
 
     Walks GetCustomerLoanHistory once, then makes one extra docs
-    call per Payment transaction. Typical payday loan has 1-3
-    payments so this stays small.
+    call per non-void transaction.
+
+    `target_doc_id` short-circuits the walk: as soon as the matching
+    receipt is shaped, the function returns. Cuts download latency
+    when the customer clicked an early-positioned receipt.
     """
     if loan_id in (None, ""):
         return []
@@ -2126,22 +2131,27 @@ def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
                 )
             seen.add(shaped["id"])
             out.append(shaped)
+            if target_doc_id is not None and shaped["id"] == target_doc_id:
+                return out
     return out
 
 
 def _list_v1_loan_docs(cid: str, loan_id: Any,
                        include_data: bool = False,
-                       loan_origin_iso: Optional[str] = None) -> List[Dict[str, Any]]:
+                       loan_origin_iso: Optional[str] = None,
+                       target_doc_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """List signed documents attached to a specific loan via Vergent v1.
 
-    Two sources:
+    Three sources, walked in order:
       1. Origination docs (Advance Contract, DDT Disclosure,
          Advance Receipt) via /V1/customer/{cid}/docs/loan/{hdr}.
-      2. Per-payment receipts via
+      2. Auto-generated extras (payoff receipt, etc.) via
+         /V1/customer/{cid}/docs/loan/{hdr}/OtherFiles.
+      3. Per-payment receipts via
          /V1/customer/{cid}/docs/loan/{hdr}/trans/{txId} for each
          non-void transaction on the loan.
 
-    Two cross-loan safeguards on origination rows:
+    Two cross-loan safeguards on origination + OtherFiles rows:
       - Drop records whose own HdrId disagrees with the requested
         loan id.
       - Drop records dated >7 days before the requested loan's
@@ -2152,6 +2162,11 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
 
     Receipts are fetched per-tx using ids read from this loan's own
     history, so they don't need date filtering.
+
+    `target_doc_id` short-circuits the walk: as soon as the matching
+    doc has been shaped into `out`, the function returns. Used by
+    the download path so a single click only pays for the calls
+    needed to reach the requested doc, not the full listing.
 
     With include_data=True, each shaped doc carries its raw Data +
     DocumentUrl for the download path to use.
@@ -2168,6 +2183,10 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
 
     out: List[Dict[str, Any]] = []
     seen: set = set()
+    target_str = str(target_doc_id) if target_doc_id is not None else None
+
+    def _matched() -> bool:
+        return target_str is not None and target_str in seen
 
     # 1. Origination docs
     path = f"/V1/customer/{cid}/docs/loan/{loan_id}"
@@ -2210,6 +2229,8 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
             continue
         seen.add(shaped["id"])
         out.append(shaped)
+        if _matched():
+            return out
 
     # 2. OtherFiles — Vergent's "additional files for a loan" bucket.
     # Payoff receipts and any post-origination docs Vergent
@@ -2247,12 +2268,15 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
             continue
         seen.add(shaped["id"])
         out.append(shaped)
+        if _matched():
+            return out
 
     # 3. Per-payment receipts (one extra Vergent call per payment tx)
     try:
         receipts = _fetch_payment_receipt_docs(cid, loan_id,
                                                 include_data=include_data,
-                                                seen=seen)
+                                                seen=seen,
+                                                target_doc_id=target_str)
         out.extend(receipts)
     except Exception as e:
         log.warning("loan-receipts unexpected loan=%s err=%s",
@@ -2418,6 +2442,7 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
         docs = _list_v1_loan_docs(
             cid, loan.get("id"), include_data=True,
             loan_origin_iso=loan.get("loanDate") or loan.get("originationDate"),
+            target_doc_id=str(doc_id),
         )
         for d in docs:
             if str(d.get("id")) == str(doc_id):
