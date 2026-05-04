@@ -55,6 +55,7 @@ import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -2047,75 +2048,53 @@ def _extract_doc_rows(status: int, body: Any) -> List[Dict[str, Any]]:
     return []
 
 
-def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
-                                 include_data: bool,
-                                 seen: set,
-                                 target_doc_id: Optional[str] = None
-                                 ) -> List[Dict[str, Any]]:
-    """For each Payment-type transaction on this loan, fetch its
-    attached receipt document via
-    /V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}.
-
-    Walks GetCustomerLoanHistory once, then makes one extra docs
-    call per non-void transaction.
-
-    `target_doc_id` short-circuits the walk: as soon as the matching
-    receipt is shaped, the function returns. Cuts download latency
-    when the customer clicked an early-positioned receipt.
-    """
-    if loan_id in (None, ""):
-        return []
-    if _v1_user_id is None:
-        _get_v1_token()
+def _history_params(cid: str, loan_id: Any) -> str:
+    """Build the GetCustomerLoanHistory query string. Token must
+    already be loaded so _v1_user_id is set."""
     uid = _v1_user_id or 0
-    params = urllib.parse.urlencode({
+    return urllib.parse.urlencode({
         "custId": cid,
         "HdrId": loan_id,
         "companyId": VERGENT_COMPANY_ID,
         "storeId": 0,
         "userId": uid,
     })
-    status, body = _v1_get(f"/V1/GetCustomerLoanHistory?{params}")
-    if status != 200:
-        log.info("loan-receipts history-status=%s loan=%s", status, loan_id)
-        return []
 
-    tx_rows: List[Dict[str, Any]] = []
+
+def _extract_history_rows(status: int, body: Any) -> List[Dict[str, Any]]:
+    """Pull tx records out of a Vergent GetCustomerLoanHistory
+    response, accepting both bare-list and wrapped shapes."""
+    if status != 200:
+        return []
     if isinstance(body, list):
-        tx_rows = [r for r in body if isinstance(r, dict)]
-    elif isinstance(body, dict):
+        return [r for r in body if isinstance(r, dict)]
+    if isinstance(body, dict):
         for key in ("Items", "Transactions", "History", "LoanHistory"):
             v = body.get(key)
             if isinstance(v, list):
-                tx_rows = [r for r in v if isinstance(r, dict)]
-                break
+                return [r for r in v if isinstance(r, dict)]
+    return []
 
+
+def _shape_payment_receipts(loan_id: Any,
+                            include_data: bool,
+                            seen: set,
+                            tx_results: List[Tuple[Dict[str, Any], Tuple[int, Any]]]
+                            ) -> List[Dict[str, Any]]:
+    """Convert raw per-tx Vergent doc responses into shaped receipt
+    docs. Pure transformation — no I/O. Caller already fanned out
+    the HTTP requests in parallel and collected the responses."""
     out: List[Dict[str, Any]] = []
-    for tx in tx_rows:
-        if tx.get("IsVoid"):
+    for tx, (tx_status, tx_body) in tx_results:
+        receipt_rows = _extract_doc_rows(tx_status, tx_body)
+        if not receipt_rows:
             continue
         tx_id = tx.get("Id")
-        if not tx_id:
-            continue
-        # Try every non-void transaction. Vergent's history rows use
-        # positive amounts (Prin/Fee/Total columns rather than signed
-        # totals) and don't reliably expose an IsPayment flag, so any
-        # filter that pre-selects "payment-like" rows ends up skipping
-        # the actual payments. Empty/404 from the per-tx docs endpoint
-        # is normal for accrual / origination rows — we just move on.
-        # With ?loanId scoping on the download path this stays fast
-        # enough; at most one loan's worth of tx calls per click.
         tx_type = str(tx.get("Type")
                       or tx.get("TransactionType")
                       or tx.get("Description") or "")
-
-        tx_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}"
-        tx_status, tx_body = _v1_get(tx_path)
-        receipt_rows = _extract_doc_rows(tx_status, tx_body)
-        if receipt_rows:
-            log.info("loan-receipts loan=%s tx=%s type=%s status=%s rows=%d",
-                     loan_id, tx_id, tx_type, tx_status, len(receipt_rows))
-
+        log.info("loan-receipts loan=%s tx=%s type=%s status=%s rows=%d",
+                 loan_id, tx_id, tx_type, tx_status, len(receipt_rows))
         for r in receipt_rows:
             shaped = _shape_v1_document(r, loan_id, "transaction",
                                          include_data=include_data)
@@ -2131,48 +2110,84 @@ def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
                 )
             seen.add(shaped["id"])
             out.append(shaped)
-            if target_doc_id is not None and shaped["id"] == target_doc_id:
-                return out
     return out
+
+
+def _filter_doc_row(r: Dict[str, Any], loan_id: Any,
+                    cutoff: Optional[datetime],
+                    bucket_label: str) -> bool:
+    """Apply the cross-loan safeguards to one Vergent doc row.
+    Returns True when the row should be kept, False when it should
+    be dropped. Logs the reason on each drop so we can see leaks
+    in CloudWatch."""
+    record_hdr = r.get("HdrId") or r.get("hdr_id")
+    if record_hdr not in (None, "") and str(record_hdr) != str(loan_id):
+        log.warning("loan-docs %s hdr_mismatch requested=%s record=%s name=%s",
+                    bucket_label, loan_id, record_hdr, r.get("DocumentName"))
+        return False
+    if cutoff is not None:
+        doc_date_raw = (
+            r.get("DocumentDate") or r.get("documentDate")
+            or r.get("Date") or r.get("date")
+            or r.get("CreatedDate") or r.get("createdDate")
+        )
+        if doc_date_raw:
+            try:
+                doc_dt = datetime.fromisoformat(str(doc_date_raw)[:10])
+                if doc_dt < cutoff:
+                    log.warning("loan-docs %s date_too_old loan=%s name=%s "
+                                "doc_date=%s",
+                                bucket_label, loan_id,
+                                r.get("DocumentName"), doc_date_raw)
+                    return False
+            except (ValueError, TypeError):
+                pass  # un-parseable → keep, defensive
+    return True
 
 
 def _list_v1_loan_docs(cid: str, loan_id: Any,
                        include_data: bool = False,
-                       loan_origin_iso: Optional[str] = None,
-                       target_doc_id: Optional[str] = None) -> List[Dict[str, Any]]:
+                       loan_origin_iso: Optional[str] = None
+                       ) -> List[Dict[str, Any]]:
     """List signed documents attached to a specific loan via Vergent v1.
 
-    Three sources, walked in order:
+    Three sources, all fetched in parallel via a ThreadPoolExecutor:
       1. Origination docs (Advance Contract, DDT Disclosure,
          Advance Receipt) via /V1/customer/{cid}/docs/loan/{hdr}.
       2. Auto-generated extras (payoff receipt, etc.) via
          /V1/customer/{cid}/docs/loan/{hdr}/OtherFiles.
       3. Per-payment receipts via
          /V1/customer/{cid}/docs/loan/{hdr}/trans/{txId} for each
-         non-void transaction on the loan.
+         non-void transaction on the loan. Discovered by issuing
+         GetCustomerLoanHistory in parallel with #1 and #2, then
+         fanning out one fetch per tx as soon as the history
+         response arrives.
 
     Two cross-loan safeguards on origination + OtherFiles rows:
       - Drop records whose own HdrId disagrees with the requested
         loan id.
-      - Drop records dated >7 days before the requested loan's
-        own origination date (Vergent's `/docs/loan/{hdr}` endpoint
-        returns rows for the entire chain on active loans, and the
-        HdrId on those leaked rows is sometimes the chain id rather
-        than a previous-loan id — date is the more reliable signal).
+      - Drop records dated >7 days before the requested loan's own
+        origination date (Vergent's /docs/loan/{hdr} endpoint
+        returns rows for the entire chain on active loans, and
+        HdrId on those leaked rows is sometimes the chain id
+        rather than a previous-loan id — date is the more reliable
+        signal).
 
-    Receipts are fetched per-tx using ids read from this loan's own
+    Receipts are fetched per-tx using ids from this loan's own
     history, so they don't need date filtering.
-
-    `target_doc_id` short-circuits the walk: as soon as the matching
-    doc has been shaped into `out`, the function returns. Used by
-    the download path so a single click only pays for the calls
-    needed to reach the requested doc, not the full listing.
 
     With include_data=True, each shaped doc carries its raw Data +
     DocumentUrl for the download path to use.
     """
     if loan_id in (None, ""):
         return []
+
+    # Pre-fetch the service token before fanning out: _get_v1_token
+    # mutates module-level globals (token, exp, user_id) and isn't
+    # locked. Doing the fetch synchronously here keeps the parallel
+    # workers on a settled cache. On warm Lambda this is a no-op.
+    if _v1_token is None or _v1_user_id is None:
+        _get_v1_token()
 
     cutoff: Optional[datetime] = None
     if loan_origin_iso:
@@ -2181,114 +2196,83 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
         except (ValueError, TypeError):
             cutoff = None
 
+    orig_path = f"/V1/customer/{cid}/docs/loan/{loan_id}"
+    other_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/OtherFiles"
+    history_path = f"/V1/GetCustomerLoanHistory?{_history_params(cid, loan_id)}"
+
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        # Tier 1: three independent listing calls fire in parallel.
+        f_orig = ex.submit(_v1_get, orig_path)
+        f_other = ex.submit(_v1_get, other_path)
+        f_history = ex.submit(_v1_get, history_path)
+
+        orig_status, orig_body = f_orig.result()
+        other_status, other_body = f_other.result()
+        hist_status, hist_body = f_history.result()
+
+        # Tier 2: as soon as we have the tx list, fan out one
+        # receipt fetch per non-void transaction.
+        tx_rows = _extract_history_rows(hist_status, hist_body)
+        tx_futures: List[Tuple[Dict[str, Any], Any]] = []
+        for tx in tx_rows:
+            if tx.get("IsVoid"):
+                continue
+            tx_id = tx.get("Id")
+            if not tx_id:
+                continue
+            tx_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}"
+            tx_futures.append((tx, ex.submit(_v1_get, tx_path)))
+
+        tx_results = [(tx, fut.result()) for tx, fut in tx_futures]
+
+    # All HTTP done; everything below is pure CPU.
+
     out: List[Dict[str, Any]] = []
     seen: set = set()
-    target_str = str(target_doc_id) if target_doc_id is not None else None
-
-    def _matched() -> bool:
-        return target_str is not None and target_str in seen
 
     # 1. Origination docs
-    path = f"/V1/customer/{cid}/docs/loan/{loan_id}"
-    status, body = _v1_get(path)
-    rows = _extract_doc_rows(status, body)
+    orig_rows = _extract_doc_rows(orig_status, orig_body)
     log.info("loan-docs origination loan=%s status=%s rows=%d names=%s",
-             loan_id, status, len(rows),
-             [str(r.get("DocumentName") or "")[:40] for r in rows[:6]])
-
-    for r in rows:
-        # Defensive filter: drop records whose own HdrId doesn't
-        # match the requested loan. Protects against Vergent
-        # returning the wrong loan's documents.
-        record_hdr = r.get("HdrId") or r.get("hdr_id")
-        if record_hdr not in (None, "") and str(record_hdr) != str(loan_id):
-            log.warning("loan-docs hdr_mismatch requested=%s record=%s name=%s",
-                        loan_id, record_hdr, r.get("DocumentName"))
+             loan_id, orig_status, len(orig_rows),
+             [str(r.get("DocumentName") or "")[:40] for r in orig_rows[:6]])
+    for r in orig_rows:
+        if not _filter_doc_row(r, loan_id, cutoff, "origination"):
             continue
-        # Date filter: drop docs older than this loan's own origination
-        # window. Catches cross-chain leakage when HdrId-mismatch doesn't.
-        if cutoff is not None:
-            doc_date_raw = (
-                r.get("DocumentDate") or r.get("documentDate")
-                or r.get("Date") or r.get("date")
-                or r.get("CreatedDate") or r.get("createdDate")
-            )
-            if doc_date_raw:
-                try:
-                    doc_dt = datetime.fromisoformat(str(doc_date_raw)[:10])
-                    if doc_dt < cutoff:
-                        log.warning("loan-docs date_too_old loan=%s name=%s "
-                                    "doc_date=%s loan_date=%s",
-                                    loan_id, r.get("DocumentName"),
-                                    doc_date_raw, loan_origin_iso)
-                        continue
-                except (ValueError, TypeError):
-                    pass  # un-parseable date → keep, defensive
         shaped = _shape_v1_document(r, loan_id, "loan", include_data=include_data)
         if not shaped or shaped["id"] in seen:
             continue
         seen.add(shaped["id"])
         out.append(shaped)
-        if _matched():
-            return out
 
-    # 2. OtherFiles — Vergent's "additional files for a loan" bucket.
-    # Payoff receipts and any post-origination docs Vergent
-    # auto-generates land here. Same HdrId + date filters apply so
-    # cross-loan rows can't sneak in. Empty list / 404 is normal for
-    # loans with no extras yet (e.g. an active loan pre-payoff).
-    other_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/OtherFiles"
-    other_status, other_body = _v1_get(other_path)
+    # 2. OtherFiles
     other_rows = _extract_doc_rows(other_status, other_body)
     if other_rows:
         log.info("loan-docs other-files loan=%s status=%s rows=%d names=%s",
                  loan_id, other_status, len(other_rows),
                  [str(r.get("DocumentName") or "")[:40] for r in other_rows[:6]])
     for r in other_rows:
-        record_hdr = r.get("HdrId") or r.get("hdr_id")
-        if record_hdr not in (None, "") and str(record_hdr) != str(loan_id):
-            log.warning("loan-docs other-files hdr_mismatch requested=%s record=%s name=%s",
-                        loan_id, record_hdr, r.get("DocumentName"))
+        if not _filter_doc_row(r, loan_id, cutoff, "other-files"):
             continue
-        if cutoff is not None:
-            doc_date_raw = (
-                r.get("DocumentDate") or r.get("documentDate")
-                or r.get("Date") or r.get("date")
-                or r.get("CreatedDate") or r.get("createdDate")
-            )
-            if doc_date_raw:
-                try:
-                    doc_dt = datetime.fromisoformat(str(doc_date_raw)[:10])
-                    if doc_dt < cutoff:
-                        continue
-                except (ValueError, TypeError):
-                    pass
         shaped = _shape_v1_document(r, loan_id, "loan", include_data=include_data)
         if not shaped or shaped["id"] in seen:
             continue
         seen.add(shaped["id"])
         out.append(shaped)
-        if _matched():
-            return out
 
-    # 3. Per-payment receipts (one extra Vergent call per payment tx)
+    # 3. Per-tx payment receipts (already fetched in parallel above)
     try:
-        receipts = _fetch_payment_receipt_docs(cid, loan_id,
-                                                include_data=include_data,
-                                                seen=seen,
-                                                target_doc_id=target_str)
+        receipts = _shape_payment_receipts(loan_id, include_data, seen, tx_results)
         out.extend(receipts)
     except Exception as e:
         log.warning("loan-receipts unexpected loan=%s err=%s",
                     loan_id, type(e).__name__)
 
-    if status not in (200, 404):
-        log.warning("v1 loan-docs %s status=%s loan=%s", path, status, loan_id)
+    if orig_status not in (200, 404):
+        log.warning("v1 loan-docs %s status=%s loan=%s",
+                    orig_path, orig_status, loan_id)
 
     # Newest first.
-    def _key(item: Dict[str, Any]) -> str:
-        return str(item.get("documentDate") or "")
-    out.sort(key=_key, reverse=True)
+    out.sort(key=lambda item: str(item.get("documentDate") or ""), reverse=True)
     return out
 
 
@@ -2442,7 +2426,6 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
         docs = _list_v1_loan_docs(
             cid, loan.get("id"), include_data=True,
             loan_origin_iso=loan.get("loanDate") or loan.get("originationDate"),
-            target_doc_id=str(doc_id),
         )
         for d in docs:
             if str(d.get("id")) == str(doc_id):
