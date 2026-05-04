@@ -249,7 +249,18 @@
           return;
         }
         renderDetail(loan);
-        loadDocuments(loan.id);
+        // Documents only render for paid-off loans. Active loans
+        // don't yet have a final document set (the Advance Receipt
+        // is generated at payoff) and the docs endpoint has been
+        // observed returning a previous loan's documents in some
+        // cases — hide the section entirely until that's resolved.
+        var docsSection = qs('#loanDocumentsSection');
+        if (loan.isOutstanding) {
+          if (docsSection) docsSection.style.display = 'none';
+        } else {
+          if (docsSection) docsSection.style.display = '';
+          loadDocuments(loan.id);
+        }
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
@@ -275,29 +286,25 @@
       pill.textContent = statusPillText(loan);
     }
 
-    var summary;
-    if (loan.isOutstanding) {
-      summary = [
-        ['Status', loan.status || 'Current'],
-        ['Amount Borrowed', fmtCurrency(loan.principal)],
-        ['Current Balance', fmtCurrency(loan.balance)],
-        ['Payoff Amount', fmtCurrency(loan.payoffAmount)],
-        ['Next Payment', loan.nextDueDate
-          ? fmtCurrency(loan.nextDueAmount) + ' on ' + fmtDate(loan.nextDueDate)
-          : '—'],
-        ['Payment Status', loan.daysLate || '—']
-      ];
-    } else {
-      var principal = Number(loan.principal) || 0;
-      var fees = Number(loan.fees) || 0;
-      summary = [
-        ['Status', loan.status || 'Closed'],
-        ['Amount Borrowed', fmtCurrency(loan.principal)],
-        ['Fee', fmtCurrency(loan.fees)],
-        ['Total Paid', fmtCurrency(principal + fees)],
-        ['Payment Status', loan.daysLate || '—']
-      ];
-    }
+    // Unified Summary for both active and paid-off loans:
+    // Status / Amount Borrowed / Fee / Total Paid / Payment Status.
+    // Total Paid is always (principal + fees) - current_balance,
+    // which:
+    //   - Equals (principal + fees) for a paid-off loan (balance = 0).
+    //   - Equals 0 (or partial) for an active loan with payments
+    //     not yet made (balance still high).
+    var principal = Number(loan.principal) || 0;
+    var fees = Number(loan.fees) || 0;
+    var balance = Number(loan.balance) || 0;
+    var totalDue = principal + fees;
+    var totalPaid = Math.max(0, totalDue - balance);
+    var summary = [
+      ['Status', loan.status || (loan.isOutstanding ? 'Current' : 'Closed')],
+      ['Amount Borrowed', fmtCurrency(principal)],
+      ['Fee', fmtCurrency(fees)],
+      ['Total Paid', fmtCurrency(totalPaid)],
+      ['Payment Status', loan.daysLate || '—'],
+    ];
     renderStats(qs('#loanStatsSummary'), summary);
   }
 
