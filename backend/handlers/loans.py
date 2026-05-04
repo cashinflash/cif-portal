@@ -465,6 +465,40 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
                  hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id"),
                  loan_amount, fees, candidate)
 
+    # Fallback: the loan-list endpoint does NOT return originated fees
+    # on paid-off loans. Call /V1/loan/{HdrId} (documented as
+    # "Returns the Loan Balances from eCash") which is loan-record-
+    # complete and includes fee fields the list endpoint omits.
+    loan_balance_debug: Dict[str, Any] = {}
+    hdr_id_for_call = hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id")
+    if (fees is None or fees == 0) and hdr_id_for_call:
+        try:
+            bal_status, bal_body = _v1_get(f"/V1/loan/{hdr_id_for_call}")
+            if bal_status == 200 and isinstance(bal_body, dict):
+                # Try the same key search against this response.
+                bal_fees = _try_keys(bal_body, ORIGINAL_FEE_KEYS, accept_zero=True)
+                if bal_fees is None:
+                    bal_fees = _try_keys(bal_body, OTHER_FEE_KEYS, accept_zero=False)
+                if bal_fees is not None and bal_fees != 0:
+                    fees = bal_fees
+                # Surface candidate fields from this response too so
+                # we can see what's there in DevTools.
+                loan_balance_debug = {
+                    k: bal_body.get(k) for k in bal_body.keys()
+                    if any(s in k.lower() for s in ("fee", "amount", "due",
+                                                     "payoff", "finance",
+                                                     "charge", "principal",
+                                                     "paid", "total"))
+                }
+                log.info("loan-balance probe hdr_id=%s status=%s fees_after=%s candidate=%s",
+                         hdr_id_for_call, bal_status, fees, loan_balance_debug)
+            else:
+                log.info("loan-balance probe hdr_id=%s status=%s body_type=%s",
+                         hdr_id_for_call, bal_status, type(bal_body).__name__)
+        except Exception as e:
+            log.warning("loan-balance probe error hdr_id=%s err=%s",
+                        hdr_id_for_call, type(e).__name__)
+
     # Autopay pill — disabled until we verify which Vergent v1 field
     # actually means "a payment is scheduled right now" for our tenant.
     # The IsACHOrCardPaymentScheduled flag and the various date fields
@@ -528,6 +562,7 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
             if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
                                              "finance", "charge", "principal", "paid", "total"))
         },
+        "_debugLoanBalances": loan_balance_debug,
     }
 
 
