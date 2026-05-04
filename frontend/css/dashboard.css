@@ -4,12 +4,11 @@
    renders correctly even if portal.css drifts.
    ═══════════════════════════════════════ */
 
-/* ---------- SELF-HOSTED POPPINS (mirrors cif-website) ---------- */
-@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/poppins-400.woff2') format('woff2'); }
-@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/poppins-500.woff2') format('woff2'); }
-@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 600; font-display: swap; src: url('/fonts/poppins-600.woff2') format('woff2'); }
-@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/poppins-700.woff2') format('woff2'); }
-@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 800; font-display: swap; src: url('/fonts/poppins-800.woff2') format('woff2'); }
+/* ---------- FONT ---------- */
+/* Inter is loaded via Google Fonts <link> in each signed-in HTML page.
+   Poppins woff2 files in /fonts/ are kept on disk as a quick rollback
+   path — to revert, restore the @font-face block and flip the body
+   font-family below back to 'Poppins'. */
 
 /* ---------- TOKENS ---------- */
 :root {
@@ -39,7 +38,8 @@
 .dashboard-page *, .dashboard-page *::before, .dashboard-page *::after { box-sizing: border-box; }
 .dashboard-page {
   margin: 0;
-  font-family: 'Poppins', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, 'SF Pro Text', 'Segoe UI', Roboto, Arial, sans-serif;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';  /* Inter's modern stylistic sets — refined 'a', 'g', '6/9' */
   color: var(--cif-ink);
   background: var(--cif-bg);
   line-height: 1.55;
