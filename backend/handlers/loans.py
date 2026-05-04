@@ -567,19 +567,47 @@ def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
                         hdr_id, type(e).__name__)
             continue
         if not history:
+            log.info("patch-fees no history hdr_id=%s", hdr_id)
+            # Surface the raw history call diagnostics directly on the
+            # loan record so we can see what's there in DevTools.
+            loan["_patchFeesDebug"] = {"reason": "empty_history"}
             continue
-        total_paid = 0.0
+        credits = 0.0
+        debits = 0.0
+        directions: Dict[str, int] = {}
         for t in history:
-            if t.get("direction") != "credit":
-                continue
+            d = t.get("direction") or "?"
+            directions[d] = directions.get(d, 0) + 1
             amt = t.get("amount")
             if amt is None:
                 continue
-            total_paid += float(amt)
-        if total_paid > principal:
-            loan["fees"] = round(total_paid - principal, 2)
-            log.info("patched fees from history hdr_id=%s total_paid=%.2f principal=%.2f fees=%.2f",
-                     hdr_id, total_paid, principal, loan["fees"])
+            if d == "credit":
+                credits += float(amt)
+            elif d == "debit":
+                debits += float(amt)
+        log.info("patch-fees history hdr_id=%s count=%d credits=%.2f debits=%.2f directions=%s",
+                 hdr_id, len(history), credits, debits, directions)
+        if credits > principal:
+            loan["fees"] = round(credits - principal, 2)
+            log.info("patched fees from history hdr_id=%s credits=%.2f principal=%.2f fees=%.2f",
+                     hdr_id, credits, principal, loan["fees"])
+        else:
+            # Surface diagnostics in the response so we can read them
+            # in DevTools without digging CloudWatch.
+            loan["_patchFeesDebug"] = {
+                "count": len(history),
+                "credits": credits,
+                "debits": debits,
+                "directions": directions,
+                "principal": principal,
+                "first3": [
+                    {"description": t.get("description"),
+                     "amount": t.get("amount"),
+                     "direction": t.get("direction"),
+                     "date": t.get("date")}
+                    for t in history[:3]
+                ],
+            }
 
 
 # ─────────────────────────────────────────
