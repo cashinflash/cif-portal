@@ -69,6 +69,10 @@
   }
 
   function setNewLoanLinkVisibility(hasActive) {
+    // Toggle the <html> class first so the CSS rule kicks in
+    // synchronously (matches the inline preflight script on each
+    // page's <head>).
+    document.documentElement.classList.toggle('cif-has-active-loan', !!hasActive);
     var newLoanLinks = document.querySelectorAll('.dash-sidebar-link[href="/request-loan.html"]');
     for (var i = 0; i < newLoanLinks.length; i++) {
       newLoanLinks[i].style.display = hasActive ? 'none' : '';

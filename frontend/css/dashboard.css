@@ -2615,6 +2615,15 @@ body.has-sidebar .site-header { display: none; }
   border-radius: 6px;
 }
 
+/* Synchronously hide the "Request a new loan" sidebar link if the
+   <html> element has the cif-has-active-loan flag set by the
+   inline preflight script in each signed-in page's <head>. Avoids
+   the FOUC where the link briefly flashes during page navigation
+   before sidebar.js runs at the bottom of <body>. */
+html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
+  display: none !important;
+}
+
 /* ───────────────────────────────────────────────────────────
    DASHBOARD REDESIGN — Brigit-style refresh
    - Greeting header (date + name + status pill + avatar)

@@ -310,7 +310,9 @@
     try {
       sessionStorage.setItem('cif_has_active_loan', String(hasActive));
       sessionStorage.setItem('cif_has_active_loan_at', String(Date.now()));
-      // Also hide the link on this page right away.
+      // Set the synchronous CSS hook + hide the link inline so
+      // there's no flash on the dashboard page itself.
+      document.documentElement.classList.toggle('cif-has-active-loan', !!hasActive);
       var newLoanLinks = document.querySelectorAll('.dash-sidebar-link[href="/request-loan.html"]');
       for (var i = 0; i < newLoanLinks.length; i++) {
         newLoanLinks[i].style.display = hasActive ? 'none' : '';

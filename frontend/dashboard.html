@@ -12,6 +12,20 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css">
   <link rel="stylesheet" href="/css/dashboard.css">
+  <!-- Preflight: synchronously hide the "Request a new loan" sidebar
+       link when the customer has an active loan on file. Reads a
+       sessionStorage flag that dashboard.js / sidebar.js write after
+       fetching /api/my-loans/active. Avoids the FOUC of the link
+       briefly appearing before sidebar.js runs. -->
+  <script>
+    (function(){
+      try {
+        if (sessionStorage.getItem('cif_has_active_loan') === 'true') {
+          document.documentElement.classList.add('cif-has-active-loan');
+        }
+      } catch(e){}
+    })();
+  </script>
 </head>
 <body class="dashboard-page has-sidebar">
 
