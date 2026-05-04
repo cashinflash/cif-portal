@@ -2089,14 +2089,27 @@ def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
     for tx in tx_rows:
         if tx.get("IsVoid"):
             continue
-        # Try every non-void transaction. Vergent's payment labels
-        # vary ("Payment", "ACH Payment", "Card Payment", "Partial",
-        # "Settlement", etc.) — easier to ask for docs on every row
-        # and accept the empty 404s than to maintain a label list.
         tx_id = tx.get("Id")
         if not tx_id:
             continue
-        tx_type = str(tx.get("Type") or tx.get("Label") or "")
+        # Filter to payment transactions only — receipts only attach
+        # to credits-from-customer, never to origination/accrual/fee
+        # rows. Use structural signals (IsPayment flag, amount sign)
+        # rather than label matching since Vergent's transaction
+        # labels vary ("Payment", "ACH Payment", "Partial",
+        # "Settlement"...). Skipping non-payment rows cuts Vergent
+        # round trips in half on a typical paid-off loan.
+        is_payment = tx.get("IsPayment")
+        if is_payment is None:
+            amt_raw = (tx.get("Amount") if tx.get("Amount") is not None
+                       else tx.get("TransactionAmount"))
+            amt_num = _to_number(amt_raw)
+            is_payment = amt_num is not None and amt_num < 0
+        if not is_payment:
+            continue
+        tx_type = str(tx.get("Type")
+                      or tx.get("TransactionType")
+                      or tx.get("Description") or "")
 
         tx_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}"
         tx_status, tx_body = _v1_get(tx_path)
@@ -2341,17 +2354,37 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
 
     qs = event.get("queryStringParameters") or {}
     want_pdf = (qs or {}).get("format") == "pdf"
+    hint_loan_id = (qs or {}).get("loanId") if isinstance(qs, dict) else None
 
     # Ownership check + content fetch: walk this customer's loans and
     # find the matching docId. Vergent's listing endpoint inlines the
     # document content as base64 in the `Data` field, so a single
     # listing call gets us both ownership confirmation AND the content
     # — no separate binary download endpoint needed.
+    #
+    # When the frontend passes ?loanId=N (it always does for docs
+    # rendered from the loan-detail page), we scope the walk to that
+    # one loan instead of every loan on file. Walking every loan
+    # blows the Lambda budget on customers with 2-3 paid-off loans
+    # because each loan triggers its own receipt-history walk.
     shaped = _fetch_all_loans(cid)
     if not shaped:
         return _json_response(404, {"error": "doc_not_found"})
+    if hint_loan_id:
+        loans_to_check = [
+            l for l in shaped
+            if str(l.get("id")) == str(hint_loan_id)
+            or str(l.get("publicId") or "") == str(hint_loan_id)
+        ]
+        if not loans_to_check:
+            # Hint pointed at a loan that isn't on this customer —
+            # fall back to the full walk rather than return 404,
+            # in case the hint is stale.
+            loans_to_check = shaped
+    else:
+        loans_to_check = shaped
     matched = None
-    for loan in shaped:
+    for loan in loans_to_check:
         docs = _list_v1_loan_docs(
             cid, loan.get("id"), include_data=True,
             loan_origin_iso=loan.get("loanDate") or loan.get("originationDate"),

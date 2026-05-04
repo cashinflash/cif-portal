@@ -46,6 +46,7 @@ Resources:
       FunctionName: !Sub cif-portal-loans-${StackEnv}
       CodeUri: ../backend/
       Handler: handlers.loans.lambda_handler
+      Timeout: 29
       Environment:
         Variables:
           VERGENT_BASE_URL: !Ref VergentBaseUrl

@@ -429,7 +429,10 @@
   // Chromium so the customer gets a real PDF on disk).
   function fetchDocBlob(doc, format) {
     var url = DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download';
-    if (format === 'pdf') url += '?format=pdf';
+    var qs = [];
+    if (format === 'pdf') qs.push('format=pdf');
+    if (doc.loanId) qs.push('loanId=' + encodeURIComponent(doc.loanId));
+    if (qs.length) url += '?' + qs.join('&');
     return fetch(url, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': '*/*' },
       credentials: 'omit'
@@ -462,6 +465,7 @@
     // consistently across desktop + mobile browsers. Bonus: no blob
     // URL lifecycle to manage for the modal (download still uses one).
     var url = DOCS_ENDPOINT + '/' + encodeURIComponent(doc.id) + '/download';
+    if (doc.loanId) url += '?loanId=' + encodeURIComponent(doc.loanId);
     fetch(url, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': '*/*' },
       credentials: 'omit'

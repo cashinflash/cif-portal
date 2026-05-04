@@ -239,9 +239,14 @@ jobs:
           # AWS CLI's --environment expects JSON like {"Variables":{...}}, NOT
           # the shorthand "Variables={...}" form (the latter only works with
           # CLI shorthand key=value syntax, not JSON values).
+          # Bump timeout to 29s (just under API Gateway's 30s ceiling).
+          # Document listings/downloads can string several Vergent
+          # round trips on customers with multi-payment loans, and
+          # the 15s default trips before the response makes it back.
           aws lambda update-function-configuration \
             --function-name "$FN" \
             --environment "$ENV_JSON" \
+            --timeout 29 \
             --no-cli-pager >/dev/null
           echo "Updated env vars on $FN:"
           echo "  PROFILE_REQUESTS_TABLE=$PROFILE_REQUESTS_TABLE"
