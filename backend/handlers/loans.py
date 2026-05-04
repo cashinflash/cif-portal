@@ -1982,10 +1982,10 @@ def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str,
     if not isinstance(record, dict):
         return None
     doc_id = (
-        record.get("ChainId")
-        or record.get("Id") or record.get("id")
+        record.get("Id") or record.get("id")
         or record.get("DocId") or record.get("docId")
         or record.get("DocumentId") or record.get("documentId")
+        or record.get("ChainId")  # last-resort fallback only
     )
     if doc_id in (None, ""):
         return None
@@ -2096,9 +2096,25 @@ def _shape_payment_receipts(loan_id: Any,
         log.info("loan-receipts loan=%s tx=%s type=%s status=%s rows=%d",
                  loan_id, tx_id, tx_type, tx_status, len(receipt_rows))
         for r in receipt_rows:
+            # Defensive: skip rows whose TransId disagrees with the
+            # tx we asked about. Vergent's per-tx docs endpoint
+            # occasionally returns sibling receipts from other
+            # transactions on the same loan; without this guard those
+            # would collide with the real receipts on doc id and the
+            # `seen` dedup would drop them.
+            row_tx = r.get("TransId") or r.get("transId")
+            if row_tx not in (None, "") and tx_id not in (None, "") \
+                    and str(row_tx) != str(tx_id):
+                continue
             shaped = _shape_v1_document(r, loan_id, "transaction",
                                          include_data=include_data)
-            if not shaped or shaped["id"] in seen:
+            if not shaped:
+                continue
+            # Disambiguate by tx so two receipts that happen to share
+            # a Vergent doc id (e.g., when Vergent reuses ChainId-style
+            # ids across receipts) still survive the seen-dedup.
+            shaped["id"] = "{}:tx:{}".format(shaped["id"], tx_id)
+            if shaped["id"] in seen:
                 continue
             # Override displayName so receipts read clearly even if
             # Vergent's DocumentName is generic.
