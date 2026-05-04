@@ -287,6 +287,7 @@
     var originatedRaw = loan.loanDate || loan.originationDate;
     var summary = [
       ['Originated', originatedRaw ? fmtDate(originatedRaw) : '—'],
+      ['Due Date', loan.nextDueDate ? fmtDate(loan.nextDueDate) : '—'],
       ['Status', loan.status || (loan.isOutstanding ? 'Current' : 'Closed')],
       ['Amount Borrowed', fmtCurrency(principal)],
       ['Fee', fmtCurrency(fees)],
