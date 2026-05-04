@@ -369,12 +369,13 @@
 }
 .dash-loan-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 24px 28px;
-  padding: 26px 0;
-  border-top: 1px solid var(--cif-hairline);
-  border-bottom: 1px solid var(--cif-hairline);
-  margin-bottom: 32px;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px 28px;
+  padding: 24px 26px;
+  background: linear-gradient(180deg, #f9fafb 0%, #f4f6f9 100%);
+  border-radius: 16px;
+  border: 1px solid var(--cif-hairline);
+  margin: 8px 0 28px;
 }
 .dash-loan-stat-label {
   font-size: .72rem;
@@ -385,17 +386,26 @@
   margin-bottom: 6px;
 }
 .dash-loan-stat-value {
-  font-size: 1.25rem;
+  font-size: 1.3rem;
   font-weight: 800;
   letter-spacing: -.01em;
   color: var(--cif-navy);
   font-variant-numeric: tabular-nums;
+  line-height: 1.15;
 }
 .dash-loan-cta-row {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+  padding-top: 6px;
+}
+.dash-loan-cta-row .btn-apply,
+.dash-loan-cta-row .btn-login {
+  padding: 13px 26px;
+  font-weight: 700;
+  font-size: .95rem;
+  letter-spacing: -0.005em;
 }
 
 /* Status pill */
@@ -3002,13 +3012,14 @@ body.has-sidebar .site-header { display: none; }
   .dash-loan-stats {
     grid-template-columns: 1fr 1fr;
     gap: 18px 20px;
-    padding: 20px 0;
-    margin-bottom: 22px;
+    padding: 18px 18px;
+    margin: 6px 0 22px;
   }
+  .dash-loan-stat-value { font-size: 1.15rem; }
   .dash-loan-amount { font-size: clamp(2.2rem, 9vw, 3rem); }
   .dash-loan-cta-row { flex-direction: column; align-items: stretch; }
   .dash-loan-cta-row .btn-apply,
-  .dash-loan-cta-row .btn-login { width: 100%; text-align: center; }
+  .dash-loan-cta-row .btn-login { width: 100%; text-align: center; padding: 14px 22px; }
 
   /* Help strip cleaner on mobile */
   .dash-help-inner { flex-direction: column; align-items: stretch; gap: 14px; }
