@@ -265,15 +265,6 @@
 
   function renderDetail(loan) {
     setText(qs('#loansTitle'), 'Loan #' + (loan.publicId || loan.id));
-    setText(qs('#loanDetailTitle'), 'Loan #' + (loan.publicId || loan.id));
-
-    var meta = [];
-    if (loan.loanClass) meta.push(loan.loanClass);
-    if (loan.loanDate || loan.originationDate) {
-      meta.push('Originated ' + fmtDate(loan.loanDate || loan.originationDate));
-    }
-    if (loan.storeName) meta.push(loan.storeName);
-    setText(qs('#loanDetailMeta'), meta.join(' · ') || '—');
 
     var pill = qs('#loanDetailPill');
     if (pill) {
@@ -282,7 +273,7 @@
     }
 
     // Unified Summary for both active and paid-off loans:
-    // Status / Amount Borrowed / Fee / Total Paid / Payment Status.
+    // Originated / Status / Amount Borrowed / Fee / Total Paid / Payment Status.
     // Total Paid is always (principal + fees) - current_balance,
     // which:
     //   - Equals (principal + fees) for a paid-off loan (balance = 0).
@@ -293,7 +284,9 @@
     var balance = Number(loan.balance) || 0;
     var totalDue = principal + fees;
     var totalPaid = Math.max(0, totalDue - balance);
+    var originatedRaw = loan.loanDate || loan.originationDate;
     var summary = [
+      ['Originated', originatedRaw ? fmtDate(originatedRaw) : '—'],
       ['Status', loan.status || (loan.isOutstanding ? 'Current' : 'Closed')],
       ['Amount Borrowed', fmtCurrency(principal)],
       ['Fee', fmtCurrency(fees)],
