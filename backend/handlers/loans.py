@@ -366,15 +366,6 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     amount_due = _to_number(hdr.get("AmountDue"))
     min_due = _to_number(hdr.get("MinAmountDue"))
 
-    # Entry-trace log for diagnosing the loan-fee issue. Always fires.
-    # Together with the fee probe below, lets us tell whether
-    # _shape_v1_loan ran at all vs whether fees was set successfully.
-    log.info("shape-loan-entry hdr_id=%s loan_amount=%r outstanding=%s "
-             "hdr_keys=%d has_detail=%s",
-             hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id"),
-             hdr.get("LoanAmount"), is_outstanding,
-             len(hdr.keys()), bool(detail))
-
     # "Amount due" on the UI should be what the customer actually owes on
     # the due date — principal + fees. For a payday loan that's AmountDue
     # (total) or PayoffAmount. MinAmountDue can be just the fee portion
@@ -383,15 +374,15 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
 
     # Fee amount — Vergent uses different field names across products
     # and lifecycle stages. On a PAID-OFF loan, "current" fee fields
-    # (e.g. `Fees`) often return 0 because nothing is currently owing.
-    # We need the ORIGINAL fee amount, so we:
-    #   1. Search "Original*" prefixed fields first.
-    #   2. Search general fee field names but ONLY accept non-zero values
-    #      (a zero from a "current owing fees" field would be misleading).
-    #   3. Fall back to peak/payoff/due minus principal where the math
-    #      gives a positive value.
-    #   4. If we still end up with None or 0 on a real (non-zero) loan,
-    #      log a probe so we can see exactly which keys Vergent returns.
+    # (e.g. `Fees`) return 0 because nothing is currently owing.
+    # Search:
+    #   1. Original* prefixed fields (accept zero — explicit value).
+    #   2. General fee names (skip zero — likely a "currently owing"
+    #      value, misleading after payoff).
+    #   3. payoff/amount-due minus principal — only useful for
+    #      outstanding loans.
+    # If still null on a paid-off loan, the route handler patches it
+    # by summing payment transactions (see _patch_missing_fees).
     fees = None
     ORIGINAL_FEE_KEYS = (
         "OriginalFees", "OriginalFeeAmount", "OriginalFinanceCharge",
@@ -415,89 +406,18 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
             return n
         return None
 
-    # Pass 1: Original* fields on hdr, accept zero (an explicit
-    # original-fees=0 means it really was a $0-fee loan).
     fees = _try_keys(hdr, ORIGINAL_FEE_KEYS, accept_zero=True)
     if fees is None and isinstance(detail, dict):
         fees = _try_keys(detail, ORIGINAL_FEE_KEYS, accept_zero=True)
-
-    # Pass 2: general fee names on hdr/detail, IGNORE zero values
-    # (those are usually "currently owing", which is 0 after payoff).
     if fees is None:
         fees = _try_keys(hdr, OTHER_FEE_KEYS, accept_zero=False)
     if fees is None and isinstance(detail, dict):
         fees = _try_keys(detail, OTHER_FEE_KEYS, accept_zero=False)
-
-    # Pass 3: peak balance (MaxAmountDue) minus principal — works for
-    # paid-off loans because it's max-ever, not current.
-    if fees is None:
-        max_due = _to_number(hdr.get("MaxAmountDue"))
-        if max_due is not None and loan_amount is not None and max_due > loan_amount:
-            fees = round(max_due - loan_amount, 2)
-
-    # Pass 4: original/originated total minus principal.
-    if fees is None:
-        for ak in ("OriginalAmount", "OriginalLoanAmount", "OriginatedAmount"):
-            v = _to_number(hdr.get(ak))
-            if v is not None and loan_amount is not None and v > loan_amount:
-                fees = round(v - loan_amount, 2)
-                break
-
-    # Pass 5: payoff/amount-due minus principal — only useful for
-    # outstanding loans (zeros for paid-off, so this is mostly a
-    # backstop).
     if fees is None:
         if payoff is not None and loan_amount is not None and payoff > loan_amount:
             fees = round(payoff - loan_amount, 2)
         elif amount_due is not None and loan_amount is not None and amount_due > loan_amount:
             fees = round(amount_due - loan_amount, 2)
-
-    # Probe — fires whenever we ended up empty-handed OR with a 0
-    # on a real (non-zero) loan. Lets us see exactly what Vergent
-    # returns for this loan and lock the search to the right key.
-    if (fees is None or fees == 0) and loan_amount and loan_amount > 0:
-        candidate = {
-            k: hdr.get(k) for k in hdr.keys()
-            if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
-                                             "finance", "charge", "principal"))
-        }
-        log.info("loan-fees probe hdr_id=%s loan_amount=%s fees=%s candidate_fields=%s",
-                 hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id"),
-                 loan_amount, fees, candidate)
-
-    # Fallback: the loan-list endpoint does NOT return originated fees
-    # on paid-off loans. Call /V1/loan/{HdrId} (documented as
-    # "Returns the Loan Balances from eCash") which is loan-record-
-    # complete and includes fee fields the list endpoint omits.
-    loan_balance_debug: Dict[str, Any] = {}
-    hdr_id_for_call = hdr.get("hdr_id") or hdr.get("HdrId") or hdr.get("Id")
-    if (fees is None or fees == 0) and hdr_id_for_call:
-        try:
-            bal_status, bal_body = _v1_get(f"/V1/loan/{hdr_id_for_call}")
-            if bal_status == 200 and isinstance(bal_body, dict):
-                # Try the same key search against this response.
-                bal_fees = _try_keys(bal_body, ORIGINAL_FEE_KEYS, accept_zero=True)
-                if bal_fees is None:
-                    bal_fees = _try_keys(bal_body, OTHER_FEE_KEYS, accept_zero=False)
-                if bal_fees is not None and bal_fees != 0:
-                    fees = bal_fees
-                # Surface candidate fields from this response too so
-                # we can see what's there in DevTools.
-                loan_balance_debug = {
-                    k: bal_body.get(k) for k in bal_body.keys()
-                    if any(s in k.lower() for s in ("fee", "amount", "due",
-                                                     "payoff", "finance",
-                                                     "charge", "principal",
-                                                     "paid", "total"))
-                }
-                log.info("loan-balance probe hdr_id=%s status=%s fees_after=%s candidate=%s",
-                         hdr_id_for_call, bal_status, fees, loan_balance_debug)
-            else:
-                log.info("loan-balance probe hdr_id=%s status=%s body_type=%s",
-                         hdr_id_for_call, bal_status, type(bal_body).__name__)
-        except Exception as e:
-            log.warning("loan-balance probe error hdr_id=%s err=%s",
-                        hdr_id_for_call, type(e).__name__)
 
     # Autopay pill — disabled until we verify which Vergent v1 field
     # actually means "a payment is scheduled right now" for our tenant.
@@ -548,21 +468,6 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "numberOfPayments": hdr.get("NumberOfPayments"),
         "autopay": autopay,
         "scheduledPaymentDate": _format_iso(scheduled_date),
-        # TEMPORARY: surface every fee/amount/charge/finance-shaped
-        # header field with its raw value so we can identify the
-        # right field name from DevTools without digging through
-        # CloudWatch. Remove after fee detection is locked.
-        "_debugFeeFields": {
-            k: hdr.get(k) for k in hdr.keys()
-            if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
-                                             "finance", "charge", "principal", "paid", "total"))
-        },
-        "_debugDetailFeeFields": {
-            k: detail.get(k) for k in (detail.keys() if isinstance(detail, dict) else [])
-            if any(s in k.lower() for s in ("fee", "amount", "due", "payoff",
-                                             "finance", "charge", "principal", "paid", "total"))
-        },
-        "_debugLoanBalances": loan_balance_debug,
     }
 
 
@@ -632,6 +537,49 @@ def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
             shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
             return [l for l in shaped if _is_visible_loan(l)]
     return []
+
+
+def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
+    """For loans where `fees` couldn't be extracted from the loan-list
+    response (typically paid-off loans where Vergent returns only
+    0-valued "currently owing" fee fields), derive the originated fee
+    by summing payment transactions:
+
+        fees = sum(payment_amounts) - principal
+
+    Mutates the list in place. Best-effort — failures (network,
+    unexpected shape, etc.) leave fees=null and the UI just shows "—".
+    Each missing-fee loan triggers one extra v1 GetCustomerLoanHistory
+    call, which is fine for the typical CIF customer with 1-3 loans.
+    """
+    for loan in loans:
+        if loan.get("fees") is not None:
+            continue
+        principal = _to_number(loan.get("principal"))
+        hdr_id = loan.get("id")
+        store_id = loan.get("storeId")
+        if not principal or not hdr_id or principal <= 0:
+            continue
+        try:
+            history = _fetch_loan_history(cid, hdr_id, store_id, limit=200)
+        except Exception as e:
+            log.warning("patch-fees history error hdr_id=%s err=%s",
+                        hdr_id, type(e).__name__)
+            continue
+        if not history:
+            continue
+        total_paid = 0.0
+        for t in history:
+            if t.get("direction") != "credit":
+                continue
+            amt = t.get("amount")
+            if amt is None:
+                continue
+            total_paid += float(amt)
+        if total_paid > principal:
+            loan["fees"] = round(total_paid - principal, 2)
+            log.info("patched fees from history hdr_id=%s total_paid=%.2f principal=%.2f fees=%.2f",
+                     hdr_id, total_paid, principal, loan["fees"])
 
 
 # ─────────────────────────────────────────
@@ -1813,6 +1761,10 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     shaped = _fetch_all_loans(cid)
     if not shaped:
         return _json_response(200, {"loan": None, "loanCount": 0, "allLoans": []})
+
+    # Patch any missing fees by summing payment transactions. Hits one
+    # extra Vergent call per paid-off loan with fees=null; safe.
+    _patch_missing_fees(cid, shaped)
 
     # The "active loan" card on the dashboard should show only a current
     # (outstanding) loan. If the customer has none — even if they have
