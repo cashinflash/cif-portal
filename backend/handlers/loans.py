@@ -443,8 +443,7 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "loanClass": hdr.get("LoanModelName") or hdr.get("LoanTypeName", "").split(".")[-1] or None,
         "status": (
             "Current" if is_outstanding
-            else (hdr.get("SubStatus")
-                  or ("Paid Off" if status_id in (3,) else "Closed"))
+            else _normalize_closed_status(hdr.get("SubStatus"), status_id)
         ),
         "statusId": status_id,
         "subStatus": hdr.get("SubStatus"),
@@ -473,16 +472,45 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# Vergent v1 statusId values we treat as "real, paid-off" loan history
+# Vergent v1 statusId values we treat as "real, settled" loan history
 # that the customer should see. Discovered empirically via the DevTools
 # probe on Harut's account 2026-05-01:
 #   statusId 3  -> Paid Off    (the 1 loan he actually paid off)
 #   statusId 10 -> Deleted     (the 2 ghost application records)
 # Vergent's text status fields (Status, SubStatus) are NULL for these
-# records so the only reliable distinguishing field is statusId.
-# Add additional paid-off variants here as we encounter them (e.g. if
-# Vergent uses a separate code for "Paid In Full" or "Settled").
+# records so statusId is the only reliable distinguishing field.
+# Add additional settled variants (e.g. Bought Back) here as we
+# discover their statusIds.
 _PAID_OFF_STATUS_IDS = {3}
+
+# Substrings (matched case-insensitive) we treat as "loan was settled
+# in good standing" — surface to the customer and label as "Paid Off".
+# "Bought Back" is what Vergent calls a loan that's been refinanced
+# into a fresh advance: the original loan is closed in good standing,
+# functionally equivalent to a payoff from the customer's view.
+_SETTLED_STATUS_TOKENS = ("paid", "bought back", "boughtback")
+
+
+def _normalize_closed_status(sub_status: Optional[str], status_id: Any) -> str:
+    """Pick the customer-facing label for a non-outstanding loan.
+
+    "Bought Back" loans are functionally paid off (Vergent rolls them
+    into a fresh advance); we relabel them so the customer sees a
+    consistent "Paid Off" pill across both flows. Anything else falls
+    back to Vergent's SubStatus text, then to a statusId-derived
+    default.
+    """
+    if sub_status:
+        text = str(sub_status).strip().lower()
+        if "bought" in text or "paid" in text:
+            return "Paid Off"
+        return str(sub_status)
+    try:
+        if int(status_id) in _PAID_OFF_STATUS_IDS:
+            return "Paid Off"
+    except (TypeError, ValueError):
+        pass
+    return "Closed"
 
 
 def _is_visible_loan(loan: Dict[str, Any]) -> bool:
@@ -491,9 +519,9 @@ def _is_visible_loan(loan: Dict[str, Any]) -> bool:
     Customers should see:
       - outstanding (current) loans
       - paid-off loans (Vergent statusId in _PAID_OFF_STATUS_IDS)
-      - any loan with explicit "paid" text in a status field
-        (forward-compat fallback for records where Vergent fills
-        in Status/SubStatus instead of leaving them null)
+      - any loan with explicit settled-text in a status field —
+        catches Bought Back and forward-compats Vergent records
+        where Status/SubStatus is filled in instead of statusId
     Everything else (Deleted, Cancelled, ghost application records,
     etc.) is hidden everywhere — history page, dashboard list,
     activity, documents.
@@ -508,11 +536,12 @@ def _is_visible_loan(loan: Dict[str, Any]) -> bool:
     except (TypeError, ValueError):
         pass
 
-    # Forward-compat: if any status text field explicitly says "paid",
-    # show the loan even if its statusId isn't in our known set.
     candidates = (loan.get("status"), loan.get("subStatus"), loan.get("rawStatus"))
     for raw in candidates:
-        if raw and "paid" in str(raw).strip().lower():
+        if not raw:
+            continue
+        text = str(raw).strip().lower()
+        if any(tok in text for tok in _SETTLED_STATUS_TOKENS):
             return True
 
     return False
