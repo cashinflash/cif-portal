@@ -662,15 +662,17 @@
   font-size: .92rem;
 }
 
-/* Two-column definition list for loan stats. */
-.dash-loan-stats {
+/* Two-column definition list for loan stats (loans-detail page).
+   Scoped to <dl> so it doesn't collide with the dashboard's
+   <div class="dash-loan-stats"> active-loan grid. */
+dl.dash-loan-stats {
   display: grid;
   grid-template-columns: minmax(140px, max-content) 1fr;
   gap: 10px 24px;
   margin: 0;
   padding: 4px 0 0;
 }
-.dash-loan-stats dt {
+dl.dash-loan-stats dt {
   color: var(--cif-subtle);
   font-size: .82rem;
   font-weight: 600;
@@ -678,7 +680,7 @@
   text-transform: uppercase;
   align-self: center;
 }
-.dash-loan-stats dd {
+dl.dash-loan-stats dd {
   margin: 0;
   color: var(--cif-navy);
   font-size: .98rem;
@@ -730,12 +732,12 @@
 }
 
 @media (max-width: 640px) {
-  .dash-loan-stats {
+  dl.dash-loan-stats {
     grid-template-columns: 1fr;
     gap: 4px 0;
   }
-  .dash-loan-stats dt { padding-top: 8px; }
-  .dash-loan-stats dd { padding-bottom: 4px; }
+  dl.dash-loan-stats dt { padding-top: 8px; }
+  dl.dash-loan-stats dd { padding-bottom: 4px; }
   .dash-activity-row {
     grid-template-columns: 1fr max-content;
     grid-auto-rows: auto;
@@ -2677,8 +2679,13 @@ body.has-sidebar .site-header { display: none; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 40px 0 28px;
+  padding: 0;
   flex-wrap: wrap;
+}
+/* When greeting is inside the green dash-hero shell, the hero
+   provides the vertical padding (56px / 72px). */
+.dash-hero--greeting {
+  padding: 56px 0 72px;
 }
 .dash-greeting-meta { min-width: 0; }
 .dash-greeting-date {
@@ -2874,6 +2881,67 @@ body.has-sidebar .site-header { display: none; }
   box-shadow: 0 1px 3px rgba(15,23,42,.04), 0 6px 18px rgba(15,23,42,.05);
   border: 1px solid rgba(15,23,42,.04);
 }
+
+/* Quick actions card — replaces "Total borrowed" stat card.
+   Three tappable rows inside one card. */
+.dash-quick-actions {
+  background: #fff;
+  border-radius: 18px;
+  padding: 18px 14px 10px;
+  box-shadow: 0 1px 3px rgba(15,23,42,.04), 0 6px 18px rgba(15,23,42,.05);
+  border: 1px solid rgba(15,23,42,.04);
+  display: flex;
+  flex-direction: column;
+}
+.dash-quick-actions-title {
+  margin: 0 8px 8px;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--cif-muted, #6b7280);
+}
+.dash-quick-action {
+  display: grid;
+  grid-template-columns: 36px 1fr 18px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 8px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--cif-navy, #1a1a2e);
+  transition: background .15s ease, transform .15s ease;
+}
+.dash-quick-action:hover,
+.dash-quick-action:focus-visible {
+  background: rgba(15,23,42,.04);
+  outline: none;
+}
+.dash-quick-action-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.dash-quick-action-icon--green { background: rgba(14,135,65,.10); color: #0E8741; }
+.dash-quick-action-icon--slate { background: rgba(15,23,42,.06); color: var(--cif-navy, #1a1a2e); }
+.dash-quick-action-icon--gold  { background: rgba(217,168,14,.14); color: #b8860b; }
+.dash-quick-action-label {
+  font-size: .98rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  min-width: 0;
+}
+.dash-quick-action-chev {
+  color: #cbd5e1;
+  transition: color .15s ease, transform .15s ease;
+}
+.dash-quick-action:hover .dash-quick-action-chev,
+.dash-quick-action:focus-visible .dash-quick-action-chev {
+  color: var(--cif-navy, #1a1a2e);
+  transform: translateX(2px);
+}
 .dash-stat-card-icon {
   width: 36px;
   height: 36px;
@@ -2993,7 +3061,7 @@ body.has-sidebar .site-header { display: none; }
 
 @media (max-width: 720px) {
   .dash-main { gap: 20px; padding-bottom: 48px; }
-  .dash-greeting { padding: 18px 0 8px; }
+  .dash-hero--greeting { padding: 36px 0 60px; }
   .dash-greeting-name { font-size: 1.5rem; }
   .dash-greeting-right { gap: 10px; }
   .dash-status-pill { display: none; }  /* save horizontal room */

@@ -109,24 +109,30 @@
     <div class="mobile-menu-overlay" id="mobile-overlay"></div>
   </header>
 
-  <main class="container dash-main">
+  <!-- Soft-green welcome hero with floating blobs (matches loans / payments / profile pages) -->
+  <section class="dash-hero dash-hero--greeting">
+    <div class="dash-hero-blob dash-hero-blob-1" aria-hidden="true"></div>
+    <div class="dash-hero-blob dash-hero-blob-2" aria-hidden="true"></div>
+    <div class="container dash-hero-inner">
+      <header class="dash-greeting">
+        <div class="dash-greeting-meta">
+          <p class="dash-greeting-date" id="dashDate">&mdash;</p>
+          <h1 class="dash-greeting-name">Hey, <span id="dashFirstName">there</span> <span class="dash-greeting-wave" aria-hidden="true">👋</span></h1>
+        </div>
+        <div class="dash-greeting-right">
+          <span class="dash-status-pill" id="dashStatusPill" hidden>
+            <span class="dash-status-pill-dot" aria-hidden="true"></span>
+            <span id="dashStatusText">Account in good standing</span>
+          </span>
+          <a href="/profile.html" class="dash-avatar" id="dashAvatar" aria-label="Open profile">
+            <span id="dashAvatarInitials">CF</span>
+          </a>
+        </div>
+      </header>
+    </div>
+  </section>
 
-    <!-- Greeting header (date + name + status pill + avatar) -->
-    <header class="dash-greeting">
-      <div class="dash-greeting-meta">
-        <p class="dash-greeting-date" id="dashDate">&mdash;</p>
-        <h1 class="dash-greeting-name">Hey, <span id="dashFirstName">there</span> <span class="dash-greeting-wave" aria-hidden="true">👋</span></h1>
-      </div>
-      <div class="dash-greeting-right">
-        <span class="dash-status-pill" id="dashStatusPill" hidden>
-          <span class="dash-status-pill-dot" aria-hidden="true"></span>
-          <span id="dashStatusText">Account in good standing</span>
-        </span>
-        <a href="/profile.html" class="dash-avatar" id="dashAvatar" aria-label="Open profile">
-          <span id="dashAvatarInitials">CF</span>
-        </a>
-      </div>
-    </header>
+  <main class="container dash-main">
 
     <!-- "Up to $255" hero — only when there's NO active loan -->
     <section class="dash-borrow-hero" id="dashBorrowHero" hidden>
@@ -205,15 +211,31 @@
       </div>
     </section>
 
-    <!-- Two-up stat cards: Total borrowed + Member since -->
+    <!-- Two-up cards: Quick actions + Member since -->
     <section class="dash-stats-grid" id="dashStatsGrid" hidden>
-      <article class="dash-stat-card">
-        <div class="dash-stat-card-icon dash-stat-card-icon--green" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        </div>
-        <p class="dash-stat-card-label">Total borrowed</p>
-        <p class="dash-stat-card-value" id="dashTotalBorrowed">$0</p>
-        <p class="dash-stat-card-meta" id="dashTotalBorrowedMeta">Across 0 loans</p>
+      <article class="dash-quick-actions">
+        <h3 class="dash-quick-actions-title">Quick actions</h3>
+        <a href="/payments.html#new" class="dash-quick-action">
+          <span class="dash-quick-action-icon dash-quick-action-icon--green" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          </span>
+          <span class="dash-quick-action-label">Make a payment</span>
+          <svg class="dash-quick-action-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </a>
+        <a href="/loans.html" class="dash-quick-action">
+          <span class="dash-quick-action-icon dash-quick-action-icon--slate" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
+          </span>
+          <span class="dash-quick-action-label">View documents</span>
+          <svg class="dash-quick-action-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </a>
+        <a href="tel:+17472707121" class="dash-quick-action">
+          <span class="dash-quick-action-icon dash-quick-action-icon--gold" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          </span>
+          <span class="dash-quick-action-label">Talk to support</span>
+          <svg class="dash-quick-action-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </a>
       </article>
       <article class="dash-stat-card">
         <div class="dash-stat-card-icon dash-stat-card-icon--gold" aria-hidden="true">

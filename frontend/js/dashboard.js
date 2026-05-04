@@ -335,25 +335,12 @@
     if (!grid) return;
     grid.hidden = false;
 
-    // Total borrowed: sum of all loan principals (lifetime).
-    const totalEl = qs('#dashTotalBorrowed');
-    const metaEl = qs('#dashTotalBorrowedMeta');
-    let total = 0;
+    // Count of loans is still useful for the "Member since" meta.
     let count = 0;
     allLoans.forEach(function (l) {
       const p = Number(l && l.principal);
-      if (isFinite(p) && p > 0) { total += p; count += 1; }
+      if (isFinite(p) && p > 0) { count += 1; }
     });
-    if (totalEl) {
-      totalEl.textContent = total > 0
-        ? formatCurrencyPrecise(total)
-        : '$0';
-    }
-    if (metaEl) {
-      metaEl.textContent = count === 1
-        ? 'Across 1 loan'
-        : 'Across ' + count + ' loans';
-    }
 
     // Member since: year of the earliest loan's loanDate / origination.
     const sinceEl = qs('#dashMemberSince');
@@ -424,7 +411,7 @@
 
       const title = document.createElement('div');
       title.className = 'dash-recent-activity-title';
-      title.textContent = isPaidOff ? 'Loan paid off'
+      title.textContent = isPaidOff ? 'Paid in full'
                        : isPastDue ? 'Loan past due'
                        : (loan.status || 'Loan');
       main.appendChild(title);
