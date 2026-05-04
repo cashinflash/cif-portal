@@ -255,11 +255,18 @@
 .dash-main {
   position: relative;
   z-index: 2;
-  margin-top: -48px;
+  padding-top: 0;
   padding-bottom: 64px;
   display: flex;
   flex-direction: column;
-  gap: 36px;
+  gap: 28px;
+}
+/* Pages that still use the green welcome-hero (loans, payments, etc.)
+   keep the original -48px overlap so cards visually meld with the
+   hero's bottom. Dashboard removed its hero in the redesign and
+   gets a clean top instead via .dash-greeting padding. */
+.dash-hero + .dash-main {
+  margin-top: -48px;
 }
 
 /* ---------- CARD BASE ---------- */
@@ -293,11 +300,14 @@
 .dash-card-link:hover { text-decoration: underline; }
 
 /* ---------- ACTIVE LOAN CARD ---------- */
+/* Single white card; green is used as accent text only, no full-width
+   color strip. Keeps the focal point on the balance number. */
 .dash-loan-card {
   padding: 0;
   background: #fff;
   box-shadow: var(--cif-shadow-lg);
   overflow: hidden;
+  border-radius: 22px;
 }
 .dash-loan-card .dash-card-skeleton { padding: 32px; }
 .dash-loan-header {
@@ -306,38 +316,35 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 18px 32px;
-  background: linear-gradient(135deg, var(--cif-green) 0%, #0a6b34 100%);
-  color: #fff;
+  padding: 24px 32px 0;
+  background: transparent;
+  color: var(--cif-navy);
 }
 .dash-loan-header-pills {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
-.dash-loan-body-content { padding: 32px; }
+.dash-loan-body-content { padding: 22px 32px 32px; }
 .dash-loan-eyebrow {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-size: .72rem;
   letter-spacing: .12em;
   text-transform: uppercase;
   font-weight: 700;
-  color: var(--cif-green);
-  margin-bottom: 12px;
+  color: var(--cif-green-dark, #086c33);
+  margin: 0;
 }
-.dash-loan-header .dash-loan-eyebrow {
-  color: #fff;
-  margin-bottom: 0;
-}
-.dash-loan-header .dash-loan-eyebrow-id {
-  background: rgba(255,255,255,.18);
-  color: #fff;
-}
-.dash-loan-header .dash-pill {
-  background: rgba(255,255,255,.18);
-  color: #fff;
+.dash-loan-eyebrow-id {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(14,135,65,.10);
+  color: var(--cif-green-dark, #086c33);
+  font-size: .68rem;
+  letter-spacing: .04em;
+  text-transform: none;
 }
 .dash-loan-amount {
   font-size: clamp(2.75rem, 7vw, 4.25rem);
@@ -363,11 +370,11 @@
 .dash-loan-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-  padding: 24px 0;
+  gap: 24px 28px;
+  padding: 26px 0;
   border-top: 1px solid var(--cif-hairline);
   border-bottom: 1px solid var(--cif-hairline);
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 .dash-loan-stat-label {
   font-size: .72rem;
@@ -2343,8 +2350,13 @@ button.dash-doc-download:disabled {
 }
 .dash-sidebar-bottom {
   border-top: 1px solid rgba(255,255,255,.18);
+  padding-top: 18px;
+  margin-top: 14px;
+}
+.dash-sidebar-user {
+  margin-top: 14px;
   padding-top: 16px;
-  margin-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.14);
 }
 .dash-sidebar-user-name {
   font-weight: 700;
@@ -2657,7 +2669,7 @@ body.has-sidebar .site-header { display: none; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 28px 0 22px;
+  padding: 40px 0 28px;
   flex-wrap: wrap;
 }
 .dash-greeting-meta { min-width: 0; }
@@ -2916,14 +2928,17 @@ body.has-sidebar .site-header { display: none; }
   justify-content: center;
   flex-shrink: 0;
 }
+/* Paid off — soft green, checkmark icon */
 .dash-recent-activity-icon--paid {
-  background: rgba(14,135,65,.10);
+  background: rgba(14,135,65,.12);
   color: #086c33;
 }
+/* Current/active — soft slate, dollar/calendar icon */
 .dash-recent-activity-icon--current {
-  background: rgba(14,135,65,.10);
-  color: #086c33;
+  background: rgba(15,23,42,.06);
+  color: var(--cif-navy, #1a1a2e);
 }
+/* Late — soft red */
 .dash-recent-activity-icon--late {
   background: rgba(220,38,38,.10);
   color: #991b1b;
@@ -2969,13 +2984,35 @@ body.has-sidebar .site-header { display: none; }
 }
 
 @media (max-width: 720px) {
-  .dash-greeting { padding: 18px 0 14px; }
+  .dash-main { gap: 20px; padding-bottom: 48px; }
+  .dash-greeting { padding: 18px 0 8px; }
+  .dash-greeting-name { font-size: 1.5rem; }
   .dash-greeting-right { gap: 10px; }
-  .dash-status-pill { display: none; }  /* hide on small screens — saves room */
+  .dash-status-pill { display: none; }  /* save horizontal room */
   .dash-borrow-hero { padding: 26px 22px; border-radius: 18px; }
   .dash-borrow-hero-body { max-width: 100%; }
   .dash-borrow-hero-decoration { width: 200px; height: 200px; right: -80px; top: -50px; }
   .dash-stats-grid { grid-template-columns: 1fr; gap: 12px; }
   .dash-stat-card { padding: 18px 18px; }
   .dash-recent-activity-row { padding: 14px 18px; gap: 12px; }
+
+  /* Active-loan card on mobile: tighter padding, stacked stats */
+  .dash-loan-header { padding: 18px 20px 0; }
+  .dash-loan-body-content { padding: 16px 20px 22px; }
+  .dash-loan-stats {
+    grid-template-columns: 1fr 1fr;
+    gap: 18px 20px;
+    padding: 20px 0;
+    margin-bottom: 22px;
+  }
+  .dash-loan-amount { font-size: clamp(2.2rem, 9vw, 3rem); }
+  .dash-loan-cta-row { flex-direction: column; align-items: stretch; }
+  .dash-loan-cta-row .btn-apply,
+  .dash-loan-cta-row .btn-login { width: 100%; text-align: center; }
+
+  /* Help strip cleaner on mobile */
+  .dash-help-inner { flex-direction: column; align-items: stretch; gap: 14px; }
+  .dash-help-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .dash-help-actions .btn-apply,
+  .dash-help-actions .btn-login { flex: 1; text-align: center; }
 }
