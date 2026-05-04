@@ -382,7 +382,8 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     #   3. payoff/amount-due minus principal — only useful for
     #      outstanding loans.
     # If still null on a paid-off loan, the route handler patches it
-    # by summing payment transactions (see _patch_missing_fees).
+    # from peak Balance in the transaction history (see
+    # _patch_missing_fees).
     fees = None
     ORIGINAL_FEE_KEYS = (
         "OriginalFees", "OriginalFeeAmount", "OriginalFinanceCharge",
@@ -543,9 +544,19 @@ def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
     """For loans where `fees` couldn't be extracted from the loan-list
     response (typically paid-off loans where Vergent returns only
     0-valued "currently owing" fee fields), derive the originated fee
-    by summing payment transactions:
+    from the peak running Balance across the loan's transaction
+    history:
 
-        fees = sum(payment_amounts) - principal
+        fees = max(Balance) - principal
+
+    Vergent's transaction records carry separate `Prin`, `Fee`,
+    `Total`, and `Balance` columns; `Balance` is the post-transaction
+    running balance. The peak balance is reached right after the
+    Advance + Advance Fee transactions are posted, so it equals
+    principal + total fees ever charged. Subtracting principal
+    yields the originated fee, regardless of how the loan was
+    eventually repaid. (Backup: sum of positive `Fee` column values
+    — used only if the Balance column is absent on some product.)
 
     Mutates the list in place. Best-effort — failures (network,
     unexpected shape, etc.) leave fees=null and the UI just shows "—".
