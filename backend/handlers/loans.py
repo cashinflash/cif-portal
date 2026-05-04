@@ -2032,14 +2032,111 @@ def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str,
     return out
 
 
+def _extract_doc_rows(status: int, body: Any) -> List[Dict[str, Any]]:
+    """Pull document records out of a Vergent v1 docs response,
+    handling the various wrapper shapes Vergent can return."""
+    if status != 200:
+        return []
+    if isinstance(body, list):
+        return [r for r in body if isinstance(r, dict)]
+    if isinstance(body, dict):
+        for key in ("Items", "Documents", "Docs", "items", "documents", "docs"):
+            v = body.get(key)
+            if isinstance(v, list):
+                return [r for r in v if isinstance(r, dict)]
+    return []
+
+
+def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
+                                 include_data: bool,
+                                 seen: set) -> List[Dict[str, Any]]:
+    """For each Payment-type transaction on this loan, fetch its
+    attached receipt document via
+    /V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}.
+
+    Walks GetCustomerLoanHistory once, then makes one extra docs
+    call per Payment transaction. Typical payday loan has 1-3
+    payments so this stays small.
+    """
+    if loan_id in (None, ""):
+        return []
+    if _v1_user_id is None:
+        _get_v1_token()
+    uid = _v1_user_id or 0
+    params = urllib.parse.urlencode({
+        "custId": cid,
+        "HdrId": loan_id,
+        "companyId": VERGENT_COMPANY_ID,
+        "storeId": 0,
+        "userId": uid,
+    })
+    status, body = _v1_get(f"/V1/GetCustomerLoanHistory?{params}")
+    if status != 200:
+        log.info("loan-receipts history-status=%s loan=%s", status, loan_id)
+        return []
+
+    tx_rows: List[Dict[str, Any]] = []
+    if isinstance(body, list):
+        tx_rows = [r for r in body if isinstance(r, dict)]
+    elif isinstance(body, dict):
+        for key in ("Items", "Transactions", "History", "LoanHistory"):
+            v = body.get(key)
+            if isinstance(v, list):
+                tx_rows = [r for r in v if isinstance(r, dict)]
+                break
+
+    out: List[Dict[str, Any]] = []
+    for tx in tx_rows:
+        if tx.get("IsVoid"):
+            continue
+        # Vergent labels: "Payment", "ACH Payment", "Card Payment",
+        # etc. Filter to transactions whose Type/Label says payment.
+        tx_type = str(tx.get("Type") or tx.get("Label") or "").lower()
+        if "payment" not in tx_type:
+            continue
+        tx_id = tx.get("Id")
+        if not tx_id:
+            continue
+
+        tx_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}"
+        tx_status, tx_body = _v1_get(tx_path)
+        receipt_rows = _extract_doc_rows(tx_status, tx_body)
+        log.info("loan-receipts loan=%s tx=%s status=%s rows=%d",
+                 loan_id, tx_id, tx_status, len(receipt_rows))
+
+        for r in receipt_rows:
+            shaped = _shape_v1_document(r, loan_id, "transaction",
+                                         include_data=include_data)
+            if not shaped or shaped["id"] in seen:
+                continue
+            # Override displayName so receipts read clearly even if
+            # Vergent's DocumentName is generic.
+            existing_name = (shaped.get("displayName") or "").lower()
+            if "receipt" not in existing_name:
+                date_str = shaped.get("documentDate") or tx.get("BusDate") or ""
+                shaped["displayName"] = (
+                    "Payment receipt" + (" · " + date_str if date_str else "")
+                )
+            seen.add(shaped["id"])
+            out.append(shaped)
+    return out
+
+
 def _list_v1_loan_docs(cid: str, loan_id: Any,
                        include_data: bool = False) -> List[Dict[str, Any]]:
     """List signed documents attached to a specific loan via Vergent v1.
 
-    Single endpoint: GET /V1/customer/{cid}/docs/loan/{loanId}. Verified
-    against Harut's loan 4826490 — returns 3 signed records (Advance
-    Receipt, DDT Disclosure, Advance Contract w E-Sign), each with its
-    content base64-inlined as `Data`.
+    Two sources:
+      1. Origination docs (Advance Contract, DDT Disclosure,
+         Advance Receipt) via /V1/customer/{cid}/docs/loan/{hdr}.
+      2. Per-payment receipts via
+         /V1/customer/{cid}/docs/loan/{hdr}/trans/{txId} for each
+         Payment-type transaction on the loan.
+
+    Each returned record is filtered to ensure its `HdrId` matches
+    the requested `loan_id` — a defensive safeguard against Vergent
+    occasionally returning cross-loan docs (observed empirically
+    with the user's account).
 
     With include_data=True, each shaped doc carries its raw Data +
     DocumentUrl for the download path to use.
@@ -2049,26 +2146,39 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
 
     out: List[Dict[str, Any]] = []
     seen: set = set()
+
+    # 1. Origination docs
     path = f"/V1/customer/{cid}/docs/loan/{loan_id}"
     status, body = _v1_get(path)
-
-    rows: List[Dict[str, Any]] = []
-    if status == 200:
-        if isinstance(body, list):
-            rows = [r for r in body if isinstance(r, dict)]
-        elif isinstance(body, dict):
-            for key in ("Items", "Documents", "Docs", "items", "documents", "docs"):
-                v = body.get(key)
-                if isinstance(v, list):
-                    rows = [r for r in v if isinstance(r, dict)]
-                    break
+    rows = _extract_doc_rows(status, body)
+    log.info("loan-docs origination loan=%s status=%s rows=%d names=%s",
+             loan_id, status, len(rows),
+             [str(r.get("DocumentName") or "")[:40] for r in rows[:6]])
 
     for r in rows:
+        # Defensive filter: drop records whose own HdrId doesn't
+        # match the requested loan. Protects against Vergent
+        # returning the wrong loan's documents.
+        record_hdr = r.get("HdrId") or r.get("hdr_id")
+        if record_hdr not in (None, "") and str(record_hdr) != str(loan_id):
+            log.warning("loan-docs hdr_mismatch requested=%s record=%s name=%s",
+                        loan_id, record_hdr, r.get("DocumentName"))
+            continue
         shaped = _shape_v1_document(r, loan_id, "loan", include_data=include_data)
         if not shaped or shaped["id"] in seen:
             continue
         seen.add(shaped["id"])
         out.append(shaped)
+
+    # 2. Per-payment receipts (one extra fetch per Payment tx)
+    try:
+        receipts = _fetch_payment_receipt_docs(cid, loan_id,
+                                                include_data=include_data,
+                                                seen=seen)
+        out.extend(receipts)
+    except Exception as e:
+        log.warning("loan-receipts unexpected loan=%s err=%s",
+                    loan_id, type(e).__name__)
 
     if status not in (200, 404):
         log.warning("v1 loan-docs %s status=%s loan=%s", path, status, loan_id)

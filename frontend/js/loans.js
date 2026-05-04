@@ -249,18 +249,13 @@
           return;
         }
         renderDetail(loan);
-        // Documents only render for paid-off loans. Active loans
-        // don't yet have a final document set (the Advance Receipt
-        // is generated at payoff) and the docs endpoint has been
-        // observed returning a previous loan's documents in some
-        // cases — hide the section entirely until that's resolved.
+        // Documents section is shown for both active and paid-off
+        // loans. Active loans have origination docs (Advance
+        // Contract, DDT Disclosure, Advance Receipt at funding);
+        // paid-off loans add payment receipts, one per payment.
         var docsSection = qs('#loanDocumentsSection');
-        if (loan.isOutstanding) {
-          if (docsSection) docsSection.style.display = 'none';
-        } else {
-          if (docsSection) docsSection.style.display = '';
-          loadDocuments(loan.id);
-        }
+        if (docsSection) docsSection.style.display = '';
+        loadDocuments(loan.id);
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
