@@ -2096,24 +2096,26 @@ def _shape_payment_receipts(loan_id: Any,
         log.info("loan-receipts loan=%s tx=%s type=%s status=%s rows=%d",
                  loan_id, tx_id, tx_type, tx_status, len(receipt_rows))
         for r in receipt_rows:
-            # Defensive: skip rows whose TransId disagrees with the
-            # tx we asked about. Vergent's per-tx docs endpoint
-            # occasionally returns sibling receipts from other
-            # transactions on the same loan; without this guard those
-            # would collide with the real receipts on doc id and the
-            # `seen` dedup would drop them.
-            row_tx = r.get("TransId") or r.get("transId")
-            if row_tx not in (None, "") and tx_id not in (None, "") \
-                    and str(row_tx) != str(tx_id):
-                continue
             shaped = _shape_v1_document(r, loan_id, "transaction",
                                          include_data=include_data)
             if not shaped:
                 continue
-            # Disambiguate by tx so two receipts that happen to share
-            # a Vergent doc id (e.g., when Vergent reuses ChainId-style
-            # ids across receipts) still survive the seen-dedup.
-            shaped["id"] = "{}:tx:{}".format(shaped["id"], tx_id)
+            base_id = shaped["id"]
+            # Vergent's per-tx docs endpoint sometimes returns the
+            # loan's origination docs back-of-house alongside (or
+            # instead of) the actual receipt for that tx. Those
+            # reappear here with the same Id we already shaped from
+            # the origination / OtherFiles passes — skip them so
+            # they don't get re-labelled as "Payment receipt".
+            if base_id in seen:
+                continue
+            # Disambiguate by tx so two distinct receipts that
+            # happen to share a Vergent doc id (ChainId-style
+            # collisions, observed empirically) still both survive.
+            # Don't seed the base_id into seen here — that would
+            # block the next tx's receipt if Vergent reuses the
+            # same Id across them.
+            shaped["id"] = "{}:tx:{}".format(base_id, tx_id)
             if shaped["id"] in seen:
                 continue
             # Override displayName so receipts read clearly even if
