@@ -2218,7 +2218,44 @@ def _list_v1_loan_docs(cid: str, loan_id: Any,
         seen.add(shaped["id"])
         out.append(shaped)
 
-    # 2. Per-payment receipts (one extra fetch per Payment tx)
+    # 2. OtherFiles — Vergent's "additional files for a loan" bucket.
+    # Payoff receipts and any post-origination docs Vergent
+    # auto-generates land here. Same HdrId + date filters apply so
+    # cross-loan rows can't sneak in. Empty list / 404 is normal for
+    # loans with no extras yet (e.g. an active loan pre-payoff).
+    other_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/OtherFiles"
+    other_status, other_body = _v1_get(other_path)
+    other_rows = _extract_doc_rows(other_status, other_body)
+    if other_rows:
+        log.info("loan-docs other-files loan=%s status=%s rows=%d names=%s",
+                 loan_id, other_status, len(other_rows),
+                 [str(r.get("DocumentName") or "")[:40] for r in other_rows[:6]])
+    for r in other_rows:
+        record_hdr = r.get("HdrId") or r.get("hdr_id")
+        if record_hdr not in (None, "") and str(record_hdr) != str(loan_id):
+            log.warning("loan-docs other-files hdr_mismatch requested=%s record=%s name=%s",
+                        loan_id, record_hdr, r.get("DocumentName"))
+            continue
+        if cutoff is not None:
+            doc_date_raw = (
+                r.get("DocumentDate") or r.get("documentDate")
+                or r.get("Date") or r.get("date")
+                or r.get("CreatedDate") or r.get("createdDate")
+            )
+            if doc_date_raw:
+                try:
+                    doc_dt = datetime.fromisoformat(str(doc_date_raw)[:10])
+                    if doc_dt < cutoff:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+        shaped = _shape_v1_document(r, loan_id, "loan", include_data=include_data)
+        if not shaped or shaped["id"] in seen:
+            continue
+        seen.add(shaped["id"])
+        out.append(shaped)
+
+    # 3. Per-payment receipts (one extra Vergent call per payment tx)
     try:
         receipts = _fetch_payment_receipt_docs(cid, loan_id,
                                                 include_data=include_data,
