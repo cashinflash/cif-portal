@@ -2002,6 +2002,17 @@ def _shape_v1_document(record: Dict[str, Any], loan_id: Any, kind: str,
         or fname
         or "Document"
     )
+    # Drop E-Sign Receipt records — Vergent's internal audit
+    # artifact for the signing ceremony, never something a customer
+    # should see in the portal. Match the full phrase so the loan
+    # agreement ("Advance Contract w E-Sign") stays visible.
+    hay = " ".join((str(fname), str(title),
+                    str(record.get("DocTypeName") or ""))).lower()
+    if ("e-sign receipt" in hay
+            or "esign receipt" in hay
+            or "esign_receipt" in hay
+            or "electronic signature receipt" in hay):
+        return None
     # Strip extension from the display label for cleaner UI ("DDT
     # Disclosure" instead of "DDT Disclosure.html"). The fileName
     # keeps its extension for the download dialog.
