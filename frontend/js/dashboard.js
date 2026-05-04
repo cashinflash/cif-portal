@@ -93,10 +93,31 @@
   // ---------- Greeting ----------
   document.addEventListener('DOMContentLoaded', function () {
     const firstName = claims.given_name || '';
-    const welcome = qs('#welcomeHeading');
-    if (welcome) {
-      welcome.textContent = firstName ? ('Welcome back, ' + firstName + '.') : 'Welcome back.';
+
+    // Brigit-style greeting header: "Monday, May 4 / Hey, Harut 👋"
+    const dateEl = qs('#dashDate');
+    if (dateEl) {
+      try {
+        dateEl.textContent = new Date().toLocaleDateString('en-US', {
+          weekday: 'long', month: 'long', day: 'numeric',
+        });
+      } catch (e) {
+        dateEl.textContent = '';
+      }
     }
+    const firstNameEl = qs('#dashFirstName');
+    if (firstNameEl) firstNameEl.textContent = firstName || 'there';
+
+    // Avatar initials (top right of greeting + sidebar fallback)
+    const last = (claims.family_name || '').trim();
+    const fallbackChar = (claims.email || 'C').charAt(0);
+    const initials = (
+      (firstName.charAt(0) || '') + (last.charAt(0) || fallbackChar)
+    ).toUpperCase().slice(0, 2) || 'CF';
+    const avatarEl = qs('#dashAvatarInitials');
+    if (avatarEl) avatarEl.textContent = initials;
+
+    // Legacy chip / sidebar name (still on mobile + sidebar bottom)
     const chip = qs('#userChip');
     if (chip) {
       chip.textContent = firstName ? ('Hi, ' + firstName) : (claims.email || 'Account');
@@ -114,7 +135,7 @@
     wireMobileMenu();
     wireNewLoanButton();
     showPaymentSuccessBanner();  // one-shot "payment posted" banner
-    renderProfileFromClaims();   // instant render from JWT claims
+    renderProfileFromClaims();   // instant render from JWT claims (legacy selectors safe to call when missing)
     loadProfileFromApi();         // hydrate with Vergent data (account status, phone hint, text-messaging flag)
     loadActiveLoan();
   });
@@ -267,20 +288,173 @@
 
   // ---------- Active loan ----------
   function loadActiveLoan() {
-    const card = qs('#activeLoanCard');
-    if (!card) return;
-
     api(ACTIVE_ENDPOINT, token)
       .then(function (data) {
-        renderActiveLoan(card, data);
-        renderLoanList(qs('#loanListBody'), (data && data.allLoans) || []);
-        renderMemberSince((data && data.allLoans) || []);
+        renderDashboardForData(data);
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
-        renderActiveLoan(card, null);
-        renderLoanList(qs('#loanListBody'), []);
+        renderDashboardForData(null);
       });
+  }
+
+  function renderDashboardForData(data) {
+    const card = qs('#activeLoanCard');
+    const hero = qs('#dashBorrowHero');
+    const allLoans = (data && data.allLoans) || [];
+    const hasActive = !!(data && data.loan);
+
+    // Branch: active loan → show the loan card; otherwise → show
+    // the "Up to $X if approved" hero. Never both.
+    if (hasActive) {
+      if (hero) hero.hidden = true;
+      if (card) {
+        card.hidden = false;
+        renderActiveLoan(card, data);
+      }
+    } else {
+      if (card) card.hidden = true;
+      if (hero) hero.hidden = false;
+    }
+
+    // Stats grid (always visible if we got a successful response)
+    renderStatsGrid(allLoans);
+
+    // Recent activity feed (replaces the legacy My-loans list)
+    renderRecentActivity(allLoans);
+
+    // Legacy My-loans list (no longer in markup but the function is
+    // safe to call — it's a no-op when the target element is gone)
+    renderLoanList(qs('#loanListBody'), allLoans);
+    renderMemberSince(allLoans);
+  }
+
+  // ---------- Stats grid (Total borrowed + Member since) ----------
+  function renderStatsGrid(allLoans) {
+    const grid = qs('#dashStatsGrid');
+    if (!grid) return;
+    grid.hidden = false;
+
+    // Total borrowed: sum of all loan principals (lifetime).
+    const totalEl = qs('#dashTotalBorrowed');
+    const metaEl = qs('#dashTotalBorrowedMeta');
+    let total = 0;
+    let count = 0;
+    allLoans.forEach(function (l) {
+      const p = Number(l && l.principal);
+      if (isFinite(p) && p > 0) { total += p; count += 1; }
+    });
+    if (totalEl) {
+      totalEl.textContent = total > 0
+        ? formatCurrencyPrecise(total)
+        : '$0';
+    }
+    if (metaEl) {
+      metaEl.textContent = count === 1
+        ? 'Across 1 loan'
+        : 'Across ' + count + ' loans';
+    }
+
+    // Member since: year of the earliest loan's loanDate / origination.
+    const sinceEl = qs('#dashMemberSince');
+    const sinceMeta = qs('#dashMemberSinceMeta');
+    let earliest = null;
+    allLoans.forEach(function (l) {
+      const d = new Date(l.loanDate || l.originationDate || 0);
+      if (!isNaN(d.getTime()) && (earliest === null || d < earliest)) {
+        earliest = d;
+      }
+    });
+    if (sinceEl) {
+      sinceEl.textContent = earliest ? String(earliest.getFullYear()) : '—';
+    }
+    if (sinceMeta) {
+      sinceMeta.textContent = count > 1
+        ? 'Returning customer ✓'
+        : (count === 1 ? 'Welcome aboard' : '');
+    }
+  }
+
+  // ---------- Recent activity feed ----------
+  function renderRecentActivity(allLoans) {
+    const root = qs('#dashRecentActivity');
+    if (!root) return;
+    root.innerHTML = '';
+
+    if (!allLoans || !allLoans.length) {
+      const p = document.createElement('p');
+      p.className = 'dash-recent-activity-empty';
+      p.textContent = "Nothing here yet — your account activity will show up after your first loan.";
+      root.appendChild(p);
+      return;
+    }
+
+    // Newest first by loanDate / originationDate. Show top 4.
+    const sorted = allLoans.slice().sort(function (a, b) {
+      const da = new Date(a.loanDate || a.originationDate || 0).getTime();
+      const db = new Date(b.loanDate || b.originationDate || 0).getTime();
+      return db - da;
+    }).slice(0, 4);
+
+    sorted.forEach(function (loan) {
+      const row = document.createElement('a');
+      row.className = 'dash-recent-activity-row';
+      row.href = '/loans.html?id=' + encodeURIComponent(loan.id);
+      row.style.textDecoration = 'none';
+      row.style.color = 'inherit';
+
+      const status = (loan.status || '').toLowerCase();
+      const isPaidOff = status.indexOf('paid') !== -1;
+      const isPastDue = status.indexOf('past') !== -1 || (loan.daysLate && loan.daysLate.toLowerCase && loan.daysLate.toLowerCase() !== 'not late');
+
+      // Icon + classes based on state
+      const iconWrap = document.createElement('div');
+      iconWrap.className = 'dash-recent-activity-icon ' +
+        (isPaidOff ? 'dash-recent-activity-icon--paid'
+         : isPastDue ? 'dash-recent-activity-icon--late'
+         : 'dash-recent-activity-icon--current');
+      iconWrap.innerHTML = isPaidOff
+        ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
+        : isPastDue
+        ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+        : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
+
+      const main = document.createElement('div');
+      main.className = 'dash-recent-activity-main';
+
+      const title = document.createElement('div');
+      title.className = 'dash-recent-activity-title';
+      title.textContent = isPaidOff ? 'Loan paid off'
+                       : isPastDue ? 'Loan past due'
+                       : (loan.status || 'Loan');
+      main.appendChild(title);
+
+      const sub = document.createElement('div');
+      sub.className = 'dash-recent-activity-sub';
+      const dateStr = formatDate(loan.loanDate || loan.originationDate);
+      sub.textContent = 'Loan #' + (loan.publicId || loan.id) + (dateStr && dateStr !== '—' ? ' · ' + dateStr : '');
+      main.appendChild(sub);
+
+      const right = document.createElement('div');
+      right.className = 'dash-recent-activity-amount';
+
+      const amt = document.createElement('div');
+      amt.textContent = formatCurrencyPrecise(loan.principal);
+      right.appendChild(amt);
+
+      const status_el = document.createElement('span');
+      status_el.className = 'dash-recent-activity-status';
+      status_el.textContent = isPaidOff ? 'Closed'
+                            : isPastDue ? 'Past due'
+                            : (loan.status || 'Current');
+      if (isPastDue) status_el.style.color = '#991b1b';
+      right.appendChild(status_el);
+
+      row.appendChild(iconWrap);
+      row.appendChild(main);
+      row.appendChild(right);
+      root.appendChild(row);
+    });
   }
 
   function renderActiveLoan(card, data) {
