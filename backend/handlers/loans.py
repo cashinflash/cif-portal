@@ -2089,20 +2089,21 @@ def _fetch_payment_receipt_docs(cid: str, loan_id: Any,
     for tx in tx_rows:
         if tx.get("IsVoid"):
             continue
-        # Vergent labels: "Payment", "ACH Payment", "Card Payment",
-        # etc. Filter to transactions whose Type/Label says payment.
-        tx_type = str(tx.get("Type") or tx.get("Label") or "").lower()
-        if "payment" not in tx_type:
-            continue
+        # Try every non-void transaction. Vergent's payment labels
+        # vary ("Payment", "ACH Payment", "Card Payment", "Partial",
+        # "Settlement", etc.) — easier to ask for docs on every row
+        # and accept the empty 404s than to maintain a label list.
         tx_id = tx.get("Id")
         if not tx_id:
             continue
+        tx_type = str(tx.get("Type") or tx.get("Label") or "")
 
         tx_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}"
         tx_status, tx_body = _v1_get(tx_path)
         receipt_rows = _extract_doc_rows(tx_status, tx_body)
-        log.info("loan-receipts loan=%s tx=%s status=%s rows=%d",
-                 loan_id, tx_id, tx_status, len(receipt_rows))
+        if receipt_rows:
+            log.info("loan-receipts loan=%s tx=%s type=%s status=%s rows=%d",
+                     loan_id, tx_id, tx_type, tx_status, len(receipt_rows))
 
         for r in receipt_rows:
             shaped = _shape_v1_document(r, loan_id, "transaction",
@@ -2214,11 +2215,87 @@ def get_loan_documents(event: Dict[str, Any]) -> Dict[str, Any]:
     if not loan:
         return _json_response(404, {"error": "loan_not_found"})
 
-    docs = _list_v1_loan_docs(cid, loan.get("id"))
+    loan_id = loan.get("id")
+    docs = _list_v1_loan_docs(cid, loan_id)
+
+    # Temporary diagnostic: surface raw Vergent doc-record fields so
+    # we can confirm whether the cross-loan docs bug stems from
+    # Vergent shipping wrong HdrId rows or from our pipeline. Removed
+    # in a follow-up once the root cause is locked.
+    debug_docs: Dict[str, Any] = {
+        "requestedLoanId": loan_id,
+        "originationUrl": f"/V1/customer/{cid}/docs/loan/{loan_id}",
+        "originationRowsRaw": [],
+        "receiptsByTx": [],
+    }
+    try:
+        orig_status, orig_body = _v1_get(debug_docs["originationUrl"])
+        orig_rows = _extract_doc_rows(orig_status, orig_body)
+        debug_docs["originationStatus"] = orig_status
+        debug_docs["originationRowsRaw"] = [
+            {
+                "HdrId": r.get("HdrId") or r.get("hdr_id"),
+                "ChainId": r.get("ChainId") or r.get("chainId"),
+                "DocumentName": r.get("DocumentName") or r.get("documentName"),
+                "TransId": r.get("TransId") or r.get("transId"),
+                "Id": r.get("Id") or r.get("id"),
+                "DocumentDate": r.get("DocumentDate") or r.get("documentDate"),
+            }
+            for r in orig_rows
+        ]
+    except Exception as exc:
+        debug_docs["originationError"] = type(exc).__name__
+
+    try:
+        if _v1_user_id is None:
+            _get_v1_token()
+        uid = _v1_user_id or 0
+        params = urllib.parse.urlencode({
+            "custId": cid,
+            "HdrId": loan_id,
+            "companyId": VERGENT_COMPANY_ID,
+            "storeId": 0,
+            "userId": uid,
+        })
+        hist_status, hist_body = _v1_get(f"/V1/GetCustomerLoanHistory?{params}")
+        debug_docs["historyStatus"] = hist_status
+        tx_rows: List[Dict[str, Any]] = []
+        if isinstance(hist_body, list):
+            tx_rows = [r for r in hist_body if isinstance(r, dict)]
+        elif isinstance(hist_body, dict):
+            for key in ("Items", "Transactions", "History", "LoanHistory"):
+                v = hist_body.get(key)
+                if isinstance(v, list):
+                    tx_rows = [r for r in v if isinstance(r, dict)]
+                    break
+        for tx in tx_rows:
+            if tx.get("IsVoid"):
+                continue
+            tx_id = tx.get("Id")
+            if not tx_id:
+                continue
+            tx_type = str(tx.get("Type") or tx.get("Label") or "")
+            tx_path = f"/V1/customer/{cid}/docs/loan/{loan_id}/trans/{tx_id}"
+            tx_status, tx_body = _v1_get(tx_path)
+            tx_doc_rows = _extract_doc_rows(tx_status, tx_body)
+            debug_docs["receiptsByTx"].append({
+                "txId": tx_id,
+                "txType": tx_type,
+                "txStatus": tx_status,
+                "receiptCount": len(tx_doc_rows),
+                "receiptHdrIds": [r.get("HdrId") or r.get("hdr_id")
+                                  for r in tx_doc_rows],
+                "receiptNames": [r.get("DocumentName") or r.get("documentName")
+                                 for r in tx_doc_rows],
+            })
+    except Exception as exc:
+        debug_docs["historyError"] = type(exc).__name__
+
     return _json_response(200, {
         "documents": docs,
-        "loanId": loan.get("id"),
+        "loanId": loan_id,
         "publicId": loan.get("publicId"),
+        "_debugDocs": debug_docs,
     })
 
 
