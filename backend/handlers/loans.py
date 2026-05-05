@@ -53,6 +53,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets as _secrets_module  # avoid clash with `_secrets` boto client
 import time
 import uuid
@@ -2668,6 +2669,31 @@ def _shape_esign_pending(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _scan_for_guids(value: Any, path: str = "",
+                    out: Optional[List[Dict[str, str]]] = None,
+                    depth: int = 0) -> List[Dict[str, str]]:
+    """Walk an arbitrary JSON value and collect every string that
+    looks like a GUID, paired with its dotted path. Used by the
+    diagnostic surface so we can grep for the URL signing GUID
+    in Vergent's response."""
+    if out is None:
+        out = []
+    if depth > 4:
+        return out
+    guid_re = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                         r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+    if isinstance(value, str):
+        if guid_re.match(value.strip()):
+            out.append({"path": path or "<root>", "guid": value.strip()})
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _scan_for_guids(v, f"{path}.{k}" if path else k, out, depth + 1)
+    elif isinstance(value, list):
+        for i, v in enumerate(value[:20]):  # cap to avoid log spam
+            _scan_for_guids(v, f"{path}[{i}]", out, depth + 1)
+    return out
+
+
 def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
     """Fetch the list of pending e-sign requests for a customer.
     Returns shaped rows; empty list on any non-200 / unexpected
@@ -2720,6 +2746,11 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
             for fut, entry in future_map.items():
                 try:
                     s, b = fut.result()
+                    # Diagnostic: retain raw response on the entry
+                    # so get_pending_esign can surface it. Removed
+                    # once we know the right URL-GUID field.
+                    entry["_signResponseStatus"] = s
+                    entry["_signResponseBody"] = b
                     hdr = _extract_hdr_id_from_esign_doc(b) if s == 200 else None
                     if hdr:
                         entry["loanId"] = hdr
@@ -2739,55 +2770,47 @@ def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     waiting on this customer's signature. Drives the dashboard
     banner + per-loan callout on the loan-detail page.
 
-    Includes a temporary `_debug` block on the response so we can
-    confirm the path-prefix fix landed. Removed in the follow-up
-    commit once a real customer with a pending sig sees the
-    expected populated `pending` list.
+    Carries a temporary `_debug.signResponses` block — for each
+    pending entry we log Vergent's /esign/sign/{EsignId} response
+    shape + every GUID-like value found anywhere in it. That
+    surfaces the URL-shaped GUID so the follow-up commit can
+    populate the correct hosted-signing link. Dropped once we
+    know which field to read.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"pending": [], "_debug": {"reason": "no_cid"}})
 
-    path = f"/esign/pending/{cid}"
-    status, parsed, raw = _v1_request("GET", path, return_raw=True)
-    body_type = type(parsed).__name__ if parsed is not None else "None"
-    top_keys = list(parsed.keys())[:20] if isinstance(parsed, dict) else []
-    list_len = len(parsed) if isinstance(parsed, list) else None
+    enriched = _fetch_pending_esign(cid)
+    sign_responses = []
+    public = []
+    for entry in enriched:
+        sign_status = entry.pop("_signResponseStatus", None)
+        sign_body = entry.pop("_signResponseBody", None)
+        public.append(entry)
+        guid_candidates = _scan_for_guids(sign_body)
+        # Strip the originating EsignId from the candidates list so
+        # only NEW GUIDs (potential signing-session ids) remain.
+        guid_candidates = [g for g in guid_candidates
+                           if g["guid"].lower() != str(entry["id"]).lower()]
+        sign_responses.append({
+            "esignId": entry["id"],
+            "upstreamStatus": sign_status,
+            "bodyType": type(sign_body).__name__ if sign_body is not None else "None",
+            "topKeys": (list(sign_body.keys())[:30]
+                        if isinstance(sign_body, dict) else []),
+            "guidCandidates": guid_candidates[:30],
+            "rawSnippet": json.dumps(sign_body, default=str)[:1200]
+                          if sign_body is not None else "",
+        })
 
-    rows: List[Dict[str, Any]] = []
-    if status == 200:
-        if isinstance(parsed, list):
-            rows = [r for r in parsed if isinstance(r, dict)]
-        elif isinstance(parsed, dict):
-            for key in ("Items", "Documents", "Pending", "Esigns", "Records",
-                        "items", "documents", "pending", "esigns", "records",
-                        "Result", "result", "Data", "data"):
-                v = parsed.get(key)
-                if isinstance(v, list):
-                    rows = [r for r in v if isinstance(r, dict)]
-                    break
-
-    out: List[Dict[str, Any]] = []
-    seen: set = set()
-    for r in rows:
-        shaped = _shape_esign_pending(r)
-        if not shaped or shaped["id"] in seen:
-            continue
-        seen.add(shaped["id"])
-        out.append(shaped)
-
-    log.info("esign-pending cid=%s status=%s rows=%d", cid, status, len(out))
+    log.info("esign-pending cid=%s rows=%d", cid, len(public))
     return _json_response(200, {
-        "pending": out,
+        "pending": public,
         "_debug": {
             "cid": cid,
-            "path": path,
-            "upstreamStatus": status,
-            "bodyType": body_type,
-            "topKeys": top_keys,
-            "listLen": list_len,
-            "rawSnippet": (raw if isinstance(raw, str) else str(raw or ""))[:400],
+            "signResponses": sign_responses,
         },
     })
 
