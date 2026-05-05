@@ -19,6 +19,8 @@ Routes (bound to HttpApi with Cognito JWT authorizer):
   POST /api/plaid/exchange                    -> public_token → access_token + persist
   GET  /api/plaid/connections                 -> list this customer's linked banks
   DELETE /api/plaid/connections/{itemId}      -> revoke a connection
+  GET  /api/admin/plaid/customers             -> [admin] every customer with a portal Plaid link
+  GET  /api/admin/plaid/customer/{cid}        -> [admin] full detail incl. Plaid /accounts/get
   POST /api/my-loan/new                       -> returns handoff URL into Vergent loan-application UI
 
 Auth model:
@@ -3285,6 +3287,14 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             parts = [p for p in path.split("/") if p]
             item_id = parts[-1] if parts else ""
             return plaid.disconnect(event, item_id)
+        # Admin (cif-admin Cognito group) — list/detail
+        if path.endswith("/admin/plaid/customers") and method == "GET":
+            return plaid.list_admin_customers(event)
+        if ("/admin/plaid/customer/" in path
+                and method == "GET"):
+            parts = [p for p in path.split("/") if p]
+            cid_param = parts[-1] if parts else ""
+            return plaid.get_admin_customer(event, cid_param)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:

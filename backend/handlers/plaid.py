@@ -401,3 +401,249 @@ def disconnect(event: Dict[str, Any], item_id: str) -> Dict[str, Any]:
 
     log.info("plaid disconnected cid=%s item=%s", cid, item_id)
     return _json_response(200, {"ok": True})
+
+
+# ─────────────────────────────────────────
+# Admin endpoints (cif-admin Cognito group)
+# Used by cif-dashboard's "Portal Bank Links" sub-tab to list
+# every customer who has linked a bank via the portal, plus
+# detail / re-pull data on demand. Auth gate is a group check
+# on the JWT — separate from the customer endpoints above.
+# ─────────────────────────────────────────
+
+ADMIN_GROUP_NAME = "cif-admin"
+
+
+def _claims_from_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """JWT claims live under requestContext.authorizer.jwt.claims
+    on HttpApi events with a JWT authorizer attached."""
+    return (((event.get("requestContext") or {}).get("authorizer") or {})
+            .get("jwt", {}).get("claims") or {})
+
+
+def _require_admin_group(claims: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return None if the caller is in the cif-admin Cognito
+    group; otherwise return a 403 response dict the caller
+    should bubble up.
+
+    cognito:groups can come through several shapes depending on
+    the auth flow:
+      - list:   ["cif-admin", "user"]
+      - csv:    "cif-admin,user"
+      - bracketed: "[cif-admin user]"
+    Normalize all three.
+    """
+    groups_raw = claims.get("cognito:groups") or claims.get("groups") or []
+    if isinstance(groups_raw, str):
+        cleaned = groups_raw.strip("[]").replace(",", " ")
+        groups = [g.strip() for g in cleaned.split() if g.strip()]
+    elif isinstance(groups_raw, list):
+        groups = [str(g).strip() for g in groups_raw if g]
+    else:
+        groups = []
+    if ADMIN_GROUP_NAME not in groups:
+        log.info("admin gate denied caller_groups=%s required=%s",
+                 groups, ADMIN_GROUP_NAME)
+        return _json_response(403, {"ok": False, "error": "admin_required"})
+    return None
+
+
+def _fetch_vergent_profile(cid: str) -> Dict[str, str]:
+    """Pull a thin name+email+phone-last-4 profile from Vergent.
+    Lazy-imports loans._v1_get to avoid a circular module-load
+    at boot."""
+    from handlers import loans  # noqa: WPS433 — lazy on purpose
+    out = {"firstName": "", "lastName": "", "email": "", "phoneLast4": ""}
+    try:
+        status, body = loans._v1_get(f"/V1/GetCustomer/{cid}")
+    except Exception as e:
+        log.info("admin vergent-profile fetch err cid=%s err=%s",
+                 cid, type(e).__name__)
+        return out
+    if status != 200 or not isinstance(body, dict):
+        return out
+    out["firstName"] = str(body.get("FirstName") or "").strip()
+    out["lastName"] = str(body.get("LastName") or "").strip()
+    out["email"] = str(body.get("EmailAddr") or "").strip()
+    # Try v1 GetCustomerData for the primary phone
+    try:
+        s2, data = loans._v1_get(f"/V1/GetCustomerData/{cid}")
+        if s2 == 200 and isinstance(data, dict):
+            phones = data.get("custPhones") or []
+            primary = next(
+                (p for p in phones if isinstance(p, dict) and p.get("is_primary")),
+                next((p for p in phones if isinstance(p, dict)), None),
+            )
+            if primary:
+                num = str(primary.get("number") or "")
+                if len(num) >= 4:
+                    out["phoneLast4"] = num[-4:]
+    except Exception:
+        pass
+    return out
+
+
+def _scan_all_items() -> List[Dict[str, Any]]:
+    """Scan the entire Plaid items table. Fine for the small
+    customer count we're at. Replace with a GSI-backed query
+    once we cross ~5k connected customers."""
+    out: List[Dict[str, Any]] = []
+    last_key = None
+    while True:
+        kwargs: Dict[str, Any] = {"TableName": PLAID_ITEMS_TABLE}
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        resp = _dynamo.scan(**kwargs)
+        out.extend(resp.get("Items") or [])
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+    return out
+
+
+def list_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/admin/plaid/customers — admin-only listing of
+    every customer who has linked a bank via the portal,
+    hydrated with Vergent profile (name + email + phone last 4).
+
+    Optional `?search=jane` filters on name / email / customerId
+    (substring, case-insensitive)."""
+    claims = _claims_from_event(event)
+    err = _require_admin_group(claims)
+    if err:
+        return err
+
+    qs = event.get("queryStringParameters") or {}
+    search = ((qs or {}).get("search") or "").strip().lower()
+
+    # Pull every Plaid Item row from DDB and group by customerId.
+    raw = _scan_all_items()
+    by_cid: Dict[str, List[Dict[str, Any]]] = {}
+    for it in raw:
+        cid = (it.get("customerId") or {}).get("S") or ""
+        if not cid:
+            continue
+        by_cid.setdefault(cid, []).append({
+            "itemId": (it.get("itemId") or {}).get("S") or "",
+            "institutionName": (it.get("institutionName") or {}).get("S") or "Bank",
+            "institutionId": (it.get("institutionId") or {}).get("S") or "",
+            "accountMask": (it.get("accountMask") or {}).get("S") or "",
+            "accountSubtype": (it.get("accountSubtype") or {}).get("S") or "",
+            "linkedAt": (it.get("linkedAt") or {}).get("S") or "",
+        })
+
+    # Fan out Vergent profile fetches in parallel — typical CIF
+    # customer count is small (<100 portal-linked at MVP), so an
+    # 8-wide pool is fine.
+    profiles: Dict[str, Dict[str, str]] = {}
+    if by_cid:
+        from concurrent.futures import ThreadPoolExecutor as _Pool
+        with _Pool(max_workers=min(8, len(by_cid))) as ex:
+            futures = {ex.submit(_fetch_vergent_profile, cid): cid
+                       for cid in by_cid.keys()}
+            for fut in futures:
+                profiles[futures[fut]] = fut.result()
+
+    # Flatten into one row per (customer, item) pair.
+    out: List[Dict[str, Any]] = []
+    for cid, items in by_cid.items():
+        prof = profiles.get(cid, {})
+        full_name = (prof.get("firstName", "") + " " + prof.get("lastName", "")).strip()
+        for item in items:
+            out.append({
+                "customerId": cid,
+                "customerName": full_name,
+                "customerEmail": prof.get("email", ""),
+                "customerPhoneLast4": prof.get("phoneLast4", ""),
+                **item,
+            })
+
+    if search:
+        out = [r for r in out if (
+            search in (r.get("customerName") or "").lower()
+            or search in (r.get("customerEmail") or "").lower()
+            or search in (r.get("customerId") or "").lower()
+            or search in (r.get("institutionName") or "").lower()
+        )]
+
+    out.sort(key=lambda r: r.get("linkedAt") or "", reverse=True)
+    log.info("admin list-customers caller_groups=%s rows=%d",
+             claims.get("cognito:groups"), len(out))
+    return _json_response(200, {"customers": out})
+
+
+def get_admin_customer(event: Dict[str, Any], cid: str) -> Dict[str, Any]:
+    """GET /api/admin/plaid/customer/{cid} — full detail for one
+    customer. Returns Vergent profile + every Plaid Item, with a
+    fresh /accounts/get pull per Item so admins see all the
+    accounts under each link, not just the primary mask we
+    cached at link-time."""
+    claims = _claims_from_event(event)
+    err = _require_admin_group(claims)
+    if err:
+        return err
+    if not cid:
+        return _json_response(400, {"ok": False, "error": "missing_cid"})
+
+    # All items for this customer.
+    try:
+        resp = _dynamo.query(
+            TableName=PLAID_ITEMS_TABLE,
+            KeyConditionExpression="customerId = :c",
+            ExpressionAttributeValues={":c": {"S": str(cid)}},
+        )
+    except ClientError as e:
+        log.warning("admin DDB query err cid=%s err=%s",
+                    cid, e.response.get("Error", {}).get("Code"))
+        return _json_response(502, {"ok": False, "error": "db_error"})
+    raw_items = resp.get("Items") or []
+    if not raw_items:
+        return _json_response(404, {"ok": False, "error": "no_connections"})
+
+    profile = _fetch_vergent_profile(cid)
+
+    items: List[Dict[str, Any]] = []
+    for it in raw_items:
+        item_id = (it.get("itemId") or {}).get("S") or ""
+        access_token = (it.get("accessToken") or {}).get("S") or ""
+        accounts: List[Dict[str, Any]] = []
+        if access_token:
+            try:
+                a_status, a_parsed, _a_raw = _plaid_post(
+                    "/accounts/get", {"access_token": access_token},
+                )
+                if a_status == 200 and isinstance(a_parsed, dict):
+                    for acc in a_parsed.get("accounts") or []:
+                        bal = acc.get("balances") or {}
+                        accounts.append({
+                            "accountId": acc.get("account_id"),
+                            "name": acc.get("name"),
+                            "officialName": acc.get("official_name"),
+                            "mask": acc.get("mask"),
+                            "type": acc.get("type"),
+                            "subtype": acc.get("subtype"),
+                            "currentBalance": bal.get("current"),
+                            "availableBalance": bal.get("available"),
+                            "currency": bal.get("iso_currency_code"),
+                        })
+                else:
+                    log.info("admin /accounts/get non-200 item=%s status=%s",
+                             item_id, a_status)
+            except Exception as e:
+                log.info("admin /accounts/get err item=%s err=%s",
+                         item_id, type(e).__name__)
+        items.append({
+            "itemId": item_id,
+            "institutionName": (it.get("institutionName") or {}).get("S") or "Bank",
+            "institutionId": (it.get("institutionId") or {}).get("S") or "",
+            "linkedAt": (it.get("linkedAt") or {}).get("S") or "",
+            "accounts": accounts,
+        })
+
+    return _json_response(200, {
+        "customerId": cid,
+        "customerName": (profile.get("firstName", "") + " " + profile.get("lastName", "")).strip(),
+        "customerEmail": profile.get("email", ""),
+        "customerPhoneLast4": profile.get("phoneLast4", ""),
+        "items": items,
+    })

@@ -1,0 +1,142 @@
+name: Provision Cognito admin group
+
+# One-shot provisioning for the cif-admin Cognito group + a
+# service user inside it that cif-dashboard can use to call the
+# portal's admin endpoints.
+#
+# Why a service user (not per-admin):
+#   cif-dashboard's auth is cookie-based scrypt passwords (see
+#   cif-dashboard/server.py). Its frontend can't directly hold
+#   a Cognito JWT. So the dashboard backend acts as a proxy:
+#     1. Authenticates as portal-admin-svc@cashinflash.com
+#        against the portal's Cognito user pool.
+#     2. Caches the resulting access token.
+#     3. Forwards admin requests to /api/admin/plaid/* with
+#        that token.
+#   Per-admin attribution is preserved via cif-dashboard's own
+#   session log (which admin clicked what).
+#
+# Re-running this workflow rotates the service user's password
+# and re-prints it in the workflow summary so it can be pasted
+# back into cif-dashboard's Render env vars.
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_user_email:
+        description: Service user email (will be created in Cognito if missing)
+        required: true
+        default: portal-admin-svc@cashinflash.com
+
+env:
+  AWS_REGION: us-east-1
+  USER_POOL_ID: us-east-1_U508xOs95
+  GROUP_NAME: cif-admin
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure cif-admin group exists
+        run: |
+          set -e
+          if aws cognito-idp get-group \
+              --user-pool-id "$USER_POOL_ID" \
+              --group-name "$GROUP_NAME" >/dev/null 2>&1; then
+            echo "Group $GROUP_NAME already exists."
+          else
+            aws cognito-idp create-group \
+              --user-pool-id "$USER_POOL_ID" \
+              --group-name "$GROUP_NAME" \
+              --description "Cif-admin: cif-dashboard service users authorized to hit /api/admin/* on cif-portal" \
+              --no-cli-pager >/dev/null
+            echo "Created group $GROUP_NAME."
+          fi
+
+      - name: Ensure service user exists + assigned to group
+        id: svc
+        env:
+          SVC_EMAIL: ${{ github.event.inputs.service_user_email }}
+        run: |
+          set -e
+          # Generate a strong random password (Cognito requires
+          # ≥8 chars + upper + lower + digit + symbol).
+          PWD=$(python3 -c 'import secrets, string; \
+              alphabet = string.ascii_letters + string.digits + "!@#$%^&*"; \
+              print("Aa1!" + "".join(secrets.choice(alphabet) for _ in range(28)))')
+          echo "::add-mask::$PWD"
+
+          if aws cognito-idp admin-get-user \
+              --user-pool-id "$USER_POOL_ID" \
+              --username "$SVC_EMAIL" >/dev/null 2>&1; then
+            echo "User $SVC_EMAIL already exists — rotating password."
+            aws cognito-idp admin-set-user-password \
+              --user-pool-id "$USER_POOL_ID" \
+              --username "$SVC_EMAIL" \
+              --password "$PWD" \
+              --permanent \
+              --no-cli-pager >/dev/null
+          else
+            echo "Creating service user $SVC_EMAIL..."
+            aws cognito-idp admin-create-user \
+              --user-pool-id "$USER_POOL_ID" \
+              --username "$SVC_EMAIL" \
+              --user-attributes Name=email,Value="$SVC_EMAIL" Name=email_verified,Value=true \
+              --message-action SUPPRESS \
+              --no-cli-pager >/dev/null
+            aws cognito-idp admin-set-user-password \
+              --user-pool-id "$USER_POOL_ID" \
+              --username "$SVC_EMAIL" \
+              --password "$PWD" \
+              --permanent \
+              --no-cli-pager >/dev/null
+            echo "Created."
+          fi
+
+          # Add to group (idempotent — OK if already in).
+          aws cognito-idp admin-add-user-to-group \
+            --user-pool-id "$USER_POOL_ID" \
+            --username "$SVC_EMAIL" \
+            --group-name "$GROUP_NAME" \
+            --no-cli-pager >/dev/null
+          echo "$SVC_EMAIL is in group $GROUP_NAME."
+
+          # Stash for the next step (still masked).
+          echo "svc_password=$PWD" >> "$GITHUB_OUTPUT"
+
+      - name: Print credentials in the workflow summary
+        env:
+          SVC_EMAIL: ${{ github.event.inputs.service_user_email }}
+          SVC_PASSWORD: ${{ steps.svc.outputs.svc_password }}
+        run: |
+          {
+            echo "### Cognito admin service user provisioned"
+            echo ""
+            echo "**Group:** \`$GROUP_NAME\`"
+            echo "**User pool:** \`$USER_POOL_ID\`"
+            echo "**User:** \`$SVC_EMAIL\`"
+            echo ""
+            echo "Password (one-time, copy now):"
+            echo ""
+            echo '```'
+            echo "$SVC_PASSWORD"
+            echo '```'
+            echo ""
+            echo "Next: paste these into cif-dashboard's Render env vars:"
+            echo ""
+            echo '```'
+            echo "PORTAL_ADMIN_SVC_EMAIL=$SVC_EMAIL"
+            echo "PORTAL_ADMIN_SVC_PASSWORD=$SVC_PASSWORD"
+            echo "PORTAL_COGNITO_USER_POOL_ID=$USER_POOL_ID"
+            echo "PORTAL_COGNITO_APP_CLIENT_ID=1mddi61n19hftaldt9t3r622b"
+            echo "PORTAL_API_BASE=https://anh066l1wf.execute-api.us-east-1.amazonaws.com"
+            echo '```'
+            echo ""
+            echo "Re-run this workflow any time to rotate the password."
+          } >> "$GITHUB_STEP_SUMMARY"

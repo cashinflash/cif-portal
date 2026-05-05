@@ -202,6 +202,24 @@ Resources:
             Auth:
               Authorizer: JwtAuthorizer
               AuthorizerId: !Ref JwtAuthorizerId
+        AdminPlaidCustomers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/admin/plaid/customers
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        AdminPlaidCustomer:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/admin/plaid/customer/{cid}
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
 
   PaymentsFn:
     Type: AWS::Serverless::Function
