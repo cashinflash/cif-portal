@@ -1,0 +1,186 @@
+name: Update CSP for Plaid
+
+# One-shot workflow to allow Plaid's CDN + iframe + API hosts
+# in the CloudFront response-headers-policy attached to the
+# customer-portal distribution.
+#
+# Background: the portal's CSP (set during the Phase A security-
+# headers work) is currently `script-src 'self' 'unsafe-inline'`,
+# which blocks cdn.plaid.com from loading. Plaid Link won't
+# initialize until the CSP is widened.
+#
+# What this workflow does:
+#  1. Find the response-headers-policy attached to distribution
+#     EOV9K12LFKK8T.
+#  2. Read its current Content-Security-Policy.
+#  3. Update each relevant directive to also allow:
+#       script-src   → https://cdn.plaid.com
+#       frame-src    → https://*.plaid.com https://cdn.plaid.com
+#       connect-src  → https://*.plaid.com
+#       img-src      → https://*.plaid.com (institution logos)
+#       style-src    → (left alone — Plaid styles inside iframe)
+#  4. Save the policy back. Existing directives are preserved
+#     verbatim; we only ADD to script/frame/connect/img.
+#  5. Trigger an invalidation on /* so the new header is served
+#     immediately rather than waiting for the cache to expire.
+#
+# Idempotent — re-running detects already-allowed hosts and is
+# a no-op for those.
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  CF_DISTRIBUTION: EOV9K12LFKK8T
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Discover the response-headers-policy on the distribution
+        id: discover
+        run: |
+          set -e
+          # The distribution config carries the policy id under
+          # DefaultCacheBehavior.ResponseHeadersPolicyId. Cache
+          # behaviors per path can also have their own; we only
+          # touch the default.
+          aws cloudfront get-distribution-config \
+            --id "$CF_DISTRIBUTION" \
+            > /tmp/dist.json
+
+          POLICY_ID=$(jq -r \
+            '.DistributionConfig.DefaultCacheBehavior.ResponseHeadersPolicyId // empty' \
+            /tmp/dist.json)
+          if [ -z "$POLICY_ID" ] || [ "$POLICY_ID" = "null" ]; then
+            echo "::error::No ResponseHeadersPolicyId on default cache behavior. CSP must be set elsewhere (Lambda@Edge?). Falling back is out of scope for this workflow." >&2
+            exit 1
+          fi
+          echo "Found response-headers-policy id: $POLICY_ID"
+          echo "policy_id=$POLICY_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Patch CSP to allow Plaid hosts
+        env:
+          POLICY_ID: ${{ steps.discover.outputs.policy_id }}
+        run: |
+          set -e
+          aws cloudfront get-response-headers-policy \
+            --id "$POLICY_ID" > /tmp/policy.json
+          ETAG=$(jq -r '.ETag' /tmp/policy.json)
+          echo "Current ETag: $ETAG"
+
+          CONFIG=$(jq '.ResponseHeadersPolicy.ResponseHeadersPolicyConfig' /tmp/policy.json)
+
+          # Pull the existing CSP value (custom header OR the
+          # SecurityHeadersConfig.ContentSecurityPolicy field).
+          # We support both shapes — different setups put it in
+          # different places.
+          CSP_OLD=$(echo "$CONFIG" | jq -r '
+            .SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy
+            // (.CustomHeadersConfig.Items[]?
+                 | select(.Header | ascii_downcase == "content-security-policy")
+                 | .Value)
+            // empty
+          ' | head -n 1)
+          if [ -z "$CSP_OLD" ]; then
+            echo "::error::No CSP found on the policy. Aborting." >&2
+            exit 1
+          fi
+          echo "Current CSP:"
+          echo "  $CSP_OLD"
+
+          # Add Plaid hosts to script-src / frame-src / connect-src / img-src.
+          # If a directive doesn't exist yet, add it. If it already includes
+          # the host, leave it alone.
+          PATCHED=$(python3 - <<PY
+import re, sys
+src = """$CSP_OLD"""
+adds = {
+    "script-src":  ["https://cdn.plaid.com"],
+    "frame-src":   ["https://*.plaid.com", "https://cdn.plaid.com"],
+    "connect-src": ["https://*.plaid.com"],
+    "img-src":     ["https://*.plaid.com"],
+}
+parts = [p.strip() for p in src.split(";") if p.strip()]
+by_name = {}
+order = []
+for p in parts:
+    bits = p.split(None, 1)
+    name = bits[0]
+    rest = bits[1] if len(bits) > 1 else ""
+    by_name[name] = rest
+    order.append(name)
+
+for name, hosts in adds.items():
+    cur = by_name.get(name, "")
+    cur_set = set(cur.split())
+    for h in hosts:
+        if h not in cur_set:
+            cur = (cur + " " + h).strip()
+            cur_set.add(h)
+    by_name[name] = cur
+    if name not in order:
+        order.append(name)
+
+out = "; ".join(name + " " + by_name[name] for name in order)
+print(out)
+PY
+)
+          echo "Patched CSP:"
+          echo "  $PATCHED"
+
+          if [ "$PATCHED" = "$CSP_OLD" ]; then
+            echo "CSP already allows Plaid hosts; nothing to do."
+            exit 0
+          fi
+
+          # Splice the new value back into the config (whichever
+          # shape it was in).
+          NEW_CONFIG=$(echo "$CONFIG" | jq --arg csp "$PATCHED" '
+            if .SecurityHeadersConfig.ContentSecurityPolicy then
+              .SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy = $csp
+            else . end
+            | if (.CustomHeadersConfig.Items // []) | any(.Header | ascii_downcase == "content-security-policy") then
+              .CustomHeadersConfig.Items |= map(
+                if (.Header | ascii_downcase) == "content-security-policy"
+                then .Value = $csp else . end
+              )
+            else . end
+          ')
+
+          echo "$NEW_CONFIG" > /tmp/new_config.json
+          aws cloudfront update-response-headers-policy \
+            --id "$POLICY_ID" \
+            --if-match "$ETAG" \
+            --response-headers-policy-config file:///tmp/new_config.json \
+            --no-cli-pager > /dev/null
+          echo "Policy $POLICY_ID updated."
+
+      - name: Invalidate CloudFront so the new CSP serves immediately
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$CF_DISTRIBUTION" \
+            --paths '/*' \
+            --no-cli-pager > /dev/null
+          echo "Invalidation created on $CF_DISTRIBUTION."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### CSP updated for Plaid"
+            echo ""
+            echo "- Distribution: \`$CF_DISTRIBUTION\`"
+            echo "- Hosts added to CSP: \`cdn.plaid.com\`, \`*.plaid.com\`"
+            echo "- Directives touched: \`script-src\`, \`frame-src\`, \`connect-src\`, \`img-src\`"
+            echo "- Invalidation: \`/*\`"
+            echo ""
+            echo "Next: hard-refresh the portal in a private window. Tap Connect — Plaid Link should open."
+          } >> "$GITHUB_STEP_SUMMARY"
