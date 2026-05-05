@@ -2467,6 +2467,33 @@ button.dash-doc-download:disabled {
 @media (max-width: 960px) {
   .dash-banner { margin: 0 16px 12px; }
 }
+@media (max-width: 640px) {
+  .dash-banner {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    padding: 14px 16px;
+  }
+  .dash-banner > svg { flex-shrink: 0; }
+  .dash-banner > span {
+    flex: 1 1 100%;
+    order: 1;
+  }
+  .dash-banner-actions {
+    width: 100%;
+    margin-left: 0;
+    order: 2;
+  }
+  .dash-banner-btn {
+    flex: 1 1 0;
+    justify-content: center;
+    text-align: center;
+  }
+  .dash-banner-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+  }
+}
 
 /* Empty state (no active loan) */
 .dash-loan-empty { text-align: center; padding: 48px 32px; }

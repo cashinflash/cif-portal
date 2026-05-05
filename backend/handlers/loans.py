@@ -2883,16 +2883,17 @@ def _esign_owns_loan(cid: str, loan_id: Any) -> Optional[Dict[str, Any]]:
 
 
 def get_esign_document(event: Dict[str, Any]) -> Dict[str, Any]:
-    """GET /api/my-esign/document?loanId=N — fetch the unsigned
-    document set for a loan via Vergent v1 /api/esign/sign/{guid}.
+    """GET /api/my-esign/document?loanId=N or ?esignId=GUID — fetch
+    the unsigned document set via Vergent v1 /esign/sign/{guid}.
 
-    Customer hits this when they click "Sign now" in the portal.
-    We look up the pending esign GUID for this loan from the
-    /esign/pending list (so the customer can't request docs for a
-    loan they don't own), then proxy through to Vergent. Returns
-    Vergent's response body + status so the modal can render
-    whichever shape comes back (HTML, JSON metadata with embedded
-    HTML, etc. — TBD until we see a real response).
+    Either query param works:
+      - loanId: looks up the pending esign GUID for this loan from
+        the customer's /esign/pending list, then proxies through
+      - esignId: direct fetch; ownership enforced by checking the
+        GUID is in the customer's pending list
+
+    Returns Vergent's response body so the modal can render
+    whichever shape comes back (HTML, JSON metadata, etc.).
     """
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -2900,39 +2901,50 @@ def get_esign_document(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(401, {"error": "no_customer_id"})
 
     qs = event.get("queryStringParameters") or {}
-    requested = (qs or {}).get("loanId") if isinstance(qs, dict) else None
-    if not requested:
-        return _json_response(400, {"error": "missing_loanId"})
-
-    loan = _esign_owns_loan(cid, requested)
-    if not loan:
-        return _json_response(404, {"error": "loan_not_found"})
+    requested_loan = (qs or {}).get("loanId") if isinstance(qs, dict) else None
+    requested_esign = (qs or {}).get("esignId") if isinstance(qs, dict) else None
+    if not requested_loan and not requested_esign:
+        return _json_response(400, {"error": "missing_id"})
 
     pending = _fetch_pending_esign(cid)
-    match = next(
-        (p for p in pending
-         if str(p.get("loanId")) == str(loan.get("id"))
-         or str(p.get("publicLoanId") or "") == str(loan.get("publicId") or "")),
-        None,
-    )
+
+    match = None
+    loan = None
+    if requested_esign:
+        match = next(
+            (p for p in pending if str(p.get("id")) == str(requested_esign)),
+            None,
+        )
+        if match and match.get("loanId"):
+            loan = _esign_owns_loan(cid, match["loanId"]) or {}
+    else:
+        loan = _esign_owns_loan(cid, requested_loan)
+        if not loan:
+            return _json_response(404, {"error": "loan_not_found"})
+        match = next(
+            (p for p in pending
+             if str(p.get("loanId")) == str(loan.get("id"))
+             or str(p.get("publicLoanId") or "") == str(loan.get("publicId") or "")),
+            None,
+        )
+
     if not match:
         return _json_response(404, {"error": "no_pending_signature"})
 
     esign_id = match["id"]
     status, body = _v1_get(f"/esign/sign/{esign_id}")
     log.info("esign-fetch loan=%s esign=%s status=%s body_type=%s",
-             loan.get("id"), esign_id, status, type(body).__name__)
+             (loan or {}).get("id"), esign_id, status, type(body).__name__)
     if status not in (200, 204):
         return _json_response(502, {
             "error": "vergent_error",
             "upstreamStatus": status,
         })
 
-    # Return whatever shape Vergent gave us so the frontend can adapt.
     return _json_response(200, {
         "esignId": esign_id,
-        "loanId": loan.get("id"),
-        "publicLoanId": loan.get("publicId"),
+        "loanId": (loan or {}).get("id") or match.get("loanId"),
+        "publicLoanId": (loan or {}).get("publicId") or match.get("publicLoanId"),
         "document": body,
     })
 
@@ -2940,14 +2952,15 @@ def get_esign_document(event: Dict[str, Any]) -> Dict[str, Any]:
 def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/my-esign/sign — finalize an in-portal signature.
 
-    Body: `{ "loanId": N, "signerName": "Jane Doe", "agreed": true }`.
+    Body accepts either { loanId, signerName, agreed } OR
+    { esignId, signerName, agreed }. esignId is the more reliable
+    key since Vergent's /esign/pending list doesn't always include
+    the loan reference.
 
-    Posts to Vergent v1 /api/V1/loan/{HdrId}/signingdata with our
-    best-guess payload shape. Surfaces upstreamStatus + upstreamBody
-    on failure so we can iterate on the body shape if Vergent
-    rejects it (we don't have a public schema for this endpoint
-    yet — same diagnostic-driven approach we used for the
-    profile-edit and phone-verify integrations earlier).
+    Posts to Vergent v1 /api/V1/loan/{HdrId}/signingdata when we
+    can resolve a HdrId; falls back to
+    /api/V1/customer/{cid}/signingdata otherwise. Surfaces
+    upstreamStatus + upstreamBody on failure.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -2958,37 +2971,46 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
         body = json.loads(event.get("body") or "{}")
     except (ValueError, TypeError):
         body = {}
-    requested = body.get("loanId")
+    requested_loan = body.get("loanId")
+    requested_esign = body.get("esignId")
     signer_name = (body.get("signerName") or "").strip()
     agreed = bool(body.get("agreed"))
-    if not requested:
-        return _json_response(400, {"ok": False, "error": "missing_loanId"})
+    if not requested_loan and not requested_esign:
+        return _json_response(400, {"ok": False, "error": "missing_id"})
     if not signer_name:
         return _json_response(400, {"ok": False, "error": "missing_signerName"})
     if not agreed:
         return _json_response(400, {"ok": False, "error": "consent_required"})
 
-    loan = _esign_owns_loan(cid, requested)
-    if not loan:
-        return _json_response(404, {"ok": False, "error": "loan_not_found"})
-
     pending = _fetch_pending_esign(cid)
-    match = next(
-        (p for p in pending
-         if str(p.get("loanId")) == str(loan.get("id"))
-         or str(p.get("publicLoanId") or "") == str(loan.get("publicId") or "")),
-        None,
-    )
+
+    match = None
+    loan = None
+    if requested_esign:
+        match = next(
+            (p for p in pending if str(p.get("id")) == str(requested_esign)),
+            None,
+        )
+        if match and match.get("loanId"):
+            loan = _esign_owns_loan(cid, match["loanId"]) or {}
+    else:
+        loan = _esign_owns_loan(cid, requested_loan)
+        if not loan:
+            return _json_response(404, {"ok": False, "error": "loan_not_found"})
+        match = next(
+            (p for p in pending
+             if str(p.get("loanId")) == str(loan.get("id"))
+             or str(p.get("publicLoanId") or "") == str(loan.get("publicId") or "")),
+            None,
+        )
     if not match:
         return _json_response(409, {"ok": False, "error": "no_pending_signature"})
 
-    hdr_id = loan.get("id")
+    hdr_id = (loan or {}).get("id") or match.get("loanId")
     esign_id = match["id"]
-    # Capture audit-trail fields from the request envelope. Vergent
-    # likely wants signer IP + user agent for ESIGN Act compliance.
+
     http_ctx = (event.get("requestContext") or {}).get("http") or {}
     headers_raw = event.get("headers") or {}
-    # API Gateway lower-cases header names.
     user_agent = (
         http_ctx.get("userAgent")
         or headers_raw.get("user-agent") or headers_raw.get("User-Agent")
@@ -3003,10 +3025,6 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
         source_ip = source_ip.split(",")[0].strip()
     signed_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
-    # Best-guess payload — mirrors typed-name e-sign conventions
-    # (signer name + IP + UA + timestamp + reference to the esign
-    # record). If Vergent rejects, the upstreamBody surfaces on
-    # the response so we can iterate.
     payload = {
         "EsignId": esign_id,
         "HdrId": hdr_id,
@@ -3019,32 +3037,58 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
         "Accepted": True,
     }
 
-    status, parsed, raw = _v1_request(
-        "POST", f"/V1/loan/{hdr_id}/signingdata",
-        body=payload, return_raw=True,
-    )
-    log.info("esign-submit loan=%s esign=%s status=%s", hdr_id, esign_id, status)
-    if status not in (200, 201, 204):
+    attempts = []
+    final_status = None
+    final_parsed = None
+    final_raw = ""
+
+    if hdr_id:
+        s, parsed, raw = _v1_request(
+            "POST", f"/V1/loan/{hdr_id}/signingdata",
+            body=payload, return_raw=True,
+        )
+        attempts.append({
+            "path": f"/V1/loan/{hdr_id}/signingdata",
+            "status": s,
+            "rawSnippet": (raw if isinstance(raw, str) else str(raw or ""))[:300],
+        })
+        final_status, final_parsed, final_raw = s, parsed, raw
+
+    if final_status not in (200, 201, 204):
+        # Fall back to the customer-scoped submit (works without HdrId).
+        s, parsed, raw = _v1_request(
+            "POST", f"/V1/customer/{cid}/signingdata",
+            body=payload, return_raw=True,
+        )
+        attempts.append({
+            "path": f"/V1/customer/{cid}/signingdata",
+            "status": s,
+            "rawSnippet": (raw if isinstance(raw, str) else str(raw or ""))[:300],
+        })
+        final_status, final_parsed, final_raw = s, parsed, raw
+
+    log.info("esign-submit loan=%s esign=%s final_status=%s attempts=%d",
+             hdr_id, esign_id, final_status, len(attempts))
+    if final_status not in (200, 201, 204):
         log.warning("esign-submit non-2xx loan=%s status=%s body=%r",
-                    hdr_id, status, (raw or "")[:400])
+                    hdr_id, final_status, (final_raw or "")[:400])
         return _json_response(502, {
             "ok": False,
             "error": "vergent_error",
-            "upstreamStatus": status,
-            "upstreamBody": (raw or "")[:600],
+            "upstreamStatus": final_status,
+            "upstreamBody": (final_raw or "")[:600],
+            "_debug": {"attempts": attempts},
         })
 
-    # Best-effort: PUT the signing status to "complete" so Vergent's
-    # admin views update without waiting for a poll. Failures here
-    # are non-fatal — the signature is already captured upstream.
-    try:
-        _v1_request("PUT", f"/V1/loan/{hdr_id}/signingstatus",
-                    body={"Status": "Complete", "EsignId": esign_id})
-    except Exception as exc:
-        log.info("esign-submit status-put error loan=%s err=%s",
-                 hdr_id, type(exc).__name__)
+    if hdr_id:
+        try:
+            _v1_request("PUT", f"/V1/loan/{hdr_id}/signingstatus",
+                        body={"Status": "Complete", "EsignId": esign_id})
+        except Exception as exc:
+            log.info("esign-submit status-put error loan=%s err=%s",
+                     hdr_id, type(exc).__name__)
 
-    return _json_response(200, {"ok": True, "result": parsed})
+    return _json_response(200, {"ok": True, "result": final_parsed})
 
 
 # ─────────────────────────────────────────

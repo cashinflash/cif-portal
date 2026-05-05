@@ -96,8 +96,19 @@
 
     var params = new URLSearchParams(window.location.search);
     var loanIdParam = params.get('id');
+    var esignParam = params.get('esign');
+    var actionParam = params.get('action');
+
     if (loanIdParam) {
       showDetail(loanIdParam);
+    } else if (esignParam && actionParam === 'sign') {
+      // Standalone signing flow — dashboard "Sign now" deep-linked
+      // here with just the esign GUID (Vergent's pending list
+      // doesn't always expose a HdrId we can target). Render the
+      // history list as the background and open the signing modal
+      // straight on top of it.
+      showList();
+      setTimeout(function () { openEsignModalByGuid(esignParam); }, 50);
     } else {
       showList();
     }
@@ -417,7 +428,18 @@
   // the customer type their name + check the consent box, then
   // POSTs to /api/my-esign/sign which forwards to Vergent's
   // signingdata endpoint. Reuses the doc-modal CSS pattern.
+  // Open the e-sign modal using the esign GUID directly (no
+  // loanId needed). Called from the dashboard "Sign now" deep
+  // link: /loans.html?esign=<guid>&action=sign.
+  function openEsignModalByGuid(esignId) {
+    openEsignModalCore({ esignId: esignId });
+  }
+
   function openEsignModal(loanId) {
+    openEsignModalCore({ loanId: loanId });
+  }
+
+  function openEsignModalCore(target) {
     var modal = qs('#esignModal');
     if (!modal) return;
     var body = qs('#esignModalBody');
@@ -451,7 +473,14 @@
     modal.hidden = false;
     document.body.style.overflow = 'hidden';
 
-    fetch('/api/my-esign/document?loanId=' + encodeURIComponent(loanId), {
+    var docUrl = '/api/my-esign/document';
+    if (target.esignId) {
+      docUrl += '?esignId=' + encodeURIComponent(target.esignId);
+    } else if (target.loanId) {
+      docUrl += '?loanId=' + encodeURIComponent(target.loanId);
+    }
+
+    fetch(docUrl, {
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
       credentials: 'omit',
     }).then(function (r) {
@@ -475,7 +504,7 @@
       }
     });
 
-    wireEsignSubmit(loanId);
+    wireEsignSubmit(target);
   }
 
   function renderEsignDocument(doc) {
@@ -524,7 +553,7 @@
     }
   }
 
-  function wireEsignSubmit(loanId) {
+  function wireEsignSubmit(target) {
     var nameEl = qs('#esignSignerName');
     var agreeEl = qs('#esignAgreeBox');
     var submitBtn = qs('#esignSubmitBtn');
@@ -543,6 +572,9 @@
       submitBtn.disabled = true;
       submitBtn.textContent = 'Signing…';
       if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+      var bodyPayload = { signerName: name, agreed: true };
+      if (target && target.esignId) bodyPayload.esignId = target.esignId;
+      else if (target && target.loanId) bodyPayload.loanId = target.loanId;
       fetch('/api/my-esign/sign', {
         method: 'POST',
         headers: {
@@ -551,7 +583,7 @@
           'Accept': 'application/json',
         },
         credentials: 'omit',
-        body: JSON.stringify({ loanId: loanId, signerName: name, agreed: true }),
+        body: JSON.stringify(bodyPayload),
       }).then(function (r) {
         return r.json().then(function (data) { return { ok: r.ok, data: data }; });
       }).then(function (res) {
