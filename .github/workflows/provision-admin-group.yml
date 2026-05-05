@@ -110,6 +110,42 @@ jobs:
           # Stash for the next step (still masked).
           echo "svc_password=$PWD" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure USER_PASSWORD_AUTH is enabled on the app client
+        env:
+          APP_CLIENT_ID: 1mddi61n19hftaldt9t3r622b
+        run: |
+          set -e
+          # The existing customer login flow uses ADMIN_USER_PASSWORD_AUTH
+          # (server-side admin call). cif-dashboard's proxy authenticates
+          # the service user from a Render container without AWS creds, so
+          # it needs USER_PASSWORD_AUTH (client-side flow). Read the
+          # current ExplicitAuthFlows, add the missing flow if any, write
+          # the union back. Safe re-run: reads and writes are idempotent.
+
+          CURRENT=$(aws cognito-idp describe-user-pool-client \
+            --user-pool-id "$USER_POOL_ID" \
+            --client-id "$APP_CLIENT_ID" \
+            --query 'UserPoolClient.ExplicitAuthFlows' --output json)
+          echo "Current ExplicitAuthFlows: $CURRENT"
+
+          # Required set we want present.
+          DESIRED='["ALLOW_ADMIN_USER_PASSWORD_AUTH","ALLOW_USER_PASSWORD_AUTH","ALLOW_REFRESH_TOKEN_AUTH","ALLOW_USER_SRP_AUTH"]'
+
+          MERGED=$(jq -n --argjson cur "$CURRENT" --argjson des "$DESIRED" \
+            '($cur + $des) | unique')
+          echo "Merged ExplicitAuthFlows: $MERGED"
+
+          if [ "$(echo "$CURRENT" | jq -S .)" = "$(echo "$MERGED" | jq -S .)" ]; then
+            echo "All required auth flows already enabled — no update needed."
+          else
+            aws cognito-idp update-user-pool-client \
+              --user-pool-id "$USER_POOL_ID" \
+              --client-id "$APP_CLIENT_ID" \
+              --explicit-auth-flows $(echo "$MERGED" | jq -r '.[]') \
+              --no-cli-pager >/dev/null
+            echo "Updated ExplicitAuthFlows on app client $APP_CLIENT_ID."
+          fi
+
       - name: Print credentials in the workflow summary
         env:
           SVC_EMAIL: ${{ github.event.inputs.service_user_email }}
@@ -135,7 +171,7 @@ jobs:
             echo "PORTAL_ADMIN_SVC_PASSWORD=$SVC_PASSWORD"
             echo "PORTAL_COGNITO_USER_POOL_ID=$USER_POOL_ID"
             echo "PORTAL_COGNITO_APP_CLIENT_ID=1mddi61n19hftaldt9t3r622b"
-            echo "PORTAL_API_BASE=https://anh066l1wf.execute-api.us-east-1.amazonaws.com"
+            echo "PORTAL_API_BASE=https://anh066l1wf.execute-api.us-east-1.amazonaws.com/dev"
             echo '```'
             echo ""
             echo "Re-run this workflow any time to rotate the password."
