@@ -108,13 +108,17 @@
   // Open Plaid Link with a fresh token. onDone is called after a
   // successful exchange → caller refreshes the connections list.
   function openLink(onDone) {
-    var btn = $('#bankConnectBtn');
+    var btn = $('#bankConnectBtn') || $('#dashBankConnect');
+    var originalText = btn ? btn.textContent : 'Connect your bank';
     if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
     return Promise.all([loadPlaidSdk(), fetchLinkToken()])
       .then(function (parts) {
         var Plaid = parts[0];
         var linkToken = parts[1];
-        if (btn) { btn.disabled = false; btn.textContent = 'Connect your bank'; }
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
+        if (!Plaid || !Plaid.create) {
+          throw new Error('plaid_sdk_unavailable');
+        }
         var handler = Plaid.create({
           token: linkToken,
           onSuccess: function (publicToken, metadata) {
@@ -123,6 +127,7 @@
                 if (onDone) onDone(true);
               } else {
                 console.warn('[plaid] exchange failed', res);
+                window.alert('Connected to your bank but couldn’t save the link. Please try again, or call (747) 270-7121.');
                 if (onDone) onDone(false);
               }
             });
@@ -134,8 +139,22 @@
         handler.open();
       })
       .catch(function (err) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Try again'; }
+        if (btn) { btn.disabled = false; btn.textContent = originalText; }
         console.warn('[plaid] open failed', err);
+        var msg = (err && err.message) || 'unknown';
+        var visible = 'We couldn’t open the bank-connect window.';
+        if (msg.indexOf('plaid_sdk') !== -1) {
+          visible += ' (Plaid SDK didn’t load — check your network or any ad-blockers.)';
+        } else if (msg.indexOf('http_403') !== -1 || msg.indexOf('http_404') !== -1) {
+          visible += ' (Backend route not yet registered — run the provisioning workflows.)';
+        } else if (msg.indexOf('http_5') !== -1 || msg.indexOf('plaid_error') !== -1) {
+          visible += ' (Backend reached but Plaid call failed: ' + msg + '.)';
+        } else if (msg !== 'unauthorized') {
+          visible += ' Error: ' + msg;
+        } else {
+          return;  // Already redirected to login.
+        }
+        window.alert(visible + ' Please refresh and try again, or call (747) 270-7121.');
       });
   }
 
