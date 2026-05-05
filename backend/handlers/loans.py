@@ -472,23 +472,17 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# Vergent v1 statusId values we treat as "real, settled" loan history
-# that the customer should see. Discovered empirically via the DevTools
-# probe on Harut's account 2026-05-01:
-#   statusId 3  -> Paid Off    (the 1 loan he actually paid off)
-#   statusId 10 -> Deleted     (the 2 ghost application records)
-# Vergent's text status fields (Status, SubStatus) are NULL for these
-# records so statusId is the only reliable distinguishing field.
-# Add additional settled variants (e.g. Bought Back) here as we
-# discover their statusIds.
-_PAID_OFF_STATUS_IDS = {3}
+# Vergent v1 statusId values that mark loans the customer should
+# never see — the 2 known examples are ghost application records
+# the underwriting flow leaves behind:
+#   statusId 10 -> Deleted     (ghost application records)
+# Add new bad statusIds here as we encounter them.
+_HIDDEN_STATUS_IDS = {10}
 
-# Substrings (matched case-insensitive) we treat as "loan was settled
-# in good standing" — surface to the customer and label as "Paid Off".
-# "Bought Back" is what Vergent calls a loan that's been refinanced
-# into a fresh advance: the original loan is closed in good standing,
-# functionally equivalent to a payoff from the customer's view.
-_SETTLED_STATUS_TOKENS = ("paid", "bought back", "boughtback")
+# Substrings (case-insensitive) in any status text field that mean
+# "this loan is not real or shouldn't be displayed". Drives the
+# denylist branch of _is_visible_loan.
+_HIDDEN_STATUS_TOKENS = ("delet", "cancel", "void")
 
 
 def _normalize_closed_status(sub_status: Optional[str], status_id: Any) -> str:
@@ -497,42 +491,34 @@ def _normalize_closed_status(sub_status: Optional[str], status_id: Any) -> str:
     "Bought Back" loans are functionally paid off (Vergent rolls them
     into a fresh advance); we relabel them so the customer sees a
     consistent "Paid Off" pill across both flows. Anything else falls
-    back to Vergent's SubStatus text, then to a statusId-derived
-    default.
+    back to Vergent's SubStatus text, then to "Paid Off" as the
+    default for non-outstanding records (we already filtered out
+    Deleted/Cancelled in _is_visible_loan, so anything that lands
+    here is a settled loan in good standing).
     """
     if sub_status:
         text = str(sub_status).strip().lower()
         if "bought" in text or "paid" in text:
             return "Paid Off"
         return str(sub_status)
-    try:
-        if int(status_id) in _PAID_OFF_STATUS_IDS:
-            return "Paid Off"
-    except (TypeError, ValueError):
-        pass
-    return "Closed"
+    return "Paid Off"
 
 
 def _is_visible_loan(loan: Dict[str, Any]) -> bool:
     """Filter Vergent's raw loan list down to what a customer should see.
 
-    Customers should see:
-      - outstanding (current) loans
-      - paid-off loans (Vergent statusId in _PAID_OFF_STATUS_IDS)
-      - any loan with explicit settled-text in a status field —
-        catches Bought Back and forward-compats Vergent records
-        where Status/SubStatus is filled in instead of statusId
-    Everything else (Deleted, Cancelled, ghost application records,
-    etc.) is hidden everywhere — history page, dashboard list,
-    activity, documents.
+    Denylist approach: show everything that has real loan substance
+    (principal > 0) except records explicitly tagged as Deleted /
+    Cancelled / Voided. The previous allowlist ("must contain
+    'paid'") was hiding settled-but-relabeled loans like Bought Back.
     """
     if loan.get("isOutstanding"):
         return True
 
     sid = loan.get("statusId")
     try:
-        if int(sid) in _PAID_OFF_STATUS_IDS:
-            return True
+        if int(sid) in _HIDDEN_STATUS_IDS:
+            return False
     except (TypeError, ValueError):
         pass
 
@@ -541,10 +527,19 @@ def _is_visible_loan(loan: Dict[str, Any]) -> bool:
         if not raw:
             continue
         text = str(raw).strip().lower()
-        if any(tok in text for tok in _SETTLED_STATUS_TOKENS):
-            return True
+        if any(tok in text for tok in _HIDDEN_STATUS_TOKENS):
+            return False
 
-    return False
+    # Ghost records have principal=0 and NULL status fields — drop
+    # them so the history doesn't list empty entries.
+    principal = loan.get("principal")
+    try:
+        if not principal or float(principal) <= 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+
+    return True
 
 
 def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
