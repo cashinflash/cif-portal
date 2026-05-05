@@ -20,9 +20,6 @@
 
   var TOKEN_KEY = 'cif_id_token';
   var LOGIN_URL = '/start.html';
-  var PLAID_SDK = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
-
-  var sdkPromise = null;
 
   function $(sel, root) { return (root || document).querySelector(sel); }
   function token() { return sessionStorage.getItem(TOKEN_KEY); }
@@ -62,19 +59,26 @@
   }
 
   // ----- Plaid SDK -----
-
+  // The SDK is loaded statically via a <script> tag in
+  // profile.html / dashboard.html `<head>`. This helper just
+  // waits for `window.Plaid` to become available — handles the
+  // race where the customer taps Connect before the async
+  // script has finished loading. Dynamic <script> injection
+  // was unreliable on iOS Safari (ITP / content blockers).
   function loadPlaidSdk() {
-    if (sdkPromise) return sdkPromise;
-    sdkPromise = new Promise(function (resolve, reject) {
+    return new Promise(function (resolve, reject) {
       if (window.Plaid && window.Plaid.create) return resolve(window.Plaid);
-      var s = document.createElement('script');
-      s.src = PLAID_SDK;
-      s.async = true;
-      s.onload = function () { resolve(window.Plaid); };
-      s.onerror = function () { reject(new Error('plaid_sdk_load_failed')); };
-      document.head.appendChild(s);
+      var deadline = Date.now() + 6000;
+      var iv = setInterval(function () {
+        if (window.Plaid && window.Plaid.create) {
+          clearInterval(iv);
+          resolve(window.Plaid);
+        } else if (Date.now() > deadline) {
+          clearInterval(iv);
+          reject(new Error('plaid_sdk_load_failed'));
+        }
+      }, 50);
     });
-    return sdkPromise;
   }
 
   function fetchLinkToken() {

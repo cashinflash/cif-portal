@@ -20,6 +20,9 @@
       } catch(e){}
     })();
   </script>
+  <!-- Plaid Link SDK — static load (works on iOS Safari where
+       dynamic-injection of cross-origin scripts can be blocked). -->
+  <script async src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
 </head>
 <body class="dashboard-page has-sidebar">
 
