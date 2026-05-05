@@ -2639,7 +2639,11 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
     shape so the caller can render an empty state cleanly."""
     if not cid:
         return []
-    status, body = _v1_get(f"/api/esign/pending/{cid}")
+    # V1_BASE already ends in /api/api — paths must NOT start with
+    # another /api/ or IIS routes us to a 404. Vergent's swagger
+    # documents this endpoint as /api/esign/pending/{cid}; the
+    # leading /api/ is the swagger root, not part of the path.
+    status, body = _v1_get(f"/esign/pending/{cid}")
     if status != 200:
         log.info("esign-pending status=%s cid=%s", status, cid)
         return []
@@ -2675,66 +2679,33 @@ def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     banner + per-loan callout on the loan-detail page.
 
     Includes a temporary `_debug` block on the response so we can
-    see Vergent's raw response shape during the Phase 1 rollout.
-    Removed once we confirm the parse path is right.
+    confirm the path-prefix fix landed. Removed in the follow-up
+    commit once a real customer with a pending sig sees the
+    expected populated `pending` list.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"pending": [], "_debug": {"reason": "no_cid"}})
 
-    # Probe several path variants in one shot — Vergent's swagger
-    # describes /api/esign/pending/{customerId} but we've seen
-    # casing / prefix variation across other v1 endpoints, and the
-    # diagnostic-driven approach catches it without a second
-    # deploy. First 200 with non-empty body wins; otherwise we
-    # surface every attempt's shape so we can see what's there.
-    candidates = [
-        f"/api/esign/pending/{cid}",
-        f"/api/Esign/Pending/{cid}",
-        f"/api/V1/esign/pending/{cid}",
-        f"/api/V1/customer/{cid}/esign/pending",
-        f"/api/esign/customer/{cid}/pending",
-    ]
-    attempts = []
-    chosen_body = None
-    chosen_path = None
-    for path in candidates:
-        status, parsed, raw = _v1_request("GET", path, return_raw=True)
-        body_type = type(parsed).__name__ if parsed is not None else "None"
-        top_keys = []
-        list_len = None
-        if isinstance(parsed, dict):
-            top_keys = list(parsed.keys())[:20]
-        elif isinstance(parsed, list):
-            list_len = len(parsed)
-        attempts.append({
-            "path": path,
-            "status": status,
-            "bodyType": body_type,
-            "topKeys": top_keys,
-            "listLen": list_len,
-            "rawSnippet": (raw if isinstance(raw, str) else str(raw or ""))[:300],
-        })
-        # Pick the first 200 that has non-empty content.
-        if status == 200 and chosen_body is None:
-            if (isinstance(parsed, list) and len(parsed) > 0) or (
-                isinstance(parsed, dict) and any(parsed.get(k) for k in parsed)
-            ):
-                chosen_body = parsed
-                chosen_path = path
+    path = f"/esign/pending/{cid}"
+    status, parsed, raw = _v1_request("GET", path, return_raw=True)
+    body_type = type(parsed).__name__ if parsed is not None else "None"
+    top_keys = list(parsed.keys())[:20] if isinstance(parsed, dict) else []
+    list_len = len(parsed) if isinstance(parsed, list) else None
 
     rows: List[Dict[str, Any]] = []
-    if isinstance(chosen_body, list):
-        rows = [r for r in chosen_body if isinstance(r, dict)]
-    elif isinstance(chosen_body, dict):
-        for key in ("Items", "Documents", "Pending", "Esigns", "Records",
-                    "items", "documents", "pending", "esigns", "records",
-                    "Result", "result", "Data", "data"):
-            v = chosen_body.get(key)
-            if isinstance(v, list):
-                rows = [r for r in v if isinstance(r, dict)]
-                break
+    if status == 200:
+        if isinstance(parsed, list):
+            rows = [r for r in parsed if isinstance(r, dict)]
+        elif isinstance(parsed, dict):
+            for key in ("Items", "Documents", "Pending", "Esigns", "Records",
+                        "items", "documents", "pending", "esigns", "records",
+                        "Result", "result", "Data", "data"):
+                v = parsed.get(key)
+                if isinstance(v, list):
+                    rows = [r for r in v if isinstance(r, dict)]
+                    break
 
     out: List[Dict[str, Any]] = []
     seen: set = set()
@@ -2745,14 +2716,17 @@ def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
         seen.add(shaped["id"])
         out.append(shaped)
 
-    log.info("esign-pending probe cid=%s chosen=%s rows=%d",
-             cid, chosen_path, len(out))
+    log.info("esign-pending cid=%s status=%s rows=%d", cid, status, len(out))
     return _json_response(200, {
         "pending": out,
         "_debug": {
             "cid": cid,
-            "chosenPath": chosen_path,
-            "attempts": attempts,
+            "path": path,
+            "upstreamStatus": status,
+            "bodyType": body_type,
+            "topKeys": top_keys,
+            "listLen": list_len,
+            "rawSnippet": (raw if isinstance(raw, str) else str(raw or ""))[:400],
         },
     })
 
@@ -2796,12 +2770,12 @@ def resend_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     # POST returns a non-2xx so we don't regress on tenants that
     # only support the older endpoint.
     status, _resp = _v1_request(
-        "POST", f"/api/V1/customer/{cid}/docs/sendesign/{hdr_id}",
+        "POST", f"/V1/customer/{cid}/docs/sendesign/{hdr_id}",
     )
     if status not in (200, 204):
         log.info("esign-resend POST sendesign status=%s hdr=%s; falling back to GET",
                  status, hdr_id)
-        status, _resp = _v1_get(f"/api/esign/sendEsignDocs/{hdr_id}")
+        status, _resp = _v1_get(f"/esign/sendEsignDocs/{hdr_id}")
     if status not in (200, 204):
         log.warning("esign-resend non-2xx status=%s hdr=%s", status, hdr_id)
         return _json_response(502, {"ok": False, "error": "vergent_error",
@@ -2860,7 +2834,7 @@ def get_esign_document(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(404, {"error": "no_pending_signature"})
 
     esign_id = match["id"]
-    status, body = _v1_get(f"/api/esign/sign/{esign_id}")
+    status, body = _v1_get(f"/esign/sign/{esign_id}")
     log.info("esign-fetch loan=%s esign=%s status=%s body_type=%s",
              loan.get("id"), esign_id, status, type(body).__name__)
     if status not in (200, 204):
@@ -2961,7 +2935,7 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     status, parsed, raw = _v1_request(
-        "POST", f"/api/V1/loan/{hdr_id}/signingdata",
+        "POST", f"/V1/loan/{hdr_id}/signingdata",
         body=payload, return_raw=True,
     )
     log.info("esign-submit loan=%s esign=%s status=%s", hdr_id, esign_id, status)
@@ -2979,7 +2953,7 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     # admin views update without waiting for a poll. Failures here
     # are non-fatal — the signature is already captured upstream.
     try:
-        _v1_request("PUT", f"/api/V1/loan/{hdr_id}/signingstatus",
+        _v1_request("PUT", f"/V1/loan/{hdr_id}/signingstatus",
                     body={"Status": "Complete", "EsignId": esign_id})
     except Exception as exc:
         log.info("esign-submit status-put error loan=%s err=%s",
