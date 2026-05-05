@@ -191,8 +191,67 @@
     }).then(function (data) {
       const pending = (data && data.pending) || [];
       if (!pending.length) return;
+      // Stash the diagnostic block so renderEsignBanner can drop a
+      // "Show details" expandable on the banner — useful while we
+      // pin down the right signing-URL GUID without DevTools.
+      window.__cifEsignDebug = data && data._debug;
       renderEsignBanner(pending);
     }).catch(function () { /* silent — leave banner off on network blip */ });
+  }
+
+  // Visible-on-screen debug for the e-sign hosted-signing GUID
+  // hunt. Renders a "Show details" expandable inside the banner
+  // listing every GUID Vergent's /esign/sign/{id} response
+  // returned, with a try-it link for each. Customer can tap each
+  // link to find the one that opens the right doc — and tell us.
+  // Removed once the right field is locked in.
+  function renderEsignDebugPanel(banner, debug) {
+    if (!banner || !debug || !Array.isArray(debug.signResponses)) return;
+    const allGuids = [];
+    debug.signResponses.forEach(function (r) {
+      (r.guidCandidates || []).forEach(function (g) {
+        // Skip the EsignId itself — already known to be wrong.
+        if (g.guid && g.guid.toLowerCase() !== String(r.esignId || '').toLowerCase()
+            && !allGuids.find(function (x) { return x.guid === g.guid; })) {
+          allGuids.push({ guid: g.guid, path: g.path, esignId: r.esignId });
+        }
+      });
+    });
+
+    const wrap = document.createElement('details');
+    wrap.style.cssText =
+      'flex-basis: 100%; margin-top: 10px; font-size: .78rem; line-height: 1.4;';
+    let linksHtml = '';
+    if (allGuids.length) {
+      linksHtml = '<p style="margin: 8px 0 4px;"><strong>Tap each link below — '
+                + 'whichever opens your real doc is the right GUID:</strong></p>';
+      allGuids.forEach(function (g, i) {
+        const url = 'https://shared.vergentlms.com/esign?g='
+                  + encodeURIComponent(g.guid);
+        linksHtml += '<div style="margin: 4px 0;">'
+                  + (i + 1) + '. <a href="' + url + '" target="_blank" '
+                  + 'rel="noopener" style="color:inherit; text-decoration:underline; '
+                  + 'word-break:break-all;">' + g.guid + '</a>'
+                  + '<br><span style="opacity:.6; font-size:.7rem;">from field: '
+                  + (g.path || '?') + '</span></div>';
+      });
+    } else {
+      linksHtml = '<p style="margin: 8px 0;">No alternate GUIDs found in '
+                + 'Vergent\'s /esign/sign/{id} response. The signing-URL '
+                + 'GUID lives somewhere else — please share Vergent admin '
+                + 'screenshot.</p>';
+    }
+    wrap.innerHTML =
+      '<summary style="cursor:pointer; opacity:.75;">Show technical details</summary>'
+      + linksHtml
+      + '<pre style="font-size:.7rem; white-space:pre-wrap; word-break:break-all; '
+      + 'background:rgba(0,0,0,.05); padding:8px; border-radius:6px; margin-top:8px; '
+      + 'max-height:280px; overflow:auto;">'
+      + JSON.stringify(debug, null, 2).replace(/[<>&]/g, function (c) {
+          return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
+        })
+      + '</pre>';
+    banner.appendChild(wrap);
   }
 
   function renderEsignBanner(pending) {
@@ -237,6 +296,10 @@
     }
     const close = qs('.dash-banner-close', banner);
     if (close) close.addEventListener('click', function () { banner.remove(); });
+    if (window.__cifEsignDebug) {
+      try { renderEsignDebugPanel(banner, window.__cifEsignDebug); }
+      catch (e) { /* defensive */ }
+    }
     const resendBtn = qs('[data-action="esign-resend"]', banner);
     if (resendBtn) {
       resendBtn.addEventListener('click', function () {
