@@ -284,17 +284,25 @@
     var balance = Number(loan.balance) || 0;
     var totalDue = principal + fees;
     var totalPaid = Math.max(0, totalDue - balance);
+    // Summary card splits into two columns:
+    //   Left: lifecycle / status (Originated, Due Date, Status, Payment Status)
+    //   Right: money (Amount Borrowed, Fee, Total Paid)
+    // Stacks to a single column on mobile via the .dash-loan-stats-pair
+    // grid breakpoint.
     var originatedRaw = loan.loanDate || loan.originationDate;
-    var summary = [
+    var leftSummary = [
       ['Originated', originatedRaw ? fmtDate(originatedRaw) : '—'],
       ['Due Date', loan.nextDueDate ? fmtDate(loan.nextDueDate) : '—'],
       ['Status', loan.status || (loan.isOutstanding ? 'Current' : 'Closed')],
+      ['Payment Status', loan.daysLate || '—'],
+    ];
+    var rightSummary = [
       ['Amount Borrowed', fmtCurrency(principal)],
       ['Fee', fmtCurrency(fees)],
       ['Total Paid', fmtCurrency(totalPaid)],
-      ['Payment Status', loan.daysLate || '—'],
     ];
-    renderStats(qs('#loanStatsSummary'), summary);
+    renderStats(qs('#loanStatsSummaryLeft'), leftSummary);
+    renderStats(qs('#loanStatsSummaryRight'), rightSummary);
   }
 
   function renderStats(root, pairs) {

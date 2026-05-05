@@ -672,6 +672,34 @@ dl.dash-loan-stats {
   margin: 0;
   padding: 4px 0 0;
 }
+
+/* Side-by-side wrapper for the loan-detail Summary card. Splits
+   the stat list into a left "lifecycle" column and a right
+   "money" column on desktop; stacks to a single column under
+   720px. */
+.dash-loan-stats-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px 56px;
+  align-items: start;
+}
+.dash-loan-stats-pair > dl.dash-loan-stats:first-child {
+  border-right: 1px solid var(--cif-border, #e5e7eb);
+  padding-right: 32px;
+}
+@media (max-width: 720px) {
+  .dash-loan-stats-pair {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .dash-loan-stats-pair > dl.dash-loan-stats:first-child {
+    border-right: 0;
+    padding-right: 0;
+    border-bottom: 1px solid var(--cif-border, #e5e7eb);
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+  }
+}
 dl.dash-loan-stats dt {
   color: var(--cif-subtle);
   font-size: .82rem;
