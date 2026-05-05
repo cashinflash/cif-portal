@@ -2669,6 +2669,74 @@ def _shape_esign_pending(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _looks_like_guid(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return bool(re.match(
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", value.strip()))
+
+
+# Field names (case-insensitive) Vergent might use for the
+# signing-session GUID embedded in the public hosted-signing URL
+# (`https://shared.vergentlms.com/esign?g=<guid>`). Order matters —
+# more specific names tried first. Anything matching one of these
+# AND looking like a GUID wins; if none of these are present we
+# fall back to "any GUID in the response that isn't the EsignId".
+_SIGNING_URL_GUID_FIELDS = (
+    "spcid", "spcguid", "spc",
+    "signingurlid", "signingurl",
+    "signingid", "signingguid",
+    "signid", "signguid",
+    "sessionid", "sessionguid",
+    "pendingguid", "pendingid",
+    "esignsessionid", "esignsessionguid",
+    "guid",
+)
+
+
+def _resolve_signing_guid(esign_id: str,
+                          sign_response: Any) -> Optional[str]:
+    """Pick the most-likely URL-shaped signing GUID from a
+    /esign/sign/{EsignId} response. Returns None if nothing
+    matches — caller falls back to the EsignId itself."""
+    if not isinstance(sign_response, dict):
+        return None
+
+    def _walk(obj: Any) -> Optional[str]:
+        if not isinstance(obj, dict):
+            return None
+        # Prefer name-matched GUIDs
+        for k, v in obj.items():
+            if _looks_like_guid(v) and k.lower() in _SIGNING_URL_GUID_FIELDS:
+                return v
+        # Recurse into nested dicts
+        for v in obj.values():
+            if isinstance(v, dict):
+                hit = _walk(v)
+                if hit:
+                    return hit
+            elif isinstance(v, list):
+                for item in v[:10]:
+                    if isinstance(item, dict):
+                        hit = _walk(item)
+                        if hit:
+                            return hit
+        return None
+
+    matched = _walk(sign_response)
+    if matched:
+        return matched
+
+    # Last-resort: any GUID in the response that isn't the EsignId.
+    candidates = _scan_for_guids(sign_response)
+    for c in candidates:
+        if c["guid"].lower() != str(esign_id).lower():
+            return c["guid"]
+
+    return None
+
+
 def _scan_for_guids(value: Any, path: str = "",
                     out: Optional[List[Dict[str, str]]] = None,
                     depth: int = 0) -> List[Dict[str, str]]:
@@ -2759,6 +2827,20 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
                                  entry["id"], s,
                                  list(b.keys())[:15] if isinstance(b, dict)
                                  else type(b).__name__)
+                    # Resolve the public signing-session GUID from
+                    # the /esign/sign/{id} response. EsignId from
+                    # /esign/pending is an internal record id —
+                    # the URL needs a different GUID (likely SpcId
+                    # or similar). Heuristic walks common field
+                    # names + falls back to "first non-EsignId GUID
+                    # in the response".
+                    signing_guid = _resolve_signing_guid(entry["id"], b) if s == 200 else None
+                    if signing_guid:
+                        entry["signingGuid"] = signing_guid
+                        entry["signingUrl"] = (
+                            "https://shared.vergentlms.com/esign?g="
+                            + urllib.parse.quote(signing_guid)
+                        )
                 except Exception as e:
                     log.warning("esign-enrich error id=%s err=%s",
                                 entry["id"], type(e).__name__)

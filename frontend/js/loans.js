@@ -364,18 +364,19 @@
               || String(p.publicLoanId) === String(loanId);
         });
         if (match.length) {
-          var firstEsignId = match[0] && match[0].id;
-          renderEsignCallout(callout, loanId, firstEsignId, match.length);
+          var first = match[0] || {};
+          var fallback = first.id
+            ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(first.id))
+            : '#';
+          renderEsignCallout(callout, loanId,
+                             first.signingUrl || fallback, match.length);
         }
       })
       .catch(function () { /* silent */ });
   }
 
-  function renderEsignCallout(root, loanId, esignId, count) {
+  function renderEsignCallout(root, loanId, signHref, count) {
     var noun = count > 1 ? (count + ' documents') : '1 document';
-    var signHref = esignId
-      ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esignId))
-      : '#';
     root.innerHTML = (
       '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +

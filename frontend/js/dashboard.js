@@ -203,13 +203,13 @@
     const banner = document.createElement('div');
     banner.className = 'dash-banner dash-banner--esign';
     const noun = count > 1 ? (count + ' documents') : '1 document';
-    // Sign now opens Vergent's hosted signing page in a new tab —
-    // works with just the esign GUID (no loanId/HdrId needed) and
-    // captures the signature directly into Vergent. Way simpler
-    // than rebuilding the signing ceremony in our portal.
-    const signHref = esignId
-      ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esignId))
-      : '#';
+    // Sign now opens Vergent's hosted signing page in a new tab.
+    // Prefer the signingUrl that the backend resolved from
+    // /esign/sign/{id} — the EsignId from /esign/pending isn't
+    // the GUID Vergent's URL wants. Fall back to the EsignId-based
+    // URL only if resolution failed (last-ditch).
+    const signHref = first.signingUrl
+      || (esignId ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esignId)) : '#');
     // Send me the link relies on a loanId to resend through
     // Vergent's email path. If we couldn't resolve it, hide the
     // button so the customer doesn't click into a dead end.
