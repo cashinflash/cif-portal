@@ -131,7 +131,13 @@ jobs:
           fi
 
           # Splice the new value back into the config (whichever
-          # shape it was in).
+          # shape it was in). Also normalize SecurityHeadersConfig
+          # sub-blocks so that any required fields AWS validates
+          # (Override on every block, Protection on XSSProtection,
+          # etc.) have safe defaults — the existing policy may
+          # have been created before AWS tightened that validation
+          # and the get-response-headers-policy returns it with
+          # nulls that update-response-headers-policy now rejects.
           NEW_CONFIG=$(echo "$CONFIG" | jq --arg csp "$PATCHED" '
             if .SecurityHeadersConfig.ContentSecurityPolicy then
               .SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy = $csp
@@ -142,6 +148,28 @@ jobs:
                 then .Value = $csp else . end
               )
             else . end
+            | if .SecurityHeadersConfig.XSSProtection != null then
+                .SecurityHeadersConfig.XSSProtection.Override = (.SecurityHeadersConfig.XSSProtection.Override // false)
+                | .SecurityHeadersConfig.XSSProtection.Protection = (.SecurityHeadersConfig.XSSProtection.Protection // false)
+              else . end
+            | if .SecurityHeadersConfig.ContentTypeOptions != null then
+                .SecurityHeadersConfig.ContentTypeOptions.Override = (.SecurityHeadersConfig.ContentTypeOptions.Override // false)
+              else . end
+            | if .SecurityHeadersConfig.FrameOptions != null then
+                .SecurityHeadersConfig.FrameOptions.Override = (.SecurityHeadersConfig.FrameOptions.Override // false)
+                | .SecurityHeadersConfig.FrameOptions.FrameOption = (.SecurityHeadersConfig.FrameOptions.FrameOption // "DENY")
+              else . end
+            | if .SecurityHeadersConfig.ReferrerPolicy != null then
+                .SecurityHeadersConfig.ReferrerPolicy.Override = (.SecurityHeadersConfig.ReferrerPolicy.Override // false)
+                | .SecurityHeadersConfig.ReferrerPolicy.ReferrerPolicy = (.SecurityHeadersConfig.ReferrerPolicy.ReferrerPolicy // "strict-origin-when-cross-origin")
+              else . end
+            | if .SecurityHeadersConfig.StrictTransportSecurity != null then
+                .SecurityHeadersConfig.StrictTransportSecurity.Override = (.SecurityHeadersConfig.StrictTransportSecurity.Override // false)
+                | .SecurityHeadersConfig.StrictTransportSecurity.AccessControlMaxAgeSec = (.SecurityHeadersConfig.StrictTransportSecurity.AccessControlMaxAgeSec // 31536000)
+              else . end
+            | if .SecurityHeadersConfig.ContentSecurityPolicy != null then
+                .SecurityHeadersConfig.ContentSecurityPolicy.Override = (.SecurityHeadersConfig.ContentSecurityPolicy.Override // false)
+              else . end
           ')
 
           echo "$NEW_CONFIG" > /tmp/new_config.json
