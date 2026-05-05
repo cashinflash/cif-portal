@@ -198,31 +198,33 @@
   function renderEsignBanner(pending) {
     const first = pending[0] || {};
     const loanId = first.loanId || first.publicLoanId || '';
+    const esignId = first.id || '';
     const count = pending.length;
     const banner = document.createElement('div');
     banner.className = 'dash-banner dash-banner--esign';
     const noun = count > 1 ? (count + ' documents') : '1 document';
-    // Primary action deep-links to the loan-detail page with
-    // ?action=sign so loans.js auto-opens the in-portal signing
-    // modal — customer can sign without leaving the portal.
-    // Fall back to ?esign=<guid> when Vergent's pending list
-    // doesn't expose the loanId (we still have the esign GUID).
-    let signHref;
-    if (loanId) {
-      signHref = '/loans.html?id=' + encodeURIComponent(loanId) + '&action=sign';
-    } else if (first.id) {
-      signHref = '/loans.html?esign=' + encodeURIComponent(first.id) + '&action=sign';
-    } else {
-      signHref = '/loans.html';
-    }
+    // Sign now opens Vergent's hosted signing page in a new tab —
+    // works with just the esign GUID (no loanId/HdrId needed) and
+    // captures the signature directly into Vergent. Way simpler
+    // than rebuilding the signing ceremony in our portal.
+    const signHref = esignId
+      ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esignId))
+      : '#';
+    // Send me the link relies on a loanId to resend through
+    // Vergent's email path. If we couldn't resolve it, hide the
+    // button so the customer doesn't click into a dead end.
+    const showResend = !!loanId;
+    const resendButton = showResend
+      ? '  <button type="button" class="dash-banner-btn" data-action="esign-resend">Send me the link</button>'
+      : '';
     banner.innerHTML = (
       '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
       '<polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' +
       '<span>You have <strong>' + noun + '</strong> waiting for your signature.</span>' +
       '<div class="dash-banner-actions">' +
-      '  <a class="dash-banner-btn dash-banner-btn--primary" href="' + signHref + '">Sign now</a>' +
-      '  <button type="button" class="dash-banner-btn" data-action="esign-resend">Send me the link</button>' +
+      '  <a class="dash-banner-btn dash-banner-btn--primary" href="' + signHref + '" target="_blank" rel="noopener">Sign now</a>' +
+      resendButton +
       '</div>' +
       '<button type="button" class="dash-banner-close" aria-label="Dismiss">&times;</button>'
     );

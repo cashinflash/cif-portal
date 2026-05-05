@@ -99,16 +99,18 @@
     var esignParam = params.get('esign');
     var actionParam = params.get('action');
 
+    // Backwards-compat: older dashboard banner deep-linked here
+    // with ?esign=<guid>&action=sign. Redirect such links straight
+    // to Vergent's hosted signing page so stale bookmarks still
+    // work after the simplification.
+    if (esignParam && actionParam === 'sign') {
+      window.location.replace('https://shared.vergentlms.com/esign?g=' +
+                              encodeURIComponent(esignParam));
+      return;
+    }
+
     if (loanIdParam) {
       showDetail(loanIdParam);
-    } else if (esignParam && actionParam === 'sign') {
-      // Standalone signing flow — dashboard "Sign now" deep-linked
-      // here with just the esign GUID (Vergent's pending list
-      // doesn't always expose a HdrId we can target). Render the
-      // history list as the background and open the signing modal
-      // straight on top of it.
-      showList();
-      setTimeout(function () { openEsignModalByGuid(esignParam); }, 50);
     } else {
       showList();
     }
@@ -362,31 +364,28 @@
               || String(p.publicLoanId) === String(loanId);
         });
         if (match.length) {
-          renderEsignCallout(callout, loanId, match.length);
-          // Auto-open the signing modal when the customer landed
-          // here from the dashboard "Sign now" deep-link
-          // (?action=sign). Skips the manual click on the callout.
-          var params = new URLSearchParams(window.location.search);
-          if (params.get('action') === 'sign') {
-            openEsignModal(loanId);
-          }
+          var firstEsignId = match[0] && match[0].id;
+          renderEsignCallout(callout, loanId, firstEsignId, match.length);
         }
       })
       .catch(function () { /* silent */ });
   }
 
-  function renderEsignCallout(root, loanId, count) {
+  function renderEsignCallout(root, loanId, esignId, count) {
     var noun = count > 1 ? (count + ' documents') : '1 document';
+    var signHref = esignId
+      ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esignId))
+      : '#';
     root.innerHTML = (
       '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
       '<polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' +
       '<div class="dash-esign-callout-text">' +
       '  <strong>This loan has ' + noun + ' waiting for your signature.</strong>' +
-      '  <p>Sign right here in your portal, or have the link emailed to you again.</p>' +
+      '  <p>Click Sign now to e-sign on Vergent’s secure page in a new tab.</p>' +
       '</div>' +
       '<div class="dash-esign-callout-actions">' +
-      '  <button type="button" class="dash-esign-callout-btn dash-esign-callout-btn--primary" data-action="esign-sign">Sign now</button>' +
+      '  <a class="dash-esign-callout-btn dash-esign-callout-btn--primary" href="' + signHref + '" target="_blank" rel="noopener">Sign now</a>' +
       '  <button type="button" class="dash-esign-callout-btn" data-action="esign-resend">Send me the link</button>' +
       '</div>'
     );
@@ -419,8 +418,6 @@
           });
       });
     }
-    var signBtn = qs('[data-action="esign-sign"]', root);
-    if (signBtn) signBtn.addEventListener('click', function () { openEsignModal(loanId); });
   }
 
   // ---------- E-sign modal: in-portal signing ceremony ----------
