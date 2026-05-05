@@ -2855,10 +2855,15 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
                     entry["_isValid"] = False
                     log.warning("esign-enrich error id=%s err=%s",
                                 entry["id"], type(e).__name__)
-    # Drop broken entries from the public list; surface them only
-    # in the _debug block (set on entries we decorated above).
-    valid_out = [e for e in out if e.get("_isValid", True)]
-    return valid_out if valid_out else out
+    # Drop broken entries (Vergent returns 500 on /esign/sign for
+    # stale records its own /esign/pending list nonetheless still
+    # advertises). Surfacing them caused the dashboard banner to
+    # stick around after the customer had actually finished
+    # signing — broken entries don't have a loanId so the per-loan
+    # callout hid correctly, but the dashboard sees them as "still
+    # pending". Return only valid entries; an empty list means no
+    # actionable signature waiting.
+    return [e for e in out if e.get("_isValid", True)]
 
 
 def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
