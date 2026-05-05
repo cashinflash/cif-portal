@@ -85,7 +85,11 @@
     return api('/api/plaid/link-token', { method: 'POST', body: '{}' })
       .then(function (res) {
         if (!res.ok || !res.data || !res.data.linkToken) {
-          throw new Error((res.data && res.data.error) || ('http_' + res.status));
+          var err = new Error((res.data && res.data.error) || ('http_' + res.status));
+          err.upstreamStatus = res.data && res.data.upstreamStatus;
+          err.upstreamBody = res.data && res.data.upstreamBody;
+          err.httpStatus = res.status;
+          throw err;
         }
         return res.data.linkToken;
       });
@@ -146,19 +150,28 @@
         if (btn) { btn.disabled = false; btn.textContent = originalText; }
         console.warn('[plaid] open failed', err);
         var msg = (err && err.message) || 'unknown';
-        var visible = 'We couldn’t open the bank-connect window.';
+        if (msg === 'unauthorized') return;  // already redirected
+        var lines = ['We couldn’t open the bank-connect window.'];
         if (msg.indexOf('plaid_sdk') !== -1) {
-          visible += ' (Plaid SDK didn’t load — check your network or any ad-blockers.)';
-        } else if (msg.indexOf('http_403') !== -1 || msg.indexOf('http_404') !== -1) {
-          visible += ' (Backend route not yet registered — run the provisioning workflows.)';
-        } else if (msg.indexOf('http_5') !== -1 || msg.indexOf('plaid_error') !== -1) {
-          visible += ' (Backend reached but Plaid call failed: ' + msg + '.)';
-        } else if (msg !== 'unauthorized') {
-          visible += ' Error: ' + msg;
+          lines.push('Plaid SDK didn’t load — check your network or any ad-blockers.');
+        } else if (err && err.httpStatus === 403) {
+          lines.push('Backend route not registered (HTTP 403). Re-run provision-loans.yml so the new /api/plaid/* routes are added to the API.');
+        } else if (err && err.httpStatus === 404) {
+          lines.push('Backend route not found (HTTP 404). Re-run provision-loans.yml.');
+        } else if (err && err.upstreamStatus !== undefined) {
+          if (err.upstreamStatus === 0) {
+            lines.push('Lambda couldn’t reach Plaid. Most likely PLAID_SECRET_ARN env var isn’t set — run provision-plaid.yml.');
+          } else {
+            lines.push('Plaid returned HTTP ' + err.upstreamStatus + '.');
+          }
+          if (err.upstreamBody) {
+            lines.push('Detail: ' + String(err.upstreamBody).slice(0, 220));
+          }
         } else {
-          return;  // Already redirected to login.
+          lines.push('Error: ' + msg);
         }
-        window.alert(visible + ' Please refresh and try again, or call (747) 270-7121.');
+        lines.push('Please refresh and try again, or call (747) 270-7121.');
+        window.alert(lines.join('\n\n'));
       });
   }
 
