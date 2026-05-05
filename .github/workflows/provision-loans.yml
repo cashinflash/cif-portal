@@ -80,6 +80,10 @@ jobs:
             "POST /api/my-esign/resend"
             "GET /api/my-esign/document"
             "POST /api/my-esign/sign"
+            "POST /api/plaid/link-token"
+            "POST /api/plaid/exchange"
+            "GET /api/plaid/connections"
+            "DELETE /api/plaid/connections/{itemId}"
           )
           for RK in "${ROUTES[@]}"; do
             # NOTE: --query "Items[?...].RouteId | [0]" with --output text

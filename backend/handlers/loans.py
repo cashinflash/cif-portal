@@ -15,6 +15,10 @@ Routes (bound to HttpApi with Cognito JWT authorizer):
   POST /api/my-esign/resend                   -> re-trigger e-sign email for {"loanId": N}
   GET  /api/my-esign/document?loanId=N        -> fetch unsigned doc set for in-portal signing
   POST /api/my-esign/sign                     -> submit signature {"loanId", "signerName", "agreed"}
+  POST /api/plaid/link-token                  -> mint a Plaid Link token
+  POST /api/plaid/exchange                    -> public_token → access_token + persist
+  GET  /api/plaid/connections                 -> list this customer's linked banks
+  DELETE /api/plaid/connections/{itemId}      -> revoke a connection
   POST /api/my-loan/new                       -> returns handoff URL into Vergent loan-application UI
 
 Auth model:
@@ -75,6 +79,10 @@ from handlers import telnyx_verify
 # production access twice. Both admin notifications and customer
 # change-request confirmations route through it.
 from handlers import resend_email
+
+# Plaid bank-link — used by the Profile page "Connect your bank"
+# flow + the dashboard CTA card. See handlers/plaid.py.
+from handlers import plaid
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -3265,6 +3273,18 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_esign_document(event)
         if path.endswith("/my-esign/sign") and method == "POST":
             return submit_esign(event)
+        if path.endswith("/plaid/link-token") and method == "POST":
+            return plaid.link_token(event)
+        if path.endswith("/plaid/exchange") and method == "POST":
+            return plaid.exchange(event)
+        if path.endswith("/plaid/connections") and method == "GET":
+            return plaid.list_connections(event)
+        # /api/plaid/connections/{itemId}
+        if ("/plaid/connections/" in path
+                and method == "DELETE"):
+            parts = [p for p in path.split("/") if p]
+            item_id = parts[-1] if parts else ""
+            return plaid.disconnect(event, item_id)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:

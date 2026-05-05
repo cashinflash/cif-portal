@@ -3502,3 +3502,150 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .dash-help-actions .btn-apply,
   .dash-help-actions .btn-login { flex: 1; text-align: center; }
 }
+
+/* ─────────────────────────────────────────
+   Plaid bank-link card (profile page) +
+   dashboard CTA card. Shown when the
+   customer has no connections yet OR (on
+   profile) any time as the management UI.
+   ───────────────────────────────────────── */
+#profileBanks .profile-card-head { margin-bottom: 16px; }
+#profileBanks .profile-card-meta {
+  margin: 4px 0 0;
+  color: var(--cif-subtle);
+  font-size: .9rem;
+}
+.bank-list { margin-bottom: 14px; }
+.bank-list .dash-loading { color: var(--cif-subtle); margin: 0; padding: 6px 0; }
+.bank-empty {
+  margin: 0;
+  padding: 14px 16px;
+  background: rgba(14,135,65,.06);
+  border-radius: 12px;
+  color: var(--cif-subtle);
+  font-size: .92rem;
+}
+.bank-row {
+  display: grid;
+  grid-template-columns: 44px 1fr max-content;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--cif-hairline, #e5e7eb);
+}
+.bank-row:last-child { border-bottom: none; }
+.bank-row-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: rgba(14,135,65,.1);
+  color: var(--cif-green-dark, #0C7137);
+}
+.bank-row-body { min-width: 0; }
+.bank-row-name {
+  font-weight: 700;
+  color: var(--cif-navy);
+  font-size: .98rem;
+}
+.bank-row-meta {
+  font-size: .85rem;
+  color: var(--cif-subtle);
+  margin-top: 2px;
+}
+.bank-row-when {
+  font-size: .78rem;
+  color: var(--cif-subtle);
+  margin-top: 2px;
+  opacity: .8;
+}
+.bank-row-remove {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cif-danger, #c83030);
+  border: 1.5px solid var(--cif-danger, #c83030);
+  font-weight: 600;
+  font-size: .82rem;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.bank-row-remove:hover { background: rgba(200,48,48,.08); }
+.bank-row-remove:disabled { opacity: .55; cursor: default; }
+
+.bank-connect-btn {
+  width: 100%;
+  margin-top: 6px;
+}
+.bank-connect-note {
+  margin: 12px 0 0;
+  font-size: .78rem;
+  color: var(--cif-subtle);
+  text-align: center;
+}
+
+/* Dashboard CTA — soft green card with Connect button. */
+.dash-bank-cta {
+  display: grid;
+  grid-template-columns: 56px 1fr max-content;
+  gap: 16px;
+  align-items: center;
+  padding: 18px 22px;
+  background: linear-gradient(135deg, #f0faf4 0%, #e6f5ed 100%);
+  border: 1px solid rgba(14,135,65,.18);
+  border-radius: var(--cif-radius-card, 18px);
+  margin-bottom: 18px;
+}
+.dash-bank-cta-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #0E8741;
+  color: #fff;
+  flex-shrink: 0;
+}
+.dash-bank-cta-text strong {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--cif-navy);
+  margin-bottom: 4px;
+}
+.dash-bank-cta-text p {
+  margin: 0;
+  color: var(--cif-subtle);
+  font-size: .9rem;
+}
+.dash-bank-cta .btn-apply {
+  flex-shrink: 0;
+  padding: 11px 22px;
+  border-radius: 999px;
+}
+@media (max-width: 640px) {
+  .dash-bank-cta {
+    grid-template-columns: 1fr;
+    text-align: center;
+    padding: 18px;
+  }
+  .dash-bank-cta-icon { margin: 0 auto; }
+  .dash-bank-cta .btn-apply { width: 100%; }
+  .bank-row {
+    grid-template-columns: 40px 1fr;
+    grid-template-areas:
+      "icon body"
+      "remove remove";
+    gap: 10px;
+  }
+  .bank-row-icon { grid-area: icon; }
+  .bank-row-body { grid-area: body; }
+  .bank-row-remove {
+    grid-area: remove;
+    width: 100%;
+    margin-top: 6px;
+  }
+}

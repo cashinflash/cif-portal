@@ -230,6 +230,19 @@
       </ul>
     </section>
 
+    <!-- Bank accounts (Plaid) -->
+    <section class="dash-card profile-card" id="profileBanks">
+      <div class="profile-card-head">
+        <h3>Bank accounts</h3>
+        <p class="profile-card-meta">Connect your bank to make future loan approvals faster — we never see your bank password.</p>
+      </div>
+      <div id="bankList" class="bank-list" aria-live="polite">
+        <p class="dash-loading">Loading…</p>
+      </div>
+      <button id="bankConnectBtn" class="btn-apply bank-connect-btn" type="button">Connect your bank</button>
+      <p class="bank-connect-note">Powered by <strong>Plaid</strong>. Your credentials are encrypted in transit and never stored on our servers.</p>
+    </section>
+
   </main>
 
   <!-- Edit modal (hidden by default) -->
@@ -256,5 +269,6 @@
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
   <script src="/js/profile.js"></script>
+  <script src="/js/plaid.js"></script>
 </body>
 </html>

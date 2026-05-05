@@ -169,6 +169,11 @@
       <div class="dash-borrow-hero-decoration" aria-hidden="true"></div>
     </section>
 
+    <!-- Plaid bank-link CTA — only shown when this customer
+         hasn't connected any bank account yet. Filled in by
+         js/plaid.js → maybeShowDashboardCta(). -->
+    <section id="dashBankCta" hidden></section>
+
     <!-- Active loan card — only when there IS an active loan -->
     <section class="dash-card dash-loan-card" id="activeLoanCard" hidden aria-busy="true" aria-labelledby="loanCardHeading">
       <div class="dash-card-skeleton">
@@ -317,5 +322,6 @@
 
   <script src="/js/session.js"></script>
   <script src="/js/dashboard.js"></script>
+  <script src="/js/plaid.js"></script>
 </body>
 </html>

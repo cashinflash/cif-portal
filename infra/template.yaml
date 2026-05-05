@@ -166,6 +166,42 @@ Resources:
             Auth:
               Authorizer: JwtAuthorizer
               AuthorizerId: !Ref JwtAuthorizerId
+        PlaidLinkToken:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: POST
+            Path: /api/plaid/link-token
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        PlaidExchange:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: POST
+            Path: /api/plaid/exchange
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        PlaidConnections:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: GET
+            Path: /api/plaid/connections
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
+        PlaidDisconnect:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApiId
+            Method: DELETE
+            Path: /api/plaid/connections/{itemId}
+            Auth:
+              Authorizer: JwtAuthorizer
+              AuthorizerId: !Ref JwtAuthorizerId
 
   PaymentsFn:
     Type: AWS::Serverless::Function
