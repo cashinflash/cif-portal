@@ -363,17 +363,178 @@
       '<polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' +
       '<div class="dash-esign-callout-text">' +
       '  <strong>This loan has ' + noun + ' waiting for your signature.</strong>' +
-      '  <p>We sent the signing link to your email. Lost it? Tap below and we’ll resend it.</p>' +
+      '  <p>Sign right here in your portal, or have the link emailed to you again.</p>' +
       '</div>' +
-      '<button type="button" class="dash-esign-callout-btn" data-action="esign-resend">Send me the link</button>'
+      '<div class="dash-esign-callout-actions">' +
+      '  <button type="button" class="dash-esign-callout-btn dash-esign-callout-btn--primary" data-action="esign-sign">Sign now</button>' +
+      '  <button type="button" class="dash-esign-callout-btn" data-action="esign-resend">Send me the link</button>' +
+      '</div>'
     );
     root.hidden = false;
-    var btn = qs('[data-action="esign-resend"]', root);
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      btn.disabled = true;
-      btn.textContent = 'Sending…';
-      fetch('/api/my-esign/resend', {
+    var resendBtn = qs('[data-action="esign-resend"]', root);
+    if (resendBtn) {
+      resendBtn.addEventListener('click', function () {
+        resendBtn.disabled = true;
+        resendBtn.textContent = 'Sending…';
+        fetch('/api/my-esign/resend', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          credentials: 'omit',
+          body: JSON.stringify({ loanId: loanId }),
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) {
+            if (data && data.ok) {
+              resendBtn.textContent = 'Email sent ✓';
+            } else {
+              resendBtn.textContent = 'Try again';
+              resendBtn.disabled = false;
+            }
+          }).catch(function () {
+            resendBtn.textContent = 'Try again';
+            resendBtn.disabled = false;
+          });
+      });
+    }
+    var signBtn = qs('[data-action="esign-sign"]', root);
+    if (signBtn) signBtn.addEventListener('click', function () { openEsignModal(loanId); });
+  }
+
+  // ---------- E-sign modal: in-portal signing ceremony ----------
+  // Fetches the unsigned doc set from /api/my-esign/document, lets
+  // the customer type their name + check the consent box, then
+  // POSTs to /api/my-esign/sign which forwards to Vergent's
+  // signingdata endpoint. Reuses the doc-modal CSS pattern.
+  function openEsignModal(loanId) {
+    var modal = qs('#esignModal');
+    if (!modal) return;
+    var body = qs('#esignModalBody');
+    var loading = qs('#esignModalLoading');
+    var foot = qs('#esignModalFoot');
+    var errorEl = qs('#esignModalError');
+    var nameEl = qs('#esignSignerName');
+    var agreeEl = qs('#esignAgreeBox');
+    var submitBtn = qs('#esignSubmitBtn');
+
+    // Reset state
+    if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+    if (nameEl) nameEl.value = '';
+    if (agreeEl) agreeEl.checked = false;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Sign now';
+    }
+    if (foot) foot.hidden = true;
+    if (loading) loading.hidden = false;
+    if (body) {
+      // Strip any previous render but keep the loading element.
+      body.innerHTML = '';
+      var p = document.createElement('p');
+      p.className = 'dash-loading';
+      p.id = 'esignModalLoading';
+      p.textContent = 'Loading document…';
+      body.appendChild(p);
+    }
+
+    modal.hidden = false;
+    document.body.style.overflow = 'hidden';
+
+    fetch('/api/my-esign/document?loanId=' + encodeURIComponent(loanId), {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
+      credentials: 'omit',
+    }).then(function (r) {
+      if (r.status === 401 || r.status === 403) {
+        sessionStorage.removeItem(TOKEN_KEY);
+        window.location.replace(LOGIN_URL + '?reason=session_expired');
+        throw new Error('unauthorized');
+      }
+      if (!r.ok) return r.json().then(function (e) { throw new Error(e && e.error || 'http ' + r.status); });
+      return r.json();
+    }).then(function (data) {
+      renderEsignDocument(data && data.document);
+      if (qs('#esignModalFoot')) qs('#esignModalFoot').hidden = false;
+      if (qs('#esignModalLoading')) qs('#esignModalLoading').hidden = true;
+    }).catch(function (err) {
+      if (err && err.message === 'unauthorized') return;
+      var b = qs('#esignModalBody');
+      if (b) {
+        b.innerHTML = '<p class="dash-esign-error" style="display:block">' +
+          'We couldn’t load this document. Please refresh, or call (747) 270-7121.</p>';
+      }
+    });
+
+    wireEsignSubmit(loanId);
+  }
+
+  function renderEsignDocument(doc) {
+    var body = qs('#esignModalBody');
+    if (!body) return;
+    body.innerHTML = '';
+    if (doc == null) {
+      body.textContent = 'No document content received.';
+      return;
+    }
+    // Vergent's response shape isn't documented — handle the
+    // common cases. If a string, it's likely HTML; if an object
+    // with a Data / Content / DocumentContent field, render that.
+    var html = null;
+    if (typeof doc === 'string') {
+      html = doc;
+    } else if (typeof doc === 'object') {
+      html = doc.Data || doc.data || doc.Content || doc.content
+          || doc.DocumentContent || doc.documentContent
+          || doc.Html || doc.html;
+      if (!html && Array.isArray(doc.Documents || doc.documents)) {
+        var docs = doc.Documents || doc.documents;
+        html = docs.map(function (d) {
+          return d && (d.Data || d.Content || d.Html || '');
+        }).filter(Boolean).join('<hr>');
+      }
+    }
+    if (html && /^[A-Za-z0-9+/=]+$/.test(html.trim()) && html.length > 200) {
+      // Likely base64-encoded — decode and render.
+      try {
+        html = decodeURIComponent(escape(atob(html)));
+      } catch (e) { /* not base64 — leave as-is */ }
+    }
+    if (html) {
+      var iframe = document.createElement('iframe');
+      iframe.className = 'dash-esign-doc-frame';
+      iframe.title = 'Loan documents';
+      iframe.srcdoc = html;
+      body.appendChild(iframe);
+    } else {
+      // Fall back to JSON dump so we can see what Vergent gave us.
+      var pre = document.createElement('pre');
+      pre.className = 'dash-esign-doc-json';
+      pre.textContent = JSON.stringify(doc, null, 2);
+      body.appendChild(pre);
+    }
+  }
+
+  function wireEsignSubmit(loanId) {
+    var nameEl = qs('#esignSignerName');
+    var agreeEl = qs('#esignAgreeBox');
+    var submitBtn = qs('#esignSubmitBtn');
+    var errorEl = qs('#esignModalError');
+    if (!nameEl || !agreeEl || !submitBtn) return;
+
+    function refreshSubmitState() {
+      submitBtn.disabled = !(nameEl.value.trim() && agreeEl.checked);
+    }
+    nameEl.oninput = refreshSubmitState;
+    agreeEl.onchange = refreshSubmitState;
+
+    submitBtn.onclick = function () {
+      var name = nameEl.value.trim();
+      if (!name || !agreeEl.checked) return;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing…';
+      if (errorEl) { errorEl.hidden = true; errorEl.textContent = ''; }
+      fetch('/api/my-esign/sign', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + token,
@@ -381,21 +542,74 @@
           'Accept': 'application/json',
         },
         credentials: 'omit',
-        body: JSON.stringify({ loanId: loanId }),
-      }).then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (data) {
-          if (data && data.ok) {
-            btn.textContent = 'Email sent ✓';
-          } else {
-            btn.textContent = 'Try again';
-            btn.disabled = false;
+        body: JSON.stringify({ loanId: loanId, signerName: name, agreed: true }),
+      }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+      }).then(function (res) {
+        if (res.ok && res.data && res.data.ok) {
+          submitBtn.textContent = 'Signed ✓';
+          var body = qs('#esignModalBody');
+          if (body) {
+            body.innerHTML = '<div class="dash-esign-done">' +
+              '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>' +
+              '<h4>Thank you, ' + name.split(' ')[0] + '!</h4>' +
+              '<p>Your signature has been recorded. Your loan documents will be available in the Documents section once finalized.</p>' +
+              '<button type="button" class="dash-esign-submit" data-action="esign-close">Done</button>' +
+              '</div>';
           }
-        }).catch(function () {
-          btn.textContent = 'Try again';
-          btn.disabled = false;
-        });
+          var foot = qs('#esignModalFoot');
+          if (foot) foot.hidden = true;
+          // Clear the callout — it'll re-render empty on reload.
+          var callout = qs('#loanEsignCallout');
+          if (callout) callout.hidden = true;
+        } else {
+          submitBtn.textContent = 'Sign now';
+          submitBtn.disabled = false;
+          if (errorEl) {
+            var msg = 'Sorry — we couldn’t complete the signature. Please try again, or call us at (747) 270-7121.';
+            if (res.data && res.data.upstreamStatus) {
+              msg += ' (Vergent ' + res.data.upstreamStatus + ')';
+            }
+            errorEl.textContent = msg;
+            errorEl.hidden = false;
+          }
+        }
+      }).catch(function () {
+        submitBtn.textContent = 'Sign now';
+        submitBtn.disabled = false;
+        if (errorEl) {
+          errorEl.textContent = 'Network error. Please try again.';
+          errorEl.hidden = false;
+        }
+      });
+    };
+  }
+
+  function closeEsignModal() {
+    var modal = qs('#esignModal');
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  function initEsignModal() {
+    var modal = qs('#esignModal');
+    if (!modal) return;
+    modal.addEventListener('click', function (e) {
+      var t = e.target;
+      while (t && t !== modal) {
+        if (t.getAttribute && t.getAttribute('data-action') === 'esign-close') {
+          closeEsignModal();
+          return;
+        }
+        t = t.parentNode;
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !modal.hidden) closeEsignModal();
     });
   }
+  initEsignModal();
 
   function renderDocuments(docs) {
     var root = qs('#loanDocuments');

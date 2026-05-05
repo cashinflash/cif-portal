@@ -126,6 +126,36 @@
 
       <section class="dash-esign-callout" id="loanEsignCallout" hidden></section>
 
+      <div class="dash-esign-modal" id="esignModal" hidden>
+        <button type="button" class="dash-esign-modal-backdrop" data-action="esign-close" aria-label="Close"></button>
+        <div class="dash-esign-modal-card" role="dialog" aria-modal="true" aria-labelledby="esignModalTitle">
+          <header class="dash-esign-modal-head">
+            <h3 id="esignModalTitle">Sign your loan documents</h3>
+            <button type="button" class="dash-esign-modal-close" data-action="esign-close" aria-label="Close">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </header>
+          <div class="dash-esign-modal-body" id="esignModalBody">
+            <p class="dash-loading" id="esignModalLoading">Loading document…</p>
+          </div>
+          <footer class="dash-esign-modal-foot" id="esignModalFoot" hidden>
+            <label class="dash-esign-field">
+              <span>Type your full legal name</span>
+              <input type="text" id="esignSignerName" autocomplete="off" placeholder="Jane Doe">
+            </label>
+            <label class="dash-esign-consent">
+              <input type="checkbox" id="esignAgreeBox">
+              <span>I have read the documents above and agree to sign electronically.</span>
+            </label>
+            <p class="dash-esign-error" id="esignModalError" hidden></p>
+            <div class="dash-esign-modal-actions">
+              <button type="button" class="dash-esign-cancel" data-action="esign-close">Cancel</button>
+              <button type="button" class="dash-esign-submit" id="esignSubmitBtn" disabled>Sign now</button>
+            </div>
+          </footer>
+        </div>
+      </div>
+
       <section class="dash-card" id="loanDocumentsSection">
         <div class="dash-card-head">
           <h3>Documents</h3>

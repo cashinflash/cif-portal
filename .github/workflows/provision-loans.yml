@@ -78,6 +78,8 @@ jobs:
             "POST /api/my-loan/new"
             "GET /api/my-esign/pending"
             "POST /api/my-esign/resend"
+            "GET /api/my-esign/document"
+            "POST /api/my-esign/sign"
           )
           for RK in "${ROUTES[@]}"; do
             # NOTE: --query "Items[?...].RouteId | [0]" with --output text
