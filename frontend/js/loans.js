@@ -387,38 +387,9 @@
       '</div>' +
       '<div class="dash-esign-callout-actions">' +
       '  <a class="dash-esign-callout-btn dash-esign-callout-btn--primary" href="' + signHref + '" target="_blank" rel="noopener">Sign now</a>' +
-      '  <button type="button" class="dash-esign-callout-btn" data-action="esign-resend">Send me the link</button>' +
       '</div>'
     );
     root.hidden = false;
-    var resendBtn = qs('[data-action="esign-resend"]', root);
-    if (resendBtn) {
-      resendBtn.addEventListener('click', function () {
-        resendBtn.disabled = true;
-        resendBtn.textContent = 'Sending…';
-        fetch('/api/my-esign/resend', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          credentials: 'omit',
-          body: JSON.stringify({ loanId: loanId }),
-        }).then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (data) {
-            if (data && data.ok) {
-              resendBtn.textContent = 'Email sent ✓';
-            } else {
-              resendBtn.textContent = 'Try again';
-              resendBtn.disabled = false;
-            }
-          }).catch(function () {
-            resendBtn.textContent = 'Try again';
-            resendBtn.disabled = false;
-          });
-      });
-    }
   }
 
   // ---------- E-sign modal: in-portal signing ceremony ----------

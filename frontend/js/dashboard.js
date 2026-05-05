@@ -191,67 +191,8 @@
     }).then(function (data) {
       const pending = (data && data.pending) || [];
       if (!pending.length) return;
-      // Stash the diagnostic block so renderEsignBanner can drop a
-      // "Show details" expandable on the banner — useful while we
-      // pin down the right signing-URL GUID without DevTools.
-      window.__cifEsignDebug = data && data._debug;
       renderEsignBanner(pending);
     }).catch(function () { /* silent — leave banner off on network blip */ });
-  }
-
-  // Visible-on-screen debug for the e-sign hosted-signing GUID
-  // hunt. Renders a "Show details" expandable inside the banner
-  // listing every GUID Vergent's /esign/sign/{id} response
-  // returned, with a try-it link for each. Customer can tap each
-  // link to find the one that opens the right doc — and tell us.
-  // Removed once the right field is locked in.
-  function renderEsignDebugPanel(banner, debug) {
-    if (!banner || !debug || !Array.isArray(debug.signResponses)) return;
-    const allGuids = [];
-    debug.signResponses.forEach(function (r) {
-      (r.guidCandidates || []).forEach(function (g) {
-        // Skip the EsignId itself — already known to be wrong.
-        if (g.guid && g.guid.toLowerCase() !== String(r.esignId || '').toLowerCase()
-            && !allGuids.find(function (x) { return x.guid === g.guid; })) {
-          allGuids.push({ guid: g.guid, path: g.path, esignId: r.esignId });
-        }
-      });
-    });
-
-    const wrap = document.createElement('details');
-    wrap.style.cssText =
-      'flex-basis: 100%; margin-top: 10px; font-size: .78rem; line-height: 1.4;';
-    let linksHtml = '';
-    if (allGuids.length) {
-      linksHtml = '<p style="margin: 8px 0 4px;"><strong>Tap each link below — '
-                + 'whichever opens your real doc is the right GUID:</strong></p>';
-      allGuids.forEach(function (g, i) {
-        const url = 'https://shared.vergentlms.com/esign?g='
-                  + encodeURIComponent(g.guid);
-        linksHtml += '<div style="margin: 4px 0;">'
-                  + (i + 1) + '. <a href="' + url + '" target="_blank" '
-                  + 'rel="noopener" style="color:inherit; text-decoration:underline; '
-                  + 'word-break:break-all;">' + g.guid + '</a>'
-                  + '<br><span style="opacity:.6; font-size:.7rem;">from field: '
-                  + (g.path || '?') + '</span></div>';
-      });
-    } else {
-      linksHtml = '<p style="margin: 8px 0;">No alternate GUIDs found in '
-                + 'Vergent\'s /esign/sign/{id} response. The signing-URL '
-                + 'GUID lives somewhere else — please share Vergent admin '
-                + 'screenshot.</p>';
-    }
-    wrap.innerHTML =
-      '<summary style="cursor:pointer; opacity:.75;">Show technical details</summary>'
-      + linksHtml
-      + '<pre style="font-size:.7rem; white-space:pre-wrap; word-break:break-all; '
-      + 'background:rgba(0,0,0,.05); padding:8px; border-radius:6px; margin-top:8px; '
-      + 'max-height:280px; overflow:auto;">'
-      + JSON.stringify(debug, null, 2).replace(/[<>&]/g, function (c) {
-          return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
-        })
-      + '</pre>';
-    banner.appendChild(wrap);
   }
 
   function renderEsignBanner(pending) {
@@ -265,17 +206,10 @@
     // Sign now opens Vergent's hosted signing page in a new tab.
     // Prefer the signingUrl that the backend resolved from
     // /esign/sign/{id} — the EsignId from /esign/pending isn't
-    // the GUID Vergent's URL wants. Fall back to the EsignId-based
-    // URL only if resolution failed (last-ditch).
+    // always the GUID Vergent's URL wants. Fall back to the
+    // EsignId-based URL only if resolution failed.
     const signHref = first.signingUrl
       || (esignId ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esignId)) : '#');
-    // Send me the link relies on a loanId to resend through
-    // Vergent's email path. If we couldn't resolve it, hide the
-    // button so the customer doesn't click into a dead end.
-    const showResend = !!loanId;
-    const resendButton = showResend
-      ? '  <button type="button" class="dash-banner-btn" data-action="esign-resend">Send me the link</button>'
-      : '';
     banner.innerHTML = (
       '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
@@ -283,7 +217,6 @@
       '<span>You have <strong>' + noun + '</strong> waiting for your signature.</span>' +
       '<div class="dash-banner-actions">' +
       '  <a class="dash-banner-btn dash-banner-btn--primary" href="' + signHref + '" target="_blank" rel="noopener">Sign now</a>' +
-      resendButton +
       '</div>' +
       '<button type="button" class="dash-banner-close" aria-label="Dismiss">&times;</button>'
     );
@@ -296,50 +229,6 @@
     }
     const close = qs('.dash-banner-close', banner);
     if (close) close.addEventListener('click', function () { banner.remove(); });
-    if (window.__cifEsignDebug) {
-      try { renderEsignDebugPanel(banner, window.__cifEsignDebug); }
-      catch (e) { /* defensive */ }
-    }
-    const resendBtn = qs('[data-action="esign-resend"]', banner);
-    if (resendBtn) {
-      resendBtn.addEventListener('click', function () {
-        if (!loanId) {
-          resendBtn.textContent = 'No loan id';
-          return;
-        }
-        resendBtn.disabled = true;
-        resendBtn.textContent = 'Sending…';
-        const token = sessionStorage.getItem('cif_id_token');
-        fetch('/api/my-esign/resend', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          credentials: 'omit',
-          body: JSON.stringify({ loanId: loanId }),
-        }).then(function (r) {
-          // Always parse so we can surface upstreamStatus from a 502.
-          return r.json().then(function (data) {
-            return { ok: r.ok, status: r.status, data: data };
-          }).catch(function () { return { ok: r.ok, status: r.status, data: null }; });
-        }).then(function (res) {
-            if (res.ok && res.data && res.data.ok) {
-              resendBtn.textContent = 'Email sent ✓';
-            } else {
-              const upstream = res.data && res.data.upstreamStatus;
-              resendBtn.textContent = upstream ? ('Try again (Vergent ' + upstream + ')')
-                                               : ('Try again (' + res.status + ')');
-              resendBtn.disabled = false;
-              console.warn('[esign] resend failed', res);
-            }
-          }).catch(function () {
-            resendBtn.textContent = 'Try again';
-            resendBtn.disabled = false;
-          });
-      });
-    }
   }
 
   // ---------- Profile card ----------
