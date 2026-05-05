@@ -2819,6 +2819,13 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
                     # once we know the right URL-GUID field.
                     entry["_signResponseStatus"] = s
                     entry["_signResponseBody"] = b
+                    # Mark broken entries (500 from Vergent) so we
+                    # can drop them — Vergent's /esign/pending
+                    # sometimes lists stale records that fail when
+                    # actually fetched. Picking one of these for
+                    # the Sign now URL gives the customer a 500
+                    # page on Vergent's side.
+                    entry["_isValid"] = (s == 200)
                     hdr = _extract_hdr_id_from_esign_doc(b) if s == 200 else None
                     if hdr:
                         entry["loanId"] = hdr
@@ -2827,13 +2834,6 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
                                  entry["id"], s,
                                  list(b.keys())[:15] if isinstance(b, dict)
                                  else type(b).__name__)
-                    # Resolve the public signing-session GUID from
-                    # the /esign/sign/{id} response. EsignId from
-                    # /esign/pending is an internal record id —
-                    # the URL needs a different GUID (likely SpcId
-                    # or similar). Heuristic walks common field
-                    # names + falls back to "first non-EsignId GUID
-                    # in the response".
                     signing_guid = _resolve_signing_guid(entry["id"], b) if s == 200 else None
                     if signing_guid:
                         entry["signingGuid"] = signing_guid
@@ -2841,10 +2841,24 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
                             "https://shared.vergentlms.com/esign?g="
                             + urllib.parse.quote(signing_guid)
                         )
+                    elif s == 200:
+                        # No alternate GUID in the response (Vergent
+                        # likely uses the EsignId itself in the URL).
+                        # Build the URL directly from EsignId so the
+                        # frontend has it without falling through to
+                        # the legacy fallback.
+                        entry["signingUrl"] = (
+                            "https://shared.vergentlms.com/esign?g="
+                            + urllib.parse.quote(str(entry["id"]))
+                        )
                 except Exception as e:
+                    entry["_isValid"] = False
                     log.warning("esign-enrich error id=%s err=%s",
                                 entry["id"], type(e).__name__)
-    return out
+    # Drop broken entries from the public list; surface them only
+    # in the _debug block (set on entries we decorated above).
+    valid_out = [e for e in out if e.get("_isValid", True)]
+    return valid_out if valid_out else out
 
 
 def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -2870,6 +2884,7 @@ def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     for entry in enriched:
         sign_status = entry.pop("_signResponseStatus", None)
         sign_body = entry.pop("_signResponseBody", None)
+        entry.pop("_isValid", None)
         public.append(entry)
         guid_candidates = _scan_for_guids(sign_body)
         # Strip the originating EsignId from the candidates list so
