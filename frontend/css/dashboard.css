@@ -415,6 +415,14 @@
   align-self: flex-start;
 }
 
+/* `.dash-pill { display: inline-flex }` ties specificity with
+   the implicit `[hidden] { display: none }` browser rule, and
+   the class wins by source order — so without this override,
+   pills with the `hidden` attribute still render (showing just
+   the green ::before dot, which read as a stray "." on the
+   loan-history page). */
+.dash-pill[hidden] { display: none; }
+
 .dash-pill {
   display: inline-flex;
   align-items: center;
@@ -2424,10 +2432,11 @@ button.dash-doc-download:disabled {
   width: 100%;
   background: transparent;
   color: #fff;
-  border-color: rgba(255,255,255,.4);
+  border: 1.5px solid #fff;
+  font-weight: 600;
 }
 .dash-sidebar-bottom .btn-login:hover {
-  background: rgba(255,255,255,.12);
+  background: rgba(255,255,255,.14);
   border-color: #fff;
   color: #fff;
 }
