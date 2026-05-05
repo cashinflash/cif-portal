@@ -2769,17 +2769,41 @@ def resend_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     # GET endpoint defaulted to. Fall back to the GET path if the
     # POST returns a non-2xx so we don't regress on tenants that
     # only support the older endpoint.
-    status, _resp = _v1_request(
+    attempts = []
+    post_status, _post_parsed, post_raw = _v1_request(
         "POST", f"/V1/customer/{cid}/docs/sendesign/{hdr_id}",
+        return_raw=True,
     )
+    attempts.append({
+        "method": "POST",
+        "path": f"/V1/customer/{cid}/docs/sendesign/{hdr_id}",
+        "status": post_status,
+        "rawSnippet": (post_raw if isinstance(post_raw, str) else str(post_raw or ""))[:300],
+    })
+    status = post_status
     if status not in (200, 204):
         log.info("esign-resend POST sendesign status=%s hdr=%s; falling back to GET",
                  status, hdr_id)
-        status, _resp = _v1_get(f"/esign/sendEsignDocs/{hdr_id}")
+        get_status, _get_parsed, get_raw = _v1_request(
+            "GET", f"/esign/sendEsignDocs/{hdr_id}",
+            return_raw=True,
+        )
+        attempts.append({
+            "method": "GET",
+            "path": f"/esign/sendEsignDocs/{hdr_id}",
+            "status": get_status,
+            "rawSnippet": (get_raw if isinstance(get_raw, str) else str(get_raw or ""))[:300],
+        })
+        status = get_status
     if status not in (200, 204):
-        log.warning("esign-resend non-2xx status=%s hdr=%s", status, hdr_id)
-        return _json_response(502, {"ok": False, "error": "vergent_error",
-                                    "upstreamStatus": status})
+        log.warning("esign-resend non-2xx status=%s hdr=%s attempts=%d",
+                    status, hdr_id, len(attempts))
+        return _json_response(502, {
+            "ok": False,
+            "error": "vergent_error",
+            "upstreamStatus": status,
+            "_debug": {"hdrId": hdr_id, "attempts": attempts},
+        })
     return _json_response(200, {"ok": True})
 
 

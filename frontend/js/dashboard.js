@@ -202,15 +202,20 @@
     const banner = document.createElement('div');
     banner.className = 'dash-banner dash-banner--esign';
     const noun = count > 1 ? (count + ' documents') : '1 document';
-    const viewHref = loanId ? ('/loans.html?id=' + encodeURIComponent(loanId)) : '/loans.html';
+    // Primary action deep-links to the loan-detail page with
+    // ?action=sign so loans.js auto-opens the in-portal signing
+    // modal — customer can sign without leaving the portal.
+    const signHref = loanId
+      ? ('/loans.html?id=' + encodeURIComponent(loanId) + '&action=sign')
+      : '/loans.html';
     banner.innerHTML = (
       '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
       '<polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' +
       '<span>You have <strong>' + noun + '</strong> waiting for your signature.</span>' +
       '<div class="dash-banner-actions">' +
-      '  <button type="button" class="dash-banner-btn dash-banner-btn--primary" data-action="esign-resend">Send me the link</button>' +
-      '  <a class="dash-banner-btn" href="' + viewHref + '">View loan</a>' +
+      '  <a class="dash-banner-btn dash-banner-btn--primary" href="' + signHref + '">Sign now</a>' +
+      '  <button type="button" class="dash-banner-btn" data-action="esign-resend">Send me the link</button>' +
       '</div>' +
       '<button type="button" class="dash-banner-close" aria-label="Dismiss">&times;</button>'
     );
@@ -226,7 +231,10 @@
     const resendBtn = qs('[data-action="esign-resend"]', banner);
     if (resendBtn) {
       resendBtn.addEventListener('click', function () {
-        if (!loanId) return;
+        if (!loanId) {
+          resendBtn.textContent = 'No loan id';
+          return;
+        }
         resendBtn.disabled = true;
         resendBtn.textContent = 'Sending…';
         const token = sessionStorage.getItem('cif_id_token');
@@ -239,13 +247,20 @@
           },
           credentials: 'omit',
           body: JSON.stringify({ loanId: loanId }),
-        }).then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (data) {
-            if (data && data.ok) {
+        }).then(function (r) {
+          // Always parse so we can surface upstreamStatus from a 502.
+          return r.json().then(function (data) {
+            return { ok: r.ok, status: r.status, data: data };
+          }).catch(function () { return { ok: r.ok, status: r.status, data: null }; });
+        }).then(function (res) {
+            if (res.ok && res.data && res.data.ok) {
               resendBtn.textContent = 'Email sent ✓';
             } else {
-              resendBtn.textContent = 'Try again';
+              const upstream = res.data && res.data.upstreamStatus;
+              resendBtn.textContent = upstream ? ('Try again (Vergent ' + upstream + ')')
+                                               : ('Try again (' + res.status + ')');
               resendBtn.disabled = false;
+              console.warn('[esign] resend failed', res);
             }
           }).catch(function () {
             resendBtn.textContent = 'Try again';

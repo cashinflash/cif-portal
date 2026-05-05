@@ -350,7 +350,16 @@
           return String(p.loanId) === String(loanId)
               || String(p.publicLoanId) === String(loanId);
         });
-        if (match.length) renderEsignCallout(callout, loanId, match.length);
+        if (match.length) {
+          renderEsignCallout(callout, loanId, match.length);
+          // Auto-open the signing modal when the customer landed
+          // here from the dashboard "Sign now" deep-link
+          // (?action=sign). Skips the manual click on the callout.
+          var params = new URLSearchParams(window.location.search);
+          if (params.get('action') === 'sign') {
+            openEsignModal(loanId);
+          }
+        }
       })
       .catch(function () { /* silent */ });
   }
