@@ -819,18 +819,13 @@ dl.dash-loan-stats dd {
 }
 .dash-esign-callout[hidden] { display: none; }
 .dash-esign-callout svg { flex-shrink: 0; }
-.dash-esign-callout-text { flex: 1; min-width: 0; }
-.dash-esign-callout-text strong {
-  display: block;
-  font-weight: 700;
-  font-size: .98rem;
-  margin-bottom: 2px;
+.dash-esign-callout-text {
+  flex: 1;
+  min-width: 0;
+  font-size: .92rem;
+  font-weight: 500;
 }
-.dash-esign-callout-text p {
-  margin: 0;
-  font-size: .85rem;
-  opacity: .85;
-}
+.dash-esign-callout-text strong { font-weight: 700; }
 .dash-esign-callout-actions {
   display: flex;
   gap: 8px;
@@ -863,8 +858,23 @@ a.dash-esign-callout-btn--primary:hover {
 }
 .dash-esign-callout-btn:disabled { opacity: .65; cursor: default; }
 @media (max-width: 640px) {
-  .dash-esign-callout { flex-wrap: wrap; }
-  .dash-esign-callout-actions { width: 100%; flex-direction: column; }
+  /* Mirror the dashboard banner layout: icon stays small, the
+     message text takes a full row of its own (so it doesn't
+     wrap mid-sentence next to the icon), Sign now full-width
+     button below. */
+  .dash-esign-callout {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .dash-esign-callout-text {
+    flex: 1 1 100%;
+    order: 1;
+  }
+  .dash-esign-callout-actions {
+    width: 100%;
+    flex-direction: column;
+    order: 2;
+  }
   .dash-esign-callout-btn { width: 100%; }
 }
 
