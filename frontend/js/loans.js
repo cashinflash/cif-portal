@@ -349,30 +349,54 @@
 
   // ---------- E-sign per-loan callout ----------
   // If THIS loan has at least one pending e-sign, render a slim
-  // amber callout above the Documents card with a "Send me the
-  // link" button. Same backend endpoints the dashboard banner
-  // uses; filtered to entries whose loanId / publicLoanId matches.
+  // amber callout above the Documents card with a Sign now button.
+  // Tap Sign now → Vergent's hosted signing page in a new tab →
+  // customer signs → returns to our tab. The visibilitychange
+  // listener installed below refetches and clears the callout
+  // automatically once Vergent marks the doc signed.
   function loadPendingEsignFor(loanId) {
     var callout = qs('#loanEsignCallout');
     if (!callout) return;
+    var fetchAndRender = function () {
+      api('/api/my-esign/pending', token)
+        .then(function (data) {
+          var pending = (data && data.pending) || [];
+          var match = pending.filter(function (p) {
+            return String(p.loanId) === String(loanId)
+                || String(p.publicLoanId) === String(loanId);
+          });
+          if (match.length) {
+            var first = match[0] || {};
+            var fallback = first.id
+              ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(first.id))
+              : '#';
+            renderEsignCallout(callout, loanId,
+                               first.signingUrl || fallback, match.length);
+          } else {
+            callout.hidden = true;
+            callout.innerHTML = '';
+          }
+        })
+        .catch(function () { /* silent */ });
+    };
     callout.hidden = true;
-    api('/api/my-esign/pending', token)
-      .then(function (data) {
-        var pending = (data && data.pending) || [];
-        var match = pending.filter(function (p) {
-          return String(p.loanId) === String(loanId)
-              || String(p.publicLoanId) === String(loanId);
-        });
-        if (match.length) {
-          var first = match[0] || {};
-          var fallback = first.id
-            ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(first.id))
-            : '#';
-          renderEsignCallout(callout, loanId,
-                             first.signingUrl || fallback, match.length);
-        }
-      })
-      .catch(function () { /* silent */ });
+    fetchAndRender();
+
+    // Auto-refresh on tab focus — clears the callout right after
+    // the customer finishes signing on Vergent's hosted page.
+    if (!window.__cifEsignDetailAutoRefresh) {
+      window.__cifEsignDetailAutoRefresh = true;
+      var lastChecked = Date.now();
+      var onFocus = function () {
+        if (document.visibilityState !== 'visible') return;
+        var now = Date.now();
+        if (now - lastChecked < 2000) return;
+        lastChecked = now;
+        fetchAndRender();
+      };
+      document.addEventListener('visibilitychange', onFocus);
+      window.addEventListener('focus', onFocus);
+    }
   }
 
   function renderEsignCallout(root, loanId, signHref, count) {

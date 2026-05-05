@@ -174,11 +174,11 @@
   // ---------- E-sign pending banner ----------
   // Vergent v1 /api/esign/pending/{cid} — amber banner when the
   // customer has at least one loan document waiting for signature.
-  // First click on "Send me the link" calls /api/my-esign/resend
-  // for the first pending entry's loanId (typically there's only
-  // one). Banner stays until the next page load — clearing it
-  // requires Vergent to mark the doc signed, which we re-detect
-  // on next refresh.
+  // Tap "Sign now" → Vergent's hosted signing page opens in a new
+  // tab → customer signs → returns to our tab. The visibilitychange
+  // / focus listeners installed below refetch /api/my-esign/pending
+  // so the banner clears automatically once Vergent marks the doc
+  // signed.
   function loadPendingEsign() {
     const token = sessionStorage.getItem('cif_id_token');
     if (!token) return;
@@ -190,9 +190,44 @@
       return r.json();
     }).then(function (data) {
       const pending = (data && data.pending) || [];
-      if (!pending.length) return;
-      renderEsignBanner(pending);
+      // Remove any existing banner before re-rendering so a second
+      // call from the focus-listener can clear/refresh in place.
+      const existing = document.querySelector('.dash-banner--esign');
+      if (existing) existing.remove();
+      if (pending.length) renderEsignBanner(pending);
     }).catch(function () { /* silent — leave banner off on network blip */ });
+    setupEsignAutoRefresh();
+  }
+
+  // Auto-refresh the pending-sig banner when the tab regains focus
+  // (i.e., the customer just came back from signing on Vergent's
+  // hosted page in a new tab). Registered once per page load.
+  function setupEsignAutoRefresh() {
+    if (window.__cifEsignAutoRefreshSetup) return;
+    window.__cifEsignAutoRefreshSetup = true;
+    let lastChecked = Date.now();
+    const refresh = function () {
+      if (document.visibilityState !== 'visible') return;
+      // Throttle to avoid hammering the endpoint on rapid focus
+      // toggles (e.g. macOS spaces + window switching).
+      const now = Date.now();
+      if (now - lastChecked < 2000) return;
+      lastChecked = now;
+      const token = sessionStorage.getItem('cif_id_token');
+      if (!token) return;
+      fetch('/api/my-esign/pending', {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
+        credentials: 'omit',
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          const pending = (data && data.pending) || [];
+          const existing = document.querySelector('.dash-banner--esign');
+          if (existing) existing.remove();
+          if (pending.length) renderEsignBanner(pending);
+        }).catch(function () { /* silent */ });
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
   }
 
   function renderEsignBanner(pending) {
