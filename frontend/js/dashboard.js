@@ -205,9 +205,16 @@
     // Primary action deep-links to the loan-detail page with
     // ?action=sign so loans.js auto-opens the in-portal signing
     // modal — customer can sign without leaving the portal.
-    const signHref = loanId
-      ? ('/loans.html?id=' + encodeURIComponent(loanId) + '&action=sign')
-      : '/loans.html';
+    // Fall back to ?esign=<guid> when Vergent's pending list
+    // doesn't expose the loanId (we still have the esign GUID).
+    let signHref;
+    if (loanId) {
+      signHref = '/loans.html?id=' + encodeURIComponent(loanId) + '&action=sign';
+    } else if (first.id) {
+      signHref = '/loans.html?esign=' + encodeURIComponent(first.id) + '&action=sign';
+    } else {
+      signHref = '/loans.html';
+    }
     banner.innerHTML = (
       '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +

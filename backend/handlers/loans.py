@@ -2594,6 +2594,41 @@ def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
 # E-sign — pending signatures + resend link
 # ─────────────────────────────────────────
 
+def _extract_hdr_id_from_esign_doc(body: Any) -> Optional[Any]:
+    """Pull the loan's HdrId out of a /esign/sign/{guid} response.
+
+    Vergent's response shape isn't documented; this scans the most
+    likely places (top-level field, nested Loan object, first item
+    of any Documents/Items array). Returns None if nothing matches —
+    caller logs the response shape so we can refine.
+    """
+    if not isinstance(body, dict):
+        return None
+    for key in ("HdrId", "hdr_id", "LoanHeaderId", "loanHeaderId",
+                "LoanId", "loanId", "Hdr"):
+        v = body.get(key)
+        if v:
+            return v
+    loan = body.get("Loan") or body.get("loan")
+    if isinstance(loan, dict):
+        for key in ("HdrId", "hdr_id", "LoanHeaderId", "Id", "id"):
+            v = loan.get(key)
+            if v:
+                return v
+    for arr_key in ("Documents", "documents", "Items", "items",
+                    "Transactions", "transactions"):
+        arr = body.get(arr_key)
+        if isinstance(arr, list) and arr:
+            first = arr[0]
+            if isinstance(first, dict):
+                for key in ("HdrId", "hdr_id", "LoanHeaderId",
+                            "LoanId", "loanId"):
+                    v = first.get(key)
+                    if v:
+                        return v
+    return None
+
+
 def _shape_esign_pending(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Normalize one Vergent /api/esign/pending row → portal shape."""
     if not isinstance(record, dict):
@@ -2670,6 +2705,32 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
             continue
         seen.add(shaped["id"])
         out.append(shaped)
+
+    # Vergent's /esign/pending list returns just { EsignId, EsignType,
+    # CreatedDate } — no HdrId. Fan out one /esign/sign/{guid} call
+    # per entry in parallel to extract the loan reference, so the
+    # dashboard "Sign now" button can deep-link to the right loan.
+    needs_hdr = [e for e in out if not e.get("loanId")]
+    if needs_hdr:
+        with ThreadPoolExecutor(max_workers=min(8, len(needs_hdr))) as ex:
+            future_map = {
+                ex.submit(_v1_get, f"/esign/sign/{entry['id']}"): entry
+                for entry in needs_hdr
+            }
+            for fut, entry in future_map.items():
+                try:
+                    s, b = fut.result()
+                    hdr = _extract_hdr_id_from_esign_doc(b) if s == 200 else None
+                    if hdr:
+                        entry["loanId"] = hdr
+                    else:
+                        log.info("esign-enrich no_hdr id=%s status=%s shape=%s",
+                                 entry["id"], s,
+                                 list(b.keys())[:15] if isinstance(b, dict)
+                                 else type(b).__name__)
+                except Exception as e:
+                    log.warning("esign-enrich error id=%s err=%s",
+                                entry["id"], type(e).__name__)
     return out
 
 
