@@ -407,6 +407,14 @@
 }
 
 /* Status pill */
+/* Pill variant rendered inside the loan-detail hero, just under
+   the "Loan #..." title. Sits on its own line with a small top
+   margin so it reads as a label for the loan above it. */
+.dash-hero-pill {
+  margin: 6px 0 14px;
+  align-self: flex-start;
+}
+
 .dash-pill {
   display: inline-flex;
   align-items: center;
@@ -2802,7 +2810,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   height: 44px;
   border-radius: 50%;
   background: linear-gradient(135deg, #0E8741 0%, #086c33 100%);
-  color: #fff;
+  color: #fff !important;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2811,8 +2819,10 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   letter-spacing: .02em;
   text-decoration: none;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(14,135,65,.25), 0 0 0 2px rgba(255,255,255,.85);
   transition: transform .15s ease, box-shadow .15s ease;
 }
+.dash-avatar > * { color: inherit; }
 .dash-avatar:hover,
 .dash-avatar:focus-visible {
   transform: translateY(-1px);

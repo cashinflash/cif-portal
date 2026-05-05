@@ -109,6 +109,8 @@
     qs('#loansDetailView').hidden = true;
     setText(qs('#loansTitle'), 'Your loan history');
     setText(qs('#loansSubtitle'), 'Every loan you’ve had with Cash in Flash, in one place.');
+    var heroPill = qs('#loanDetailPillHero');
+    if (heroPill) heroPill.hidden = true;
 
     api(ACTIVE_ENDPOINT, token)
       .then(function (data) {
@@ -266,10 +268,11 @@
   function renderDetail(loan) {
     setText(qs('#loansTitle'), 'Loan #' + (loan.publicId || loan.id));
 
-    var pill = qs('#loanDetailPill');
+    var pill = qs('#loanDetailPillHero');
     if (pill) {
-      pill.className = 'dash-pill ' + statusPillClass(loan);
+      pill.className = 'dash-pill dash-hero-pill ' + statusPillClass(loan);
       pill.textContent = statusPillText(loan);
+      pill.hidden = false;
     }
 
     // Unified Summary for both active and paid-off loans:
