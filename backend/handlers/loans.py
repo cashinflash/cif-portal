@@ -2672,12 +2672,89 @@ def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
 def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
     """GET /api/my-esign/pending — list e-sign requests still
     waiting on this customer's signature. Drives the dashboard
-    banner + per-loan callout on the loan-detail page."""
+    banner + per-loan callout on the loan-detail page.
+
+    Includes a temporary `_debug` block on the response so we can
+    see Vergent's raw response shape during the Phase 1 rollout.
+    Removed once we confirm the parse path is right.
+    """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
-        return _json_response(200, {"pending": []})
-    return _json_response(200, {"pending": _fetch_pending_esign(cid)})
+        return _json_response(200, {"pending": [], "_debug": {"reason": "no_cid"}})
+
+    # Probe several path variants in one shot — Vergent's swagger
+    # describes /api/esign/pending/{customerId} but we've seen
+    # casing / prefix variation across other v1 endpoints, and the
+    # diagnostic-driven approach catches it without a second
+    # deploy. First 200 with non-empty body wins; otherwise we
+    # surface every attempt's shape so we can see what's there.
+    candidates = [
+        f"/api/esign/pending/{cid}",
+        f"/api/Esign/Pending/{cid}",
+        f"/api/V1/esign/pending/{cid}",
+        f"/api/V1/customer/{cid}/esign/pending",
+        f"/api/esign/customer/{cid}/pending",
+    ]
+    attempts = []
+    chosen_body = None
+    chosen_path = None
+    for path in candidates:
+        status, parsed, raw = _v1_request("GET", path, return_raw=True)
+        body_type = type(parsed).__name__ if parsed is not None else "None"
+        top_keys = []
+        list_len = None
+        if isinstance(parsed, dict):
+            top_keys = list(parsed.keys())[:20]
+        elif isinstance(parsed, list):
+            list_len = len(parsed)
+        attempts.append({
+            "path": path,
+            "status": status,
+            "bodyType": body_type,
+            "topKeys": top_keys,
+            "listLen": list_len,
+            "rawSnippet": (raw if isinstance(raw, str) else str(raw or ""))[:300],
+        })
+        # Pick the first 200 that has non-empty content.
+        if status == 200 and chosen_body is None:
+            if (isinstance(parsed, list) and len(parsed) > 0) or (
+                isinstance(parsed, dict) and any(parsed.get(k) for k in parsed)
+            ):
+                chosen_body = parsed
+                chosen_path = path
+
+    rows: List[Dict[str, Any]] = []
+    if isinstance(chosen_body, list):
+        rows = [r for r in chosen_body if isinstance(r, dict)]
+    elif isinstance(chosen_body, dict):
+        for key in ("Items", "Documents", "Pending", "Esigns", "Records",
+                    "items", "documents", "pending", "esigns", "records",
+                    "Result", "result", "Data", "data"):
+            v = chosen_body.get(key)
+            if isinstance(v, list):
+                rows = [r for r in v if isinstance(r, dict)]
+                break
+
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for r in rows:
+        shaped = _shape_esign_pending(r)
+        if not shaped or shaped["id"] in seen:
+            continue
+        seen.add(shaped["id"])
+        out.append(shaped)
+
+    log.info("esign-pending probe cid=%s chosen=%s rows=%d",
+             cid, chosen_path, len(out))
+    return _json_response(200, {
+        "pending": out,
+        "_debug": {
+            "cid": cid,
+            "chosenPath": chosen_path,
+            "attempts": attempts,
+        },
+    })
 
 
 def resend_esign(event: Dict[str, Any]) -> Dict[str, Any]:
