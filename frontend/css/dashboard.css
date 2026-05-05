@@ -849,12 +849,18 @@ dl.dash-loan-stats dd {
   transition: background .15s ease, color .15s ease;
 }
 .dash-esign-callout-btn:hover { background: rgba(107,84,0,.1); }
-.dash-esign-callout-btn--primary {
-  background: #6b5400;
-  color: #fff;
-  border-color: #6b5400;
+.dash-esign-callout-btn--primary,
+a.dash-esign-callout-btn--primary {
+  background: #6b5400 !important;
+  color: #fff !important;
+  border-color: #6b5400 !important;
 }
-.dash-esign-callout-btn--primary:hover { background: #4a3a00; border-color: #4a3a00; color: #fff; }
+.dash-esign-callout-btn--primary:hover,
+a.dash-esign-callout-btn--primary:hover {
+  background: #4a3a00 !important;
+  border-color: #4a3a00 !important;
+  color: #fff !important;
+}
 .dash-esign-callout-btn:disabled { opacity: .65; cursor: default; }
 @media (max-width: 640px) {
   .dash-esign-callout { flex-wrap: wrap; }
@@ -2445,12 +2451,18 @@ button.dash-doc-download:disabled {
   transition: background .15s ease, color .15s ease;
 }
 .dash-banner-btn:hover { background: rgba(0,0,0,.06); }
-.dash-banner-btn--primary {
-  background: #6b5400;
-  color: #fff;
-  border-color: #6b5400;
+.dash-banner-btn--primary,
+a.dash-banner-btn--primary {
+  background: #6b5400 !important;
+  color: #fff !important;
+  border-color: #6b5400 !important;
 }
-.dash-banner-btn--primary:hover { background: #4a3a00; border-color: #4a3a00; color: #fff; }
+.dash-banner-btn--primary:hover,
+a.dash-banner-btn--primary:hover {
+  background: #4a3a00 !important;
+  border-color: #4a3a00 !important;
+  color: #fff !important;
+}
 .dash-banner-btn:disabled { opacity: .65; cursor: default; }
 .dash-banner strong { font-weight: 700; }
 .dash-banner-close {
@@ -2487,6 +2499,8 @@ button.dash-doc-download:disabled {
     flex: 1 1 0;
     justify-content: center;
     text-align: center;
+    padding: 12px 18px;
+    font-size: .95rem;
   }
   .dash-banner-close {
     position: absolute;
