@@ -684,7 +684,6 @@ dl.dash-loan-stats {
   align-items: start;
 }
 .dash-loan-stats-pair > dl.dash-loan-stats:first-child {
-  border-right: 1px solid var(--cif-border, #e5e7eb);
   padding-right: 32px;
 }
 @media (max-width: 720px) {
