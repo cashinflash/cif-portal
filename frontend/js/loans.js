@@ -258,6 +258,7 @@
         var docsSection = qs('#loanDocumentsSection');
         if (docsSection) docsSection.style.display = '';
         loadDocuments(loan.id);
+        loadPendingEsignFor(loan.id);
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
@@ -331,6 +332,69 @@
         if (err && err.message === 'unauthorized') return;
         renderDocumentsError();
       });
+  }
+
+  // ---------- E-sign per-loan callout ----------
+  // If THIS loan has at least one pending e-sign, render a slim
+  // amber callout above the Documents card with a "Send me the
+  // link" button. Same backend endpoints the dashboard banner
+  // uses; filtered to entries whose loanId / publicLoanId matches.
+  function loadPendingEsignFor(loanId) {
+    var callout = qs('#loanEsignCallout');
+    if (!callout) return;
+    callout.hidden = true;
+    api('/api/my-esign/pending', token)
+      .then(function (data) {
+        var pending = (data && data.pending) || [];
+        var match = pending.filter(function (p) {
+          return String(p.loanId) === String(loanId)
+              || String(p.publicLoanId) === String(loanId);
+        });
+        if (match.length) renderEsignCallout(callout, loanId, match.length);
+      })
+      .catch(function () { /* silent */ });
+  }
+
+  function renderEsignCallout(root, loanId, count) {
+    var noun = count > 1 ? (count + ' documents') : '1 document';
+    root.innerHTML = (
+      '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
+      '<polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' +
+      '<div class="dash-esign-callout-text">' +
+      '  <strong>This loan has ' + noun + ' waiting for your signature.</strong>' +
+      '  <p>We sent the signing link to your email. Lost it? Tap below and we’ll resend it.</p>' +
+      '</div>' +
+      '<button type="button" class="dash-esign-callout-btn" data-action="esign-resend">Send me the link</button>'
+    );
+    root.hidden = false;
+    var btn = qs('[data-action="esign-resend"]', root);
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      fetch('/api/my-esign/resend', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        credentials: 'omit',
+        body: JSON.stringify({ loanId: loanId }),
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (data && data.ok) {
+            btn.textContent = 'Email sent ✓';
+          } else {
+            btn.textContent = 'Try again';
+            btn.disabled = false;
+          }
+        }).catch(function () {
+          btn.textContent = 'Try again';
+          btn.disabled = false;
+        });
+    });
   }
 
   function renderDocuments(docs) {

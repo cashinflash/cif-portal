@@ -11,6 +11,8 @@ Routes (bound to HttpApi with Cognito JWT authorizer):
   GET  /api/my-loans/activity                 -> recent activity for ?loanId=X
   GET  /api/my-loans/documents                -> list signed documents for ?loanId=X
   GET  /api/my-loans/documents/{docId}/download -> stream document binary (?format=pdf for PDF)
+  GET  /api/my-esign/pending                  -> pending e-sign requests for this customer
+  POST /api/my-esign/resend                   -> re-trigger e-sign email for {"loanId": N}
   POST /api/my-loan/new                       -> returns handoff URL into Vergent loan-application UI
 
 Auth model:
@@ -2587,6 +2589,136 @@ def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# E-sign — pending signatures + resend link
+# ─────────────────────────────────────────
+
+def _shape_esign_pending(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Normalize one Vergent /api/esign/pending row → portal shape."""
+    if not isinstance(record, dict):
+        return None
+    guid = (
+        record.get("Id") or record.get("id")
+        or record.get("Guid") or record.get("guid")
+        or record.get("EsignId") or record.get("esignId")
+    )
+    if not guid:
+        return None
+    loan_id = (
+        record.get("HdrId") or record.get("hdr_id")
+        or record.get("LoanHeaderId") or record.get("loanHeaderId")
+        or record.get("LoanId") or record.get("loanId")
+    )
+    public_id = (
+        record.get("PublicLoanId") or record.get("publicLoanId")
+        or record.get("PublicId") or record.get("publicId")
+    )
+    document_name = (
+        record.get("DocumentName") or record.get("documentName")
+        or record.get("Name") or record.get("name")
+        or "Loan documents"
+    )
+    when = (
+        record.get("CreatedDate") or record.get("createdDate")
+        or record.get("RequestedDate") or record.get("requestedDate")
+        or record.get("Date") or record.get("date")
+    )
+    return {
+        "id": str(guid),
+        "loanId": loan_id,
+        "publicLoanId": public_id,
+        "documentName": str(document_name),
+        "createdDate": _format_iso(when),
+    }
+
+
+def _fetch_pending_esign(cid: str) -> List[Dict[str, Any]]:
+    """Fetch the list of pending e-sign requests for a customer.
+    Returns shaped rows; empty list on any non-200 / unexpected
+    shape so the caller can render an empty state cleanly."""
+    if not cid:
+        return []
+    status, body = _v1_get(f"/api/esign/pending/{cid}")
+    if status != 200:
+        log.info("esign-pending status=%s cid=%s", status, cid)
+        return []
+    rows: List[Dict[str, Any]] = []
+    if isinstance(body, list):
+        rows = [r for r in body if isinstance(r, dict)]
+    elif isinstance(body, dict):
+        for key in ("Items", "Documents", "Pending", "Esigns",
+                    "items", "documents", "pending", "esigns"):
+            v = body.get(key)
+            if isinstance(v, list):
+                rows = [r for r in v if isinstance(r, dict)]
+                break
+    # Diagnostic: log the raw field set on the first row so we know
+    # what Vergent is actually shipping. Removed when Phase 2 lands.
+    if rows:
+        log.info("esign-pending shape cid=%s count=%d keys=%s",
+                 cid, len(rows), list(rows[0].keys())[:20])
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for r in rows:
+        shaped = _shape_esign_pending(r)
+        if not shaped or shaped["id"] in seen:
+            continue
+        seen.add(shaped["id"])
+        out.append(shaped)
+    return out
+
+
+def get_pending_esign(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/my-esign/pending — list e-sign requests still
+    waiting on this customer's signature. Drives the dashboard
+    banner + per-loan callout on the loan-detail page."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(200, {"pending": []})
+    return _json_response(200, {"pending": _fetch_pending_esign(cid)})
+
+
+def resend_esign(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-esign/resend — re-trigger Vergent's e-sign
+    email for a specific loan the customer owns. Body:
+    `{ "loanId": <int> }`.
+
+    Ownership is enforced by walking _fetch_all_loans and matching
+    the requested loanId — same pattern as get_loan_documents.
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"ok": False, "error": "no_customer_id"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (ValueError, TypeError):
+        body = {}
+    requested = body.get("loanId")
+    if requested in (None, ""):
+        return _json_response(400, {"ok": False, "error": "missing_loanId"})
+
+    shaped = _fetch_all_loans(cid)
+    loan = next(
+        (l for l in shaped
+         if str(l.get("id")) == str(requested)
+         or str(l.get("publicId") or "") == str(requested)),
+        None,
+    )
+    if not loan:
+        return _json_response(404, {"ok": False, "error": "loan_not_found"})
+
+    hdr_id = loan.get("id")
+    status, _resp = _v1_get(f"/api/esign/sendEsignDocs/{hdr_id}")
+    if status not in (200, 204):
+        log.warning("esign-resend non-2xx status=%s hdr=%s", status, hdr_id)
+        return _json_response(502, {"ok": False, "error": "vergent_error",
+                                    "upstreamStatus": status})
+    return _json_response(200, {"ok": True})
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -2627,6 +2759,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 and "/my-loans/documents/" in path
                 and method == "GET"):
             return get_document_download(event)
+        if path.endswith("/my-esign/pending") and method == "GET":
+            return get_pending_esign(event)
+        if path.endswith("/my-esign/resend") and method == "POST":
+            return resend_esign(event)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:

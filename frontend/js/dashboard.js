@@ -138,6 +138,7 @@
     renderProfileFromClaims();   // instant render from JWT claims (legacy selectors safe to call when missing)
     loadProfileFromApi();         // hydrate with Vergent data (account status, phone hint, text-messaging flag)
     loadActiveLoan();
+    loadPendingEsign();           // amber banner when Vergent has a doc waiting on the customer's signature
   });
 
   // ---------- One-shot "payment received" banner ----------
@@ -168,6 +169,90 @@
     }
     const close = qs('.dash-banner-close', banner);
     if (close) close.addEventListener('click', function () { banner.remove(); });
+  }
+
+  // ---------- E-sign pending banner ----------
+  // Vergent v1 /api/esign/pending/{cid} — amber banner when the
+  // customer has at least one loan document waiting for signature.
+  // First click on "Send me the link" calls /api/my-esign/resend
+  // for the first pending entry's loanId (typically there's only
+  // one). Banner stays until the next page load — clearing it
+  // requires Vergent to mark the doc signed, which we re-detect
+  // on next refresh.
+  function loadPendingEsign() {
+    const token = sessionStorage.getItem('cif_id_token');
+    if (!token) return;
+    fetch('/api/my-esign/pending', {
+      headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
+      credentials: 'omit',
+    }).then(function (r) {
+      if (!r.ok) return null;
+      return r.json();
+    }).then(function (data) {
+      const pending = (data && data.pending) || [];
+      if (!pending.length) return;
+      renderEsignBanner(pending);
+    }).catch(function () { /* silent — leave banner off on network blip */ });
+  }
+
+  function renderEsignBanner(pending) {
+    const first = pending[0] || {};
+    const loanId = first.loanId || first.publicLoanId || '';
+    const count = pending.length;
+    const banner = document.createElement('div');
+    banner.className = 'dash-banner dash-banner--esign';
+    const noun = count > 1 ? (count + ' documents') : '1 document';
+    const viewHref = loanId ? ('/loans.html?id=' + encodeURIComponent(loanId)) : '/loans.html';
+    banner.innerHTML = (
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
+      '<polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' +
+      '<span>You have <strong>' + noun + '</strong> waiting for your signature.</span>' +
+      '<div class="dash-banner-actions">' +
+      '  <button type="button" class="dash-banner-btn dash-banner-btn--primary" data-action="esign-resend">Send me the link</button>' +
+      '  <a class="dash-banner-btn" href="' + viewHref + '">View loan</a>' +
+      '</div>' +
+      '<button type="button" class="dash-banner-close" aria-label="Dismiss">&times;</button>'
+    );
+    const main = qs('.dash-main');
+    const hero = qs('.dash-hero');
+    if (main && hero && main.parentNode) {
+      main.parentNode.insertBefore(banner, main);
+    } else if (hero && hero.parentNode) {
+      hero.parentNode.insertBefore(banner, hero.nextSibling);
+    }
+    const close = qs('.dash-banner-close', banner);
+    if (close) close.addEventListener('click', function () { banner.remove(); });
+    const resendBtn = qs('[data-action="esign-resend"]', banner);
+    if (resendBtn) {
+      resendBtn.addEventListener('click', function () {
+        if (!loanId) return;
+        resendBtn.disabled = true;
+        resendBtn.textContent = 'Sending…';
+        const token = sessionStorage.getItem('cif_id_token');
+        fetch('/api/my-esign/resend', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          credentials: 'omit',
+          body: JSON.stringify({ loanId: loanId }),
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) {
+            if (data && data.ok) {
+              resendBtn.textContent = 'Email sent ✓';
+            } else {
+              resendBtn.textContent = 'Try again';
+              resendBtn.disabled = false;
+            }
+          }).catch(function () {
+            resendBtn.textContent = 'Try again';
+            resendBtn.disabled = false;
+          });
+      });
+    }
   }
 
   // ---------- Profile card ----------

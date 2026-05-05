@@ -76,6 +76,8 @@ jobs:
             "GET /api/my-loans/documents"
             "GET /api/my-loans/documents/{docId}/download"
             "POST /api/my-loan/new"
+            "GET /api/my-esign/pending"
+            "POST /api/my-esign/resend"
           )
           for RK in "${ROUTES[@]}"; do
             # NOTE: --query "Items[?...].RouteId | [0]" with --output text
