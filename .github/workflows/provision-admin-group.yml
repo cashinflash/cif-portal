@@ -70,7 +70,15 @@ jobs:
           PWD=$(python3 -c 'import secrets, string; \
               alphabet = string.ascii_letters + string.digits + "!@#$%^&*"; \
               print("Aa1!" + "".join(secrets.choice(alphabet) for _ in range(28)))')
-          echo "::add-mask::$PWD"
+          # NOTE: do NOT call `echo "::add-mask::$PWD"` here. GitHub
+          # Actions' masking applies to the step summary as well, which
+          # is exactly where we WANT the password visible — that's how
+          # the operator copies it into Render's
+          # PORTAL_ADMIN_SVC_PASSWORD env var. Trust boundary: anyone
+          # with read access to GitHub Actions on this private repo is
+          # already trusted (the workflow itself can provision Cognito
+          # users + attach IAM). Password rotates every run, so log
+          # exposure is bounded.
 
           if aws cognito-idp admin-get-user \
               --user-pool-id "$USER_POOL_ID" \
