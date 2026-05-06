@@ -630,6 +630,125 @@ def _v1_request(method: str, path: str, *,
 
 
 # ─────────────────────────────────────────
+# Repay-via-Vergent payment endpoints (Phase Z)
+# ─────────────────────────────────────────
+# Vergent exposes direct Repay-gateway wrappers under /V1/repay/transaction/*.
+# These sidestep the persistent failures of /V1/PostCustomerLoanPayment
+# (NullReferenceException for un-tokenized cards) and v2 CustomerPortal
+# CreditCardPayment (DependencyResolutionException). Same v1 service-token
+# auth as every other working v1 endpoint we use.
+#
+# Body shape isn't fully documented; we send a generous set of fields
+# in both PascalCase and snake_case so Vergent picks whatever it
+# recognizes (same belt-and-suspenders pattern that worked in Phase W).
+# Diagnostic surfacing on failure shows the verbatim upstream body
+# so we can iterate field names without redeploying.
+
+def _build_repay_body_card(*, cid, loan_id, card_id, amount, store_id,
+                           user_id, idempotency_key):
+    return {
+        "CompanyId":     VERGENT_COMPANY_ID,
+        "company_id":    VERGENT_COMPANY_ID,
+        "CustomerId":    int(cid),
+        "customer_id":   int(cid),
+        "LoanId":        int(loan_id),
+        "loan_id":       int(loan_id),
+        "HeaderId":      int(loan_id),  # alias some Vergent endpoints use
+        "header_id":     int(loan_id),
+        "CardId":        int(card_id),
+        "card_id":       int(card_id),
+        "Amount":        round(float(amount), 2),
+        "amount":        round(float(amount), 2),
+        "PaymentAmount": round(float(amount), 2),
+        "payment_amount": round(float(amount), 2),
+        "StoreId":       int(store_id) if store_id else 0,
+        "store_id":      int(store_id) if store_id else 0,
+        "UserId":        int(user_id) if user_id else 0,
+        "user_id":       int(user_id) if user_id else 0,
+        "IdempotencyKey": idempotency_key or "",
+        "idempotency_key": idempotency_key or "",
+    }
+
+
+def _build_repay_body_check(*, cid, loan_id, bank_id, amount, store_id,
+                            user_id, idempotency_key):
+    return {
+        "CompanyId":     VERGENT_COMPANY_ID,
+        "company_id":    VERGENT_COMPANY_ID,
+        "CustomerId":    int(cid),
+        "customer_id":   int(cid),
+        "LoanId":        int(loan_id),
+        "loan_id":       int(loan_id),
+        "HeaderId":      int(loan_id),
+        "header_id":     int(loan_id),
+        "BankId":        int(bank_id),
+        "bank_id":       int(bank_id),
+        "Amount":        round(float(amount), 2),
+        "amount":        round(float(amount), 2),
+        "PaymentAmount": round(float(amount), 2),
+        "payment_amount": round(float(amount), 2),
+        "StoreId":       int(store_id) if store_id else 0,
+        "store_id":      int(store_id) if store_id else 0,
+        "UserId":        int(user_id) if user_id else 0,
+        "user_id":       int(user_id) if user_id else 0,
+        "IdempotencyKey": idempotency_key or "",
+        "idempotency_key": idempotency_key or "",
+    }
+
+
+def _shape_repay_response(status, parsed, raw, *,
+                          amount, last4, method, new_balance):
+    """Translate Vergent /V1/repay/transaction/* response into the
+    same {success, confirmationId, ...} shape `payments.js` expects.
+    On non-2xx or business-logic decline, surfaces upstream body for
+    diagnosis."""
+    if status not in (200, 201):
+        log.warning("repay/transaction/%s upstream status=%s raw=%s",
+                    method, status, (raw or "")[:600])
+        return _json_response(502, {
+            "success": False,
+            "error":   "upstream_unavailable",
+            "upstreamStatus": status,
+            "upstreamBody":   (raw or "")[:600],
+        })
+    # Some Vergent endpoints return a wrapped shape with Success: false
+    # for declines. Surface as a clean failure if present.
+    if isinstance(parsed, dict):
+        success_flag = parsed.get("Success") or parsed.get("success")
+        if success_flag is False:
+            errs = (parsed.get("Errors") or parsed.get("errors")
+                    or parsed.get("ErrorMessage") or parsed.get("Error"))
+            log.warning("repay/transaction/%s declined parsed=%s",
+                        method, str(parsed)[:400])
+            return _json_response(200, {
+                "success": False,
+                "error":   "card_declined" if method == "card" else "ach_declined",
+                "upstreamErrors": errs,
+                "upstreamBody":   (raw or "")[:600],
+            })
+        confirmation_id = (parsed.get("TransactionId")
+                           or parsed.get("transactionId")
+                           or parsed.get("Id") or parsed.get("id")
+                           or parsed.get("ConfirmationId")
+                           or parsed.get("confirmationId"))
+    else:
+        confirmation_id = None
+    if not confirmation_id:
+        from datetime import datetime, timezone as _tz
+        confirmation_id = datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+    return _json_response(200, {
+        "success":        True,
+        "confirmationId": str(confirmation_id),
+        "transactionId":  confirmation_id,
+        "amount":         round(float(amount), 2),
+        "last4":          last4,
+        "paymentMethod":  method,
+        "newBalance":     new_balance,
+        "via":            "repay-sync",
+    })
+
+
+# ─────────────────────────────────────────
 # OmniaPay — iframe session creation for customer-self-service Add Card
 # ─────────────────────────────────────────
 _omniapay_creds_cache: Optional[Dict[str, str]] = None
@@ -1111,9 +1230,10 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         bankId  (when method=bank),
         idempotencyKey }
 
-    Both flows use v1 PostCustomerLoanPayment — v1 auths with the
-    service Token header and takes customerId-free context (loan id
-    + payment method id). No customer JWT required.
+    Both flows post directly to Vergent's Repay-gateway endpoints
+    (POST /V1/repay/transaction/{card,check}/sync). Same v1 service
+    token auth as everything else. Replaces the previous v2 → v1
+    fallback chain that was broken at both layers.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -1128,6 +1248,7 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     pay_method = (body.get("method") or "card").lower()
     loan_id = body.get("loanId")
     amount = body.get("amount")
+    idempotency_key = (body.get("idempotencyKey") or "").strip()
 
     if loan_id is None or amount is None:
         return _json_response(400, {"error": "missing_fields"})
@@ -1138,7 +1259,8 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     if amount_num <= 0:
         return _json_response(400, {"error": "amount_invalid"})
 
-    # Ownership + payoff guard via v1 (same pattern as before).
+    # Ownership + payoff guard via v1 (unchanged from prior pipeline —
+    # this part has always worked).
     loan = _fetch_active_loan(cid)
     if not loan or str(loan.get("id")) != str(loan_id):
         status_ok, raw_loans = _v1_get(f"/V1/{cid}/loans")
@@ -1160,183 +1282,89 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(400, {"error": "amount_invalid", "payoff": payoff})
 
     store_id = loan.get("storeId") or 0
-    hdr_id = int(loan.get("id")) if loan.get("id") else 0
 
-    # Vergent v1 PostCustomerLoanPayment body shape (documented):
-    #   CompanyId, StoreId, UserId, HeaderId, PaymentDate, PaymentAmount,
-    #   PaymentMethod (object: Type + reference fields depending on type)
-    from datetime import datetime, timezone
-    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    # Prime the v1 service token so loans._v1_user_id is populated
+    # (the Repay endpoints accept a UserId field for audit-attribution).
+    _get_v1_token()
+    from handlers import loans as _loans
+    user_id = _loans._v1_user_id or 0
 
     if pay_method == "card":
         card_id = body.get("cardId")
         if card_id is None:
             return _json_response(400, {"error": "missing_fields"})
-        # Ownership: confirm the cardId is in the customer's saved cards.
+        # Ownership check against saved cards list.
         st_c, cards_body, _ = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
         if st_c != 200 or not isinstance(cards_body, list):
             return _json_response(502, {"error": "upstream_unavailable"})
         card = next(
-            (c for c in cards_body if isinstance(c, dict) and str(c.get("id")) == str(card_id)),
+            (c for c in cards_body if isinstance(c, dict)
+             and str(c.get("id")) == str(card_id)),
             None,
         )
         if not card:
             return _json_response(403, {"error": "card_not_yours"})
-        last4 = "".join(ch for ch in (card.get("card_number") or "") if ch.isdigit())[-4:]
+        last4 = "".join(ch for ch in (card.get("card_number") or "")
+                        if ch.isdigit())[-4:]
 
-        # ── Primary path: v2 CustomerPortal/CreditCardPayment ──
-        # Service APIM auth (customer-JWT path via AuthenticateCognito
-        # is broken for our tenant per docs/CLAUDE.md). Vergent's
-        # published swagger schema for the request body omits
-        # `cardId`, but the endpoint actually requires it (confirmed
-        # empirically by an "ArgumentException: cardId must be a
-        # non-default value" 400 response when we omitted it).
-        # paymentId=0 is accepted for ad-hoc (non-scheduled-installment)
-        # payments — confirmed by the same error path passing the
-        # paymentId check before the cardId check.
-        v2_trail: list = []
-        v2_status, v2_parsed, v2_raw = _v2_credit_card_payment(
-            hdr_id, 0, round(amount_num, 2), int(card_id),
-            customer_id=int(cid) if cid else None,
+        charge_body = _build_repay_body_card(
+            cid=cid, loan_id=loan_id, card_id=card_id,
+            amount=amount_num, store_id=store_id, user_id=user_id,
+            idempotency_key=idempotency_key,
         )
-        v2_trail.append({
-            "step": "charge", "paymentId": 0, "cardId": int(card_id),
-            "status": v2_status, "rawHead": (v2_raw or "")[:200],
-        })
-        if v2_status in (200, 201):
+        log.info("payment-attempt method=card cid=%s loan_id=%s last4=%s amount=%s",
+                 cid, loan_id, last4, amount_num)
+        status, parsed, raw = _v1_request(
+            "POST", "/V1/repay/transaction/card/sync", body=charge_body,
+        )
+        new_balance = None
+        if status in (200, 201):
             refreshed = _fetch_active_loan(cid)
-            new_balance = (
-                refreshed.get("balance") if refreshed else None
-            )
-            confirmation = (
-                v2_parsed.get("scheduleDate")
-                if isinstance(v2_parsed, dict) else None
-            ) or now_iso
-            log.info(
-                "v2 payment success cid=%s loan_id=%s amount=%s "
-                "last4=%s confirmation=%s",
-                cid, loan_id, amount_num, last4, confirmation,
-            )
-            return _json_response(200, {
-                "success": True,
-                "confirmationId": str(confirmation),
-                "transactionId": None,
-                "amount": round(amount_num, 2),
-                "last4": last4,
-                "paymentMethod": "card",
-                "newBalance": new_balance,
-                "via": "v2",
-            })
-        log.warning(
-            "v2 CreditCardPayment failed status=%s raw=%s "
-            "— falling back to v1",
-            v2_status, (v2_raw or "")[:300],
+            new_balance = refreshed.get("balance") if refreshed else None
+        return _shape_repay_response(
+            status, parsed, raw,
+            amount=amount_num, last4=last4, method="card",
+            new_balance=new_balance,
         )
 
-        # ── Fallback path: v1 PostCustomerLoanPayment ──
-        # No pre-flight tokenization check here: v1 GetCustomerCards
-        # doesn't expose card_ref/CardProcessor/card_guid in its
-        # response (those fields are internal to Vergent's charge
-        # flow). A card returned with all of those empty can still be
-        # chargeable — confirmed empirically when Vergent admin
-        # successfully charged the same card our portal had been
-        # blocking. Trust v1 to either charge the card or return a
-        # real upstream error that we surface via upstreamBody.
-        method_obj = {"Type": "Card", "CardId": int(card_id)}
     elif pay_method == "bank":
         bank_id = body.get("bankId")
         if bank_id is None:
             return _json_response(400, {"error": "missing_fields"})
-        # Ownership: confirm the bankId is in the customer's saved banks.
         st_b, banks_body, _ = _v1_request("GET", f"/V1/GetCustomerBanks?custId={cid}")
         if st_b != 200 or not isinstance(banks_body, list):
             return _json_response(502, {"error": "upstream_unavailable"})
         bank = next(
-            (b for b in banks_body if isinstance(b, dict) and str(b.get("id")) == str(bank_id)),
+            (b for b in banks_body if isinstance(b, dict)
+             and str(b.get("id")) == str(bank_id)),
             None,
         )
         if not bank:
             return _json_response(403, {"error": "bank_not_yours"})
-        last4 = "".join(ch for ch in (bank.get("account_number") or "") if ch.isdigit())[-4:]
-        method_obj = {"Type": "ACH", "BankId": int(bank_id)}
-    else:
-        return _json_response(400, {"error": "method_invalid"})
+        last4 = "".join(ch for ch in (bank.get("account_number") or "")
+                        if ch.isdigit())[-4:]
 
-    # Ensure the v1 service token has been fetched so loans._v1_user_id
-    # is populated (it's set when /api/authenticate responds). Without
-    # UserId in the PaymentInfo body, Vergent's v1 controller crashes
-    # at line 3413 with NullReferenceException — confirmed empirically
-    # against admin-charged cards that nonetheless fail our charge.
-    _get_v1_token()
-    from handlers import loans as _loans
-    user_id = _loans._v1_user_id or 0
+        charge_body = _build_repay_body_check(
+            cid=cid, loan_id=loan_id, bank_id=bank_id,
+            amount=amount_num, store_id=store_id, user_id=user_id,
+            idempotency_key=idempotency_key,
+        )
+        log.info("payment-attempt method=ach cid=%s loan_id=%s last4=%s amount=%s",
+                 cid, loan_id, last4, amount_num)
+        status, parsed, raw = _v1_request(
+            "POST", "/V1/repay/transaction/check/sync", body=charge_body,
+        )
+        new_balance = None
+        if status in (200, 201):
+            refreshed = _fetch_active_loan(cid)
+            new_balance = refreshed.get("balance") if refreshed else None
+        return _shape_repay_response(
+            status, parsed, raw,
+            amount=amount_num, last4=last4, method="bank",
+            new_balance=new_balance,
+        )
 
-    charge_body = {
-        "CompanyId": VERGENT_COMPANY_ID,
-        "StoreId": int(store_id) if store_id else 0,
-        "UserId": int(user_id),
-        "HeaderId": hdr_id,
-        "PaymentDate": now_iso,
-        "PaymentAmount": round(amount_num, 2),
-        # Documented v1 PaymentInfo fields the v1 PDF lists but we
-        # had been omitting. Vergent's controller dereferences these
-        # internally and crashes with NullReferenceException at
-        # V1Controller.PostCustomerLoanPayment line 3413 if any are
-        # missing. Defaults are safe for an ad-hoc card payment that
-        # isn't using a coupon, isn't returning change, and isn't
-        # tied to a paper instrument.
-        "ChangeDue": 0,
-        "SelectedCoupon": None,
-        "CouponAmount": 0,
-        "PaymentSource": 0,
-        "InstrumentNumber": "",
-        "PaymentMethod": method_obj,
-    }
-
-    log.info("payment attempt cid=%s user_id=%s method=%s loan_id=%s last4=%s amount=%s",
-             cid, user_id, pay_method, loan_id, last4, amount_num)
-
-    status, charge, raw = _v1_request("POST", "/V1/PostCustomerLoanPayment", body=charge_body)
-
-    if status not in (200, 201):
-        log.warning("payment upstream status=%s raw=%s", status, (raw or "")[:600])
-        # Surface the upstream Vergent status + body in the 502 so we
-        # can diagnose without CloudWatch round-trips. Strip from the
-        # response once the charge flow is verified working.
-        return _json_response(502, {
-            "error": "upstream_unavailable",
-            "upstreamStatus": status,
-            "upstreamBody": (raw or "")[:400],
-        })
-
-    if isinstance(charge, dict) and charge.get("Errors"):
-        log.warning("payment declined cid=%s loan_id=%s errors=%s",
-                    cid, loan_id, charge.get("Errors"))
-        return _json_response(200, {
-            "success": False,
-            "error": "card_declined",
-            "upstreamErrors": charge.get("Errors"),
-        })
-
-    # Re-fetch the loan so we can tell the UI the new balance.
-    refreshed = _fetch_active_loan(cid)
-    new_balance = refreshed.get("balance") if refreshed else None
-
-    trans_id = charge.get("TransactionId") if isinstance(charge, dict) else None
-    confirmation_id = str(trans_id) if trans_id else now_iso
-
-    log.info("payment success cid=%s method=%s loan_id=%s last4=%s amount=%s trans=%s new_balance=%s",
-             cid, pay_method, loan_id, last4, amount_num, trans_id, new_balance)
-
-    return _json_response(200, {
-        "success": True,
-        "confirmationId": confirmation_id,
-        "transactionId": trans_id,
-        "amount": round(amount_num, 2),
-        "last4": last4,
-        "paymentMethod": pay_method,
-        "newBalance": new_balance,
-    })
+    return _json_response(400, {"error": "method_invalid"})
 
 
 # ─────────────────────────────────────────
