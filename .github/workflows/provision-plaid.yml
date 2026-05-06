@@ -23,11 +23,13 @@ on:
   workflow_dispatch:
     inputs:
       client_id:
-        description: Plaid client_id
-        required: true
+        description: Plaid client_id (LEAVE BLANK to skip secret rotation and only re-attach IAM / table / env vars)
+        required: false
+        default: ''
       secret:
-        description: Plaid secret (production / development / sandbox)
-        required: true
+        description: Plaid secret — production / development / sandbox (LEAVE BLANK if not rotating)
+        required: false
+        default: ''
       env:
         description: Plaid environment
         required: true
@@ -55,6 +57,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Mask Plaid credentials in logs
+        if: github.event.inputs.client_id != '' && github.event.inputs.secret != ''
         env:
           CID: ${{ github.event.inputs.client_id }}
           SEC: ${{ github.event.inputs.secret }}
@@ -63,6 +66,7 @@ jobs:
           echo "::add-mask::$SEC"
 
       - name: Store/refresh Plaid secret
+        if: github.event.inputs.client_id != '' && github.event.inputs.secret != ''
         env:
           CID: ${{ github.event.inputs.client_id }}
           SEC: ${{ github.event.inputs.secret }}
@@ -87,6 +91,12 @@ jobs:
               --secret-string "$PAYLOAD" >/dev/null
             echo "Created secret $SECRET_NAME (env=$ENV)"
           fi
+
+      - name: Skip-secret-rotation notice
+        if: github.event.inputs.client_id == '' || github.event.inputs.secret == ''
+        run: |
+          echo "Plaid client_id/secret left blank — skipping secret rotation."
+          echo "Re-attaching IAM policy, ensuring table exists, and refreshing env vars only."
 
       - name: Create DDB table if missing
         run: |
