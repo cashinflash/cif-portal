@@ -55,6 +55,11 @@ PLAID_ITEMS_TABLE = os.environ.get(
 )
 CLIENT_NAME = "Cash in Flash"
 PRODUCTS = ["auth", "identity", "transactions"]
+# Asset reports are consented at link time but not required, so the
+# customer's link UX stays identical. Without this, /asset_report/create
+# fails with PRODUCT_NOT_ENABLED for the Plaid Item — admin can't
+# re-run reports from the dashboard.
+ADDITIONAL_CONSENTED_PRODUCTS = ["assets"]
 COUNTRY_CODES = ["US"]
 LANGUAGE = "en"
 HTTP_TIMEOUT = 12  # seconds
@@ -254,6 +259,7 @@ def link_token(event: Dict[str, Any]) -> Dict[str, Any]:
         "country_codes": COUNTRY_CODES,
         "language": LANGUAGE,
         "products": PRODUCTS,
+        "additional_consented_products": ADDITIONAL_CONSENTED_PRODUCTS,
         "user": {"client_user_id": str(cid)},
     }
     status, parsed, raw = _plaid_post("/link/token/create", body)
