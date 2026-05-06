@@ -58,6 +58,7 @@ CLIENT_NAME = "Cash in Flash"
 # (engine_v3 pipeline for portal-linked customers). Adding to `products`
 # directly is more reliable than `additional_consented_products` which
 # is still in beta on Plaid's side and silently fails on some accounts.
+# (Touched 2026-05-05 to trigger Lambda redeploy after deploy.yml fix.)
 PRODUCTS = ["auth", "identity", "transactions", "assets"]
 COUNTRY_CODES = ["US"]
 LANGUAGE = "en"
