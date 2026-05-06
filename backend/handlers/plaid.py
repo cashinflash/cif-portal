@@ -54,12 +54,11 @@ PLAID_ITEMS_TABLE = os.environ.get(
     "PLAID_ITEMS_TABLE", "cif-portal-plaid-items-dev"
 )
 CLIENT_NAME = "Cash in Flash"
-PRODUCTS = ["auth", "identity", "transactions"]
-# Asset reports are consented at link time but not required, so the
-# customer's link UX stays identical. Without this, /asset_report/create
-# fails with PRODUCT_NOT_ENABLED for the Plaid Item — admin can't
-# re-run reports from the dashboard.
-ADDITIONAL_CONSENTED_PRODUCTS = ["assets"]
+# Asset reports are needed for the cif-dashboard Re-run report feature
+# (engine_v3 pipeline for portal-linked customers). Adding to `products`
+# directly is more reliable than `additional_consented_products` which
+# is still in beta on Plaid's side and silently fails on some accounts.
+PRODUCTS = ["auth", "identity", "transactions", "assets"]
 COUNTRY_CODES = ["US"]
 LANGUAGE = "en"
 HTTP_TIMEOUT = 12  # seconds
@@ -259,7 +258,6 @@ def link_token(event: Dict[str, Any]) -> Dict[str, Any]:
         "country_codes": COUNTRY_CODES,
         "language": LANGUAGE,
         "products": PRODUCTS,
-        "additional_consented_products": ADDITIONAL_CONSENTED_PRODUCTS,
         "user": {"client_user_id": str(cid)},
     }
     status, parsed, raw = _plaid_post("/link/token/create", body)
