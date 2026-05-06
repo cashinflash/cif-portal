@@ -139,6 +139,7 @@ jobs:
                     "dynamodb:PutItem",
                     "dynamodb:DeleteItem",
                     "dynamodb:Query",
+                    "dynamodb:Scan",
                     "dynamodb:UpdateItem"
                   ],
                   "Resource": $table
