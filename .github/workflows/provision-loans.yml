@@ -86,6 +86,9 @@ jobs:
             "DELETE /api/plaid/connections/{itemId}"
             "GET /api/admin/plaid/customers"
             "GET /api/admin/plaid/customer/{cid}"
+            "POST /api/admin/plaid/asset-report/{itemId}"
+            "GET /api/admin/plaid/asset-report/{token}"
+            "GET /api/admin/plaid/asset-report/{token}/pdf"
           )
           for RK in "${ROUTES[@]}"; do
             # NOTE: --query "Items[?...].RouteId | [0]" with --output text

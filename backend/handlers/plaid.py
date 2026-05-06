@@ -25,6 +25,7 @@ Plaid API reference: https://plaid.com/docs/api/
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -647,3 +648,192 @@ def get_admin_customer(event: Dict[str, Any], cid: str) -> Dict[str, Any]:
         "customerPhoneLast4": profile.get("phoneLast4", ""),
         "items": items,
     })
+
+
+# ─────────────────────────────────────────
+# Admin asset-report endpoints (Phase U.3)
+# Trigger a Plaid /asset_report/create for an existing item, poll
+# for readiness, and download the PDF. Each pull costs ~$5 from
+# Plaid — the dashboard prompts before triggering.
+# ─────────────────────────────────────────
+
+
+def _find_access_token_by_item(item_id: str) -> Tuple[str, str]:
+    """Scan plaid items table for the row with matching itemId.
+    Returns (access_token, customerId). Both empty when not found.
+    Used by admin endpoints that only know itemId (the dashboard
+    URL has just itemId, not customerId)."""
+    if not item_id:
+        return "", ""
+    for it in _scan_all_items():
+        if (it.get("itemId") or {}).get("S") == str(item_id):
+            return (
+                (it.get("accessToken") or {}).get("S") or "",
+                (it.get("customerId") or {}).get("S") or "",
+            )
+    return "", ""
+
+
+def trigger_asset_report(event: Dict[str, Any], item_id: str) -> Dict[str, Any]:
+    """POST /api/admin/plaid/asset-report/{itemId} — trigger a fresh
+    Plaid asset report for the access token associated with this item.
+    Returns the asset_report_token (used by the get endpoints to poll
+    + fetch the PDF)."""
+    claims = _claims_from_event(event)
+    err = _require_admin_group(claims)
+    if err:
+        return err
+    if not item_id:
+        return _json_response(400, {"ok": False, "error": "missing_itemId"})
+
+    access_token, cid = _find_access_token_by_item(item_id)
+    if not access_token:
+        return _json_response(404, {"ok": False, "error": "item_not_found"})
+
+    status, parsed, raw = _plaid_post(
+        "/asset_report/create",
+        {
+            "access_tokens": [access_token],
+            "days_requested": 90,
+            "options": {
+                "client_report_id": item_id,
+                "webhook": "",
+            },
+        },
+    )
+    if status != 200 or not isinstance(parsed, dict):
+        log.warning("admin asset_report/create failed cid=%s item=%s status=%s body=%r",
+                    cid, item_id, status, (raw or "")[:300])
+        # Common case: ITEM_LOGIN_REQUIRED — customer changed bank
+        # password, token is stale. Surface clean error so the
+        # dashboard can prompt admin to ask customer to reconnect.
+        err_code = (parsed or {}).get("error_code") or ""
+        return _json_response(502, {
+            "ok": False,
+            "error": "plaid_create_failed",
+            "errorCode": err_code,
+            "detail": (raw or "")[:400],
+        })
+
+    return _json_response(200, {
+        "ok": True,
+        "assetReportToken": parsed.get("asset_report_token"),
+        "requestId": parsed.get("request_id"),
+        "customerId": cid,
+        "itemId": item_id,
+    })
+
+
+def get_asset_report(event: Dict[str, Any], token: str) -> Dict[str, Any]:
+    """GET /api/admin/plaid/asset-report/{token} — poll Plaid for the
+    generated report. While Plaid is still building (typical 30s-2min),
+    we return HTTP 202 + {ready: false, retryAfter: 5} so the
+    dashboard can poll. When ready, returns 200 + {ready: true, report}."""
+    claims = _claims_from_event(event)
+    err = _require_admin_group(claims)
+    if err:
+        return err
+    if not token:
+        return _json_response(400, {"ok": False, "error": "missing_token"})
+
+    status, parsed, raw = _plaid_post(
+        "/asset_report/get",
+        {"asset_report_token": token, "include_insights": False},
+    )
+    # PRODUCT_NOT_READY → still generating; tell dashboard to retry.
+    err_code = (parsed or {}).get("error_code") if isinstance(parsed, dict) else ""
+    if err_code == "PRODUCT_NOT_READY" or (status == 400 and "PRODUCT_NOT_READY" in (raw or "")):
+        return _json_response(202, {
+            "ok": True,
+            "ready": False,
+            "retryAfter": 5,
+        })
+    if status != 200 or not isinstance(parsed, dict):
+        log.warning("admin asset_report/get failed token=%s... status=%s body=%r",
+                    token[:12], status, (raw or "")[:300])
+        return _json_response(502, {
+            "ok": False,
+            "error": "plaid_get_failed",
+            "errorCode": err_code,
+            "detail": (raw or "")[:400],
+        })
+    return _json_response(200, {
+        "ok": True,
+        "ready": True,
+        "report": parsed.get("report") or {},
+        "warnings": parsed.get("warnings") or [],
+    })
+
+
+def get_asset_report_pdf(event: Dict[str, Any], token: str) -> Dict[str, Any]:
+    """GET /api/admin/plaid/asset-report/{token}/pdf — fetch the PDF
+    binary version of the asset report. Returns the PDF base64-encoded
+    with isBase64Encoded=true so HttpApi forwards it correctly to the
+    browser as application/pdf."""
+    claims = _claims_from_event(event)
+    err = _require_admin_group(claims)
+    if err:
+        return err
+    if not token:
+        return _json_response(400, {"ok": False, "error": "missing_token"})
+
+    creds = _load_creds()
+    if not creds:
+        return _json_response(502, {"ok": False, "error": "credentials_unavailable"})
+
+    payload = {
+        "client_id": creds["clientId"],
+        "secret": creds["secret"],
+        "asset_report_token": token,
+    }
+    url = f"{_api_host(creds['env'])}/asset_report/pdf/get"
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/pdf,application/json",
+            "User-Agent": "cif-portal/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            raw_bytes = resp.read()
+            ctype = resp.headers.get("Content-Type", "application/pdf")
+            if "pdf" not in ctype.lower():
+                # Plaid returned a JSON error — bubble it up
+                log.warning("admin asset_report/pdf/get unexpected ctype=%s body=%r",
+                            ctype, raw_bytes[:300])
+                return _json_response(502, {
+                    "ok": False,
+                    "error": "pdf_unexpected_content_type",
+                    "detail": raw_bytes[:400].decode("utf-8", "replace"),
+                })
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = (e.read() or b"").decode("utf-8", "replace")
+        except Exception:
+            pass
+        log.warning("admin asset_report/pdf/get HTTPError code=%s body=%r",
+                    e.code, body[:300])
+        return _json_response(502, {
+            "ok": False,
+            "error": "plaid_pdf_failed",
+            "status": e.code,
+            "detail": body[:400],
+        })
+    except Exception as e:
+        log.warning("admin asset_report/pdf/get error=%s", type(e).__name__)
+        return _json_response(502, {"ok": False, "error": "pdf_network_error"})
+
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": f'attachment; filename="asset-report-{token[:12]}.pdf"',
+            "Access-Control-Allow-Origin": "*",
+        },
+        "body": base64.b64encode(raw_bytes).decode("ascii"),
+        "isBase64Encoded": True,
+    }

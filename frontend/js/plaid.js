@@ -132,6 +132,9 @@
           onSuccess: function (publicToken, metadata) {
             exchangePublicToken(publicToken, metadata).then(function (res) {
               if (res.ok && res.data && res.data.ok) {
+                var instName = (metadata && metadata.institution
+                                && metadata.institution.name) || 'Your bank';
+                _showSuccessBanner(instName);
                 if (onDone) onDone(true);
               } else {
                 console.warn('[plaid] exchange failed', res);
@@ -176,6 +179,47 @@
   }
 
   // ----- Profile-page list rendering -----
+
+  // Slide-in green confirmation banner shown after a successful Plaid
+  // Link exchange. Auto-dismisses after 4 seconds; click X to dismiss
+  // earlier. Inline-styled so we don't need a CSS edit.
+  function _showSuccessBanner(institutionName) {
+    var existing = document.getElementById('cif-plaid-success-banner');
+    if (existing) existing.parentNode.removeChild(existing);
+    var b = document.createElement('div');
+    b.id = 'cif-plaid-success-banner';
+    b.setAttribute('role', 'status');
+    b.style.cssText = [
+      'position:fixed', 'top:16px', 'left:50%',
+      'transform:translateX(-50%)',
+      'background:#e8f5ee', 'color:#1a6b3c',
+      'border:1px solid #1a6b3c33',
+      'border-radius:10px',
+      'padding:12px 18px',
+      'font-family:inherit', 'font-size:14px', 'font-weight:600',
+      'box-shadow:0 4px 12px rgba(0,0,0,.08)',
+      'z-index:10000',
+      'display:flex', 'align-items:center', 'gap:10px',
+      'max-width:90vw',
+    ].join(';');
+    var safeName = String(institutionName || 'Your bank')
+      .replace(/[<>&"']/g, function (c) {
+        return { '<': '&lt;', '>': '&gt;', '&': '&amp;',
+                 '"': '&quot;', "'": '&#39;' }[c];
+      });
+    b.innerHTML = ''
+      + '<span style="font-size:18px">✓</span>'
+      + '<span>' + safeName + ' connected successfully</span>'
+      + '<button type="button" aria-label="Close"'
+        + ' style="background:transparent;border:0;color:inherit;'
+        + 'font-size:18px;cursor:pointer;padding:0 4px;line-height:1;'
+        + 'opacity:.6;font-family:inherit">×</button>';
+    document.body.appendChild(b);
+    var closeBtn = b.querySelector('button');
+    var dismiss = function () { if (b.parentNode) b.parentNode.removeChild(b); };
+    closeBtn.addEventListener('click', dismiss);
+    setTimeout(dismiss, 4000);
+  }
 
   function fmtSubtype(s) {
     if (!s) return '';

@@ -3295,6 +3295,21 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             parts = [p for p in path.split("/") if p]
             cid_param = parts[-1] if parts else ""
             return plaid.get_admin_customer(event, cid_param)
+        # Admin (Phase U.3) — Plaid asset reports on demand
+        if ("/admin/plaid/asset-report/" in path and method == "POST"):
+            parts = [p for p in path.split("/") if p]
+            item_id = parts[-1] if parts else ""
+            return plaid.trigger_asset_report(event, item_id)
+        if (path.endswith("/pdf") and "/admin/plaid/asset-report/" in path
+                and method == "GET"):
+            parts = [p for p in path.split("/") if p]
+            # path = .../admin/plaid/asset-report/{token}/pdf
+            tok = parts[-2] if len(parts) >= 2 else ""
+            return plaid.get_asset_report_pdf(event, tok)
+        if ("/admin/plaid/asset-report/" in path and method == "GET"):
+            parts = [p for p in path.split("/") if p]
+            tok = parts[-1] if parts else ""
+            return plaid.get_asset_report(event, tok)
 
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:
