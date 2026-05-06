@@ -3299,4 +3299,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _json_response(404, {"error": "not_found", "path": path})
     except Exception as exc:
         log.exception("loans handler unexpected error: %s", exc)
-        return _json_response(200, {"error": "upstream_unavailable"})
+        return _json_response(200, {
+            "error": "upstream_unavailable",
+            "_detail": f"{type(exc).__name__}: {str(exc)[:300]}",
+            "_path": path,
+        })
