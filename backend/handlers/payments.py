@@ -1,34 +1,43 @@
 """
-Customer Portal — Payments handler (Vergent v2 APIM + Repay).
+Customer Portal — Payments handler.
 
 Routes (bound to HttpApi with Cognito JWT authorizer):
   GET  /api/my-cards                 -> list the customer's saved cards
+  GET  /api/my-banks                 -> list the customer's saved banks
   GET  /api/my-payment/loan-summary  -> active loan data formatted for the pay page
-  POST /api/my-payment               -> charge a saved card and post to the loan
+  POST /api/my-payment               -> create a Vergent customer-portal handoff
+                                        URL the customer follows to pay
+
+Why a handoff: Vergent's REST surface for charging cards is a maze of
+broken endpoints for our tenant — v1 PostCustomerLoanPayment crashes
+with NullReferenceException at line 3413 of their controller, v2
+CustomerPortal/CreditCardPayment requires a customer JWT but
+AuthenticateCognito itself crashes server-side, and the
+v1/repay/transaction/* endpoints are webhook receivers rather than
+charge endpoints. The handoff endpoint (/api/authenticate/handoff/
+create) is the path Vergent maintains and tests themselves; it
+returns a single-use URL that signs the customer into Vergent's
+hosted customer portal where they can pay using whichever payment
+method they have on file. After the customer pays and returns,
+the loan summary refresh shows the updated balance.
 
 Auth model:
   - API Gateway's Cognito JWT authorizer identifies the customer
     (custom:vergentCustomerId claim).
   - Vergent is called with the SERVICE APIM token (JWT from
     /api/authenticate at the APIM host) plus the x-api-key header.
-    We reuse the exact caching pattern from loans.py::_get_apim_token.
-  - Before we execute a charge, we pull the customer's loans via v1
-    and confirm the requested loanId belongs to the caller. We also
-    confirm cardId is in the caller's card list. Never trust the body
-    alone for authorization.
-
-PCI posture: we never touch raw PAN. Vergent returns tokenized saved
-cards (last4 only); Vergent routes the charge to Repay server-side.
-Our logs record cardId + last4 + amount + confirmation id.
 
 Environment:
   VERGENT_APIM_BASE_URL  default https://prod.apim.vergentlms.com/external/shared
   VERGENT_V1_BASE_URL    default https://shared.vergentlms.com/api/api
   VERGENT_SECRET_ARN     Secrets Manager ARN (same secret as loans.py)
+  VERGENT_HANDOFF_AUTHORITY  default cashinflash.apply.vergentlms.com (loans.py
+                             import; same value used for all handoffs)
+  VERGENT_PAYMENT_HANDOFF_TARGET  default "/" (relative URL inside Vergent's
+                                  customer portal where the customer lands)
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -39,6 +48,7 @@ from typing import Any, Dict, Optional
 from handlers.loans import (
     APIM_BASE,
     CORS_HEADERS,
+    HANDOFF_AUTHORITY,
     V1_BASE,
     _claims,
     _customer_id,
@@ -53,22 +63,7 @@ from handlers.loans import (
 )
 
 VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
-REPAY_SECRET_ARN = os.environ.get("REPAY_SECRET_ARN",
-                                  "cif-portal/repay/credentials")
-REPAY_GATEWAY_BASE = os.environ.get("REPAY_GATEWAY_BASE",
-                                    "https://api.repayonline.com/rgapi/v1.0")
-
-# OmniaPay (Vergent-owned) — used for the customer-self-service Add Card
-# flow via embedded iframe. Server-to-server: Lambda calls this API to
-# create an iframe session, gets back a 32-char hex GUID, and the
-# frontend embeds https://iframe.omniapay.com/{guid}?refererUrls=... so
-# the customer's PAN/CVV never traverses our infrastructure (PCI SAQ A).
-OMNIAPAY_SECRET_ARN = os.environ.get("OMNIAPAY_SECRET_ARN",
-                                     "cif-portal/omniapay/credentials")
-OMNIAPAY_API_BASE = os.environ.get("OMNIAPAY_API_BASE",
-                                   "https://api.omniapay.com")
-OMNIAPAY_IFRAME_BASE = os.environ.get("OMNIAPAY_IFRAME_BASE",
-                                      "https://iframe.omniapay.com")
+PAYMENT_HANDOFF_TARGET = os.environ.get("VERGENT_PAYMENT_HANDOFF_TARGET", "/")
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -240,415 +235,6 @@ def _apim_call(method: str, path: str, *,
     return _http(f"{APIM_BASE}{path}", method, body=body, headers=h)
 
 
-# ─────────────────────────────────────────
-# Vergent v2 CustomerPortal — customer-context auth + payment
-# ─────────────────────────────────────────
-# v2 CreditCardPayment uses the loan's default funding method
-# (no cardId in the request) — sidesteps v1 PostCustomerLoanPayment's
-# server-side NullReferenceException when a card record lacks a
-# Repay token. Auth is a v2 customer session token obtained by
-# exchanging the customer's Cognito JWT via AuthenticateCognito.
-
-def _get_customer_v2_token(event: Dict[str, Any],
-                           trail: Optional[list] = None) -> Optional[str]:
-    """Exchange the request's Cognito JWT for a Vergent v2 customer token.
-
-    The customer's Cognito ID token is in the request's Authorization
-    header (already validated by API Gateway's Cognito authorizer).
-    Send it to v2 AuthenticateCognito to get back a Vergent customer
-    session token usable for v2 CustomerPortal endpoints.
-
-    Returns the token string, or None if the exchange fails. If
-    `trail` is provided, append a step-result dict for diagnosis.
-    """
-    def _record(step_outcome: Dict[str, Any]) -> None:
-        if trail is not None:
-            trail.append(step_outcome)
-
-    headers = event.get("headers") or {}
-    auth_header = ""
-    for k in ("authorization", "Authorization"):
-        if k in headers and headers[k]:
-            auth_header = headers[k]
-            break
-    jwt = auth_header.replace("Bearer ", "").replace("bearer ", "").strip()
-    if not jwt:
-        log.warning("v2 token exchange: no Authorization header on request")
-        _record({"step": "auth", "status": 0, "note": "no_auth_header"})
-        return None
-
-    creds = _get_creds()
-    if not creds:
-        log.warning("v2 token exchange: vergent creds not loaded")
-        _record({"step": "auth", "status": 0, "note": "no_creds"})
-        return None
-    api_key = creds.get("xApiKey", "")
-
-    url = f"{APIM_BASE}/api/CustomerPortal/AuthenticateCognito"
-    body = {"jwt": jwt}
-    h = {
-        "Content-Type": "application/json",
-        "x-api-key": api_key,
-    }
-    status, parsed, raw = _http(url, "POST", body=body, headers=h)
-    if status != 200 or not isinstance(parsed, dict):
-        log.warning("v2 AuthenticateCognito failed: status=%s raw=%s",
-                    status, (raw or "")[:300])
-        _record({
-            "step": "auth",
-            "status": status,
-            "rawHead": (raw or "")[:200],
-        })
-        return None
-    tok = parsed.get("token")
-    if isinstance(tok, str) and tok.strip():
-        log.info("v2 AuthenticateCognito ok: token_len=%d", len(tok))
-        _record({
-            "step": "auth", "status": 200, "tokenLen": len(tok.strip()),
-        })
-        return tok.strip()
-    log.warning("v2 AuthenticateCognito returned no token: %r", parsed)
-    _record({
-        "step": "auth", "status": 200, "note": "no_token_in_response",
-        "responseKeys": sorted(parsed.keys()),
-    })
-    return None
-
-
-def _get_next_payment_id(loan_id: int,
-                         trail: Optional[list] = None) -> Optional[int]:
-    """Fetch the next scheduled payment's id for a loan via v2.
-
-    Uses the service APIM token (same as _apim_call) since the
-    customer-JWT path through AuthenticateCognito is broken for our
-    tenant. `source` query param is undocumented; probe a few common
-    values until one returns a parseable schedule.
-    """
-    tok = _get_apim_token()
-    if not tok:
-        if trail is not None:
-            trail.append({"step": "schedule", "status": 0, "note": "no_apim_token"})
-        return None
-    creds = _get_creds()
-    api_key = creds.get("xApiKey", "") if creds else ""
-    h = {
-        "x-api-key": api_key,
-        "Authorization": f"Bearer {tok}",
-    }
-    probe_results = []
-    for source in ("loan", "Loan", "1", "customer", "Customer"):
-        url = (
-            f"{APIM_BASE}/api/CustomerPortal/Loans/{loan_id}/"
-            f"Source/{source}/PaymentSchedule"
-        )
-        status, parsed, raw = _http(url, "GET", headers=h)
-        log.info("v2 PaymentSchedule probe loan=%s source=%s status=%s",
-                 loan_id, source, status)
-        probe_results.append({
-            "source": source,
-            "status": status,
-            "rawHead": (raw or "")[:120],
-        })
-        if status != 200:
-            continue
-
-        def _scan(items):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                pid = (
-                    item.get("id") or item.get("Id")
-                    or item.get("paymentId") or item.get("PaymentId")
-                )
-                if pid:
-                    try:
-                        return int(pid)
-                    except (TypeError, ValueError):
-                        continue
-            return None
-
-        if isinstance(parsed, list):
-            pid = _scan(parsed)
-            if pid:
-                log.info("v2 PaymentSchedule found paymentId=%s via %s",
-                         pid, source)
-                if trail is not None:
-                    trail.append({
-                        "step": "schedule", "status": 200,
-                        "source": source, "paymentId": pid,
-                        "probes": probe_results,
-                    })
-                return pid
-        elif isinstance(parsed, dict):
-            for key in ("payments", "Payments", "schedule", "Schedule",
-                        "items", "Items", "data", "Data"):
-                inner = parsed.get(key)
-                if isinstance(inner, list):
-                    pid = _scan(inner)
-                    if pid:
-                        log.info("v2 PaymentSchedule found paymentId=%s "
-                                 "via %s.%s", pid, source, key)
-                        if trail is not None:
-                            trail.append({
-                                "step": "schedule", "status": 200,
-                                "source": source, "paymentId": pid,
-                                "wrapKey": key, "probes": probe_results,
-                            })
-                        return pid
-    log.warning("v2 PaymentSchedule: no paymentId found across all "
-                "probed sources for loan=%s", loan_id)
-    if trail is not None:
-        trail.append({
-            "step": "schedule", "status": 0, "note": "no_paymentId",
-            "probes": probe_results,
-        })
-    return None
-
-
-def _v2_credit_card_payment_with_customer_token(
-    customer_token: str,
-    loan_id: int,
-    payment_id: int,
-    amount: float,
-    card_id: int,
-    customer_id: Optional[int] = None,
-) -> tuple:
-    """POST /api/CustomerPortal/Loans/Payments/CreditCardPayment using the
-    customer's Vergent portal token (obtained via /api/CustomerPortal/
-    AuthenticateCognito).
-
-    This is the (Auth)-annotated path documented in v2 swagger. Earlier
-    attempts using the service APIM token returned DependencyResolutionException —
-    likely because the endpoint's DI graph expects a customer-scoped
-    auth context. Using the customer JWT exchange flow gives us that.
-
-    Returns (status, parsed_body, raw_text). On 200, parsed_body is
-    expected to be `{ success: true, scheduleDate: "..." }`.
-    """
-    creds = _get_creds()
-    api_key = creds.get("xApiKey", "") if creds else ""
-    cid_int = int(card_id)
-    url = (
-        f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
-        f"?cardId={cid_int}&CardId={cid_int}"
-    )
-    body = {
-        # Documented schema fields:
-        "loanId":            int(loan_id),
-        "paymentId":         int(payment_id),
-        "amountDue":         float(amount),
-        "isInRescindPeriod": False,
-        "authCode":          "",
-        # cardId not in published schema but observed required at runtime —
-        # send in body + query string just in case (model binder picks one).
-        "cardId":            cid_int,
-        "CardId":            cid_int,
-    }
-    if customer_id is not None:
-        body["customerId"] = int(customer_id)
-    h = {
-        "Content-Type": "application/json",
-        "x-api-key": api_key,
-        "Authorization": f"Bearer {customer_token}",
-    }
-    return _http(url, "POST", body=body, headers=h)
-
-
-def _v2_credit_card_payment(loan_id: int,
-                            payment_id: int,
-                            amount: float,
-                            card_id: int,
-                            customer_id: Optional[int] = None) -> tuple:
-    """POST /api/CustomerPortal/Loans/Payments/CreditCardPayment.
-
-    Uses the service APIM token (same as _apim_call) — Vergent's
-    customer-JWT auth (AuthenticateCognito) is broken for our tenant
-    so we use the service-token route.
-
-    NOTE: the published swagger schema for CreditCardPaymentRequestModel
-    omits `cardId`, but Vergent's actual endpoint rejects requests
-    without it ("cardId must be a non-default value"). Confirmed
-    empirically against our tenant — adjust here if Vergent updates
-    their schema. Field naming convention is also undocumented; we
-    send the cardId in every plausible location (camelCase + Pascal
-    in body, plus URL query-string) so whichever location Vergent's
-    model binder reads from gets a non-default value.
-
-    Returns (status, parsed_body, raw_text). On 200, parsed_body is
-    expected to be `{ success: true, scheduleDate: "..." }`.
-    """
-    tok = _get_apim_token()
-    if not tok:
-        return 0, None, ""
-    creds = _get_creds()
-    api_key = creds.get("xApiKey", "") if creds else ""
-    cid_int = int(card_id)
-    url = (
-        f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
-        f"?cardId={cid_int}&CardId={cid_int}"
-    )
-    body = {
-        "loanId": int(loan_id),
-        "LoanId": int(loan_id),
-        "paymentId": int(payment_id),
-        "PaymentId": int(payment_id),
-        "amountDue": float(amount),
-        "AmountDue": float(amount),
-        "isInRescindPeriod": False,
-        "IsInRescindPeriod": False,
-        "cardId": cid_int,
-        "CardId": cid_int,
-        "card_id": cid_int,
-    }
-    if customer_id is not None:
-        body["customerId"] = int(customer_id)
-        body["CustomerId"] = int(customer_id)
-    h = {
-        "Content-Type": "application/json",
-        "x-api-key": api_key,
-        "Authorization": f"Bearer {tok}",
-    }
-    return _http(url, "POST", body=body, headers=h)
-
-
-# ─────────────────────────────────────────
-# Repay RGAPI (card tokenization)
-# ─────────────────────────────────────────
-_repay_creds_cache: Optional[Dict[str, str]] = None
-# The first call probes a handful of likely tokenize endpoints; once one
-# returns a usable id/token we lock the path for the rest of the warm
-# container's lifetime. Saves a round-trip per Add Card after bootstrap.
-_repay_tokenize_path: Optional[str] = None
-
-
-def _get_repay_creds() -> Optional[Dict[str, str]]:
-    """Fetch Repay credentials from Secrets Manager, cached per container.
-
-    Expected shape (written by .github/workflows/store-repay-secrets.yml):
-      gatewayApiUser, gatewaySecureToken, gatewayMerchantId,
-      customerPortalUrl, customerPortalToken,
-      achApiUser, achSecureToken, achMerchantId
-    """
-    global _repay_creds_cache
-    if _repay_creds_cache:
-        return _repay_creds_cache
-    try:
-        resp = _secrets.get_secret_value(SecretId=REPAY_SECRET_ARN)
-        _repay_creds_cache = json.loads(resp["SecretString"])
-        return _repay_creds_cache
-    except Exception as e:
-        log.warning("repay secret read failed arn=%s err=%s", REPAY_SECRET_ARN, e)
-        return None
-
-
-def _extract_repay_token(body: Any) -> Optional[str]:
-    """Pull the card-vault identifier out of a Repay tokenize response.
-
-    Different endpoints return the token under different keys; accept
-    any of the likely ones and return the first non-empty string.
-    """
-    if not isinstance(body, dict):
-        return None
-    for key in ("id", "token", "card_id", "card_reference",
-                "card_ref", "card_guid", "vault_id", "payment_method_id"):
-        val = body.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-    # Sometimes wrapped: {data: {id: ...}} or {card: {id: ...}}
-    for container in ("data", "card", "payment_method"):
-        inner = body.get(container)
-        if isinstance(inner, dict):
-            tok = _extract_repay_token(inner)
-            if tok:
-                return tok
-    return None
-
-
-def _repay_tokenize_card(pan: str,
-                         exp_month: int,
-                         exp_year: int,
-                         ccv: str,
-                         zip_code: str,
-                         cardholder_name: str) -> Optional[str]:
-    """POST card details to Repay's RGAPI, return the tokenized card id.
-
-    First call probes a short list of likely endpoints + body shapes;
-    once one returns a usable token, the endpoint is cached. Full
-    probe results are logged so we can lock to the winner.
-
-    Returns the token string on success, or None (caller surfaces
-    tokenization_failed to the UI).
-    """
-    global _repay_tokenize_path
-    creds = _get_repay_creds()
-    if not creds:
-        return None
-
-    api_user = creds.get("gatewayApiUser") or ""
-    secure_token = creds.get("gatewaySecureToken") or ""
-    merchant_id = creds.get("gatewayMerchantId") or ""
-    if not (api_user and secure_token and merchant_id):
-        log.warning("repay creds missing required fields; skipping tokenize")
-        return None
-
-    auth = base64.b64encode(f"{api_user}:{secure_token}".encode()).decode()
-    headers = {
-        "Authorization": f"Basic {auth}",
-        "X-Merchant-Id": str(merchant_id),
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-    # Two common body shapes; gateways differ on field names.
-    body_snake = {
-        "merchant_id": str(merchant_id),
-        "card_number": pan,
-        "expiration_month": exp_month,
-        "expiration_year": exp_year,
-        "cvv": ccv,
-        "cardholder_name": cardholder_name,
-        "billing_zip": zip_code,
-    }
-    body_camel = {
-        "merchantId": str(merchant_id),
-        "cardNumber": pan,
-        "expirationMonth": exp_month,
-        "expirationYear": exp_year,
-        "cvv": ccv,
-        "cardholderName": cardholder_name,
-        "billingZip": zip_code,
-    }
-
-    # If we've locked an endpoint + body on a previous warm call, try it first.
-    candidates = []
-    if _repay_tokenize_path:
-        candidates.append(_repay_tokenize_path)
-    for p in ("/cards", "/tokens", "/payment_methods", "/vault/cards",
-              "/card/tokenize", "/tokenize"):
-        if p not in candidates:
-            candidates.append(p)
-
-    last4 = pan[-4:]
-    tried = []
-    for path in candidates:
-        url = f"{REPAY_GATEWAY_BASE}{path}"
-        for body_shape, shape_name in ((body_snake, "snake"), (body_camel, "camel")):
-            status, parsed, raw = _http(url, "POST", body=body_shape, headers=headers)
-            token = _extract_repay_token(parsed)
-            tried.append(f"{path}:{shape_name}={status}")
-            if status in (200, 201) and token:
-                _repay_tokenize_path = path
-                log.info("repay tokenize ok path=%s shape=%s last4=%s tried=%s",
-                         path, shape_name, last4, tried)
-                return token
-            # 404 means wrong path — skip the camel retry for the same path.
-            if status == 404:
-                break
-    # Exhausted candidates — log the full probe result so we can fix.
-    flat_raw = (raw or "").replace("\n", " ")[:400] if raw else ""
-    log.warning("repay tokenize failed last4=%s tried=%s last_raw=%s",
-                last4, tried, flat_raw)
-    return None
 
 
 # ─────────────────────────────────────────
@@ -693,108 +279,6 @@ def _v1_request(method: str, path: str, *,
 # Diagnostic surfacing on failure shows the verbatim upstream body
 # so we can iterate field names without redeploying.
 
-def _build_repay_body_card(*, cid, loan_id, card_id, amount, store_id,
-                           user_id, idempotency_key):
-    return {
-        "CompanyId":     VERGENT_COMPANY_ID,
-        "company_id":    VERGENT_COMPANY_ID,
-        "CustomerId":    int(cid),
-        "customer_id":   int(cid),
-        "LoanId":        int(loan_id),
-        "loan_id":       int(loan_id),
-        "HeaderId":      int(loan_id),  # alias some Vergent endpoints use
-        "header_id":     int(loan_id),
-        "CardId":        int(card_id),
-        "card_id":       int(card_id),
-        "Amount":        round(float(amount), 2),
-        "amount":        round(float(amount), 2),
-        "PaymentAmount": round(float(amount), 2),
-        "payment_amount": round(float(amount), 2),
-        "StoreId":       int(store_id) if store_id else 0,
-        "store_id":      int(store_id) if store_id else 0,
-        "UserId":        int(user_id) if user_id else 0,
-        "user_id":       int(user_id) if user_id else 0,
-        "IdempotencyKey": idempotency_key or "",
-        "idempotency_key": idempotency_key or "",
-    }
-
-
-def _build_repay_body_check(*, cid, loan_id, bank_id, amount, store_id,
-                            user_id, idempotency_key):
-    return {
-        "CompanyId":     VERGENT_COMPANY_ID,
-        "company_id":    VERGENT_COMPANY_ID,
-        "CustomerId":    int(cid),
-        "customer_id":   int(cid),
-        "LoanId":        int(loan_id),
-        "loan_id":       int(loan_id),
-        "HeaderId":      int(loan_id),
-        "header_id":     int(loan_id),
-        "BankId":        int(bank_id),
-        "bank_id":       int(bank_id),
-        "Amount":        round(float(amount), 2),
-        "amount":        round(float(amount), 2),
-        "PaymentAmount": round(float(amount), 2),
-        "payment_amount": round(float(amount), 2),
-        "StoreId":       int(store_id) if store_id else 0,
-        "store_id":      int(store_id) if store_id else 0,
-        "UserId":        int(user_id) if user_id else 0,
-        "user_id":       int(user_id) if user_id else 0,
-        "IdempotencyKey": idempotency_key or "",
-        "idempotency_key": idempotency_key or "",
-    }
-
-
-def _shape_repay_response(status, parsed, raw, *,
-                          amount, last4, method, new_balance):
-    """Translate Vergent /V1/repay/transaction/* response into the
-    same {success, confirmationId, ...} shape `payments.js` expects.
-    On non-2xx or business-logic decline, surfaces upstream body for
-    diagnosis."""
-    if status not in (200, 201):
-        log.warning("repay/transaction/%s upstream status=%s raw=%s",
-                    method, status, (raw or "")[:600])
-        return _json_response(502, {
-            "success": False,
-            "error":   "upstream_unavailable",
-            "upstreamStatus": status,
-            "upstreamBody":   (raw or "")[:600],
-        })
-    # Some Vergent endpoints return a wrapped shape with Success: false
-    # for declines. Surface as a clean failure if present.
-    if isinstance(parsed, dict):
-        success_flag = parsed.get("Success") or parsed.get("success")
-        if success_flag is False:
-            errs = (parsed.get("Errors") or parsed.get("errors")
-                    or parsed.get("ErrorMessage") or parsed.get("Error"))
-            log.warning("repay/transaction/%s declined parsed=%s",
-                        method, str(parsed)[:400])
-            return _json_response(200, {
-                "success": False,
-                "error":   "card_declined" if method == "card" else "ach_declined",
-                "upstreamErrors": errs,
-                "upstreamBody":   (raw or "")[:600],
-            })
-        confirmation_id = (parsed.get("TransactionId")
-                           or parsed.get("transactionId")
-                           or parsed.get("Id") or parsed.get("id")
-                           or parsed.get("ConfirmationId")
-                           or parsed.get("confirmationId"))
-    else:
-        confirmation_id = None
-    if not confirmation_id:
-        from datetime import datetime, timezone as _tz
-        confirmation_id = datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
-    return _json_response(200, {
-        "success":        True,
-        "confirmationId": str(confirmation_id),
-        "transactionId":  confirmation_id,
-        "amount":         round(float(amount), 2),
-        "last4":          last4,
-        "paymentMethod":  method,
-        "newBalance":     new_balance,
-        "via":            "repay-sync",
-    })
 
 
 # ─────────────────────────────────────────
@@ -1270,223 +754,62 @@ def _fallback_bank_from_loan(cid: str) -> Optional[Dict[str, Any]]:
 
 
 def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/my-payment — charge a card OR debit a bank account.
+    """POST /api/my-payment — return a single-use Vergent customer-portal
+    handoff URL the customer follows to make a payment.
 
-    Body:
-      { method: 'card' | 'bank',
-        loanId, amount,
-        cardId  (when method=card),
-        bankId  (when method=bank),
-        idempotencyKey }
+    Body: ignored. We use the Cognito JWT to identify the customer.
 
-    Both flows post directly to Vergent's Repay-gateway endpoints
-    (POST /V1/repay/transaction/{card,check}/sync). Same v1 service
-    token auth as everything else. Replaces the previous v2 → v1
-    fallback chain that was broken at both layers.
+    Response: { handoffUrl: "https://...", token: "..." }
+
+    The customer's browser opens the URL in a new tab; Vergent's hosted
+    customer portal is the actual payment surface (it works, it's
+    PCI-compliant on Vergent's infrastructure, and Vergent maintains
+    it). When the customer comes back to our portal, the loan summary
+    refresh shows the updated balance.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(401, {"error": "unauthorized"})
 
-    try:
-        body = json.loads(event.get("body") or "{}")
-    except (TypeError, ValueError):
-        return _json_response(400, {"error": "bad_body"})
+    tok = _get_apim_token()
+    if not tok:
+        return _json_response(502, {"error": "apim_unavailable"})
+    creds = _get_creds()
+    if not creds:
+        return _json_response(502, {"error": "vergent_creds_missing"})
 
-    pay_method = (body.get("method") or "card").lower()
-    loan_id = body.get("loanId")
-    amount = body.get("amount")
-    idempotency_key = (body.get("idempotencyKey") or "").strip()
-
-    if loan_id is None or amount is None:
-        return _json_response(400, {"error": "missing_fields"})
-    try:
-        amount_num = float(amount)
-    except (TypeError, ValueError):
-        return _json_response(400, {"error": "amount_invalid"})
-    if amount_num <= 0:
-        return _json_response(400, {"error": "amount_invalid"})
-
-    # Ownership + payoff guard via v1 (unchanged from prior pipeline —
-    # this part has always worked).
-    loan = _fetch_active_loan(cid)
-    if not loan or str(loan.get("id")) != str(loan_id):
-        status_ok, raw_loans = _v1_get(f"/V1/{cid}/loans")
-        found = None
-        if status_ok == 200 and isinstance(raw_loans, list):
-            for r in raw_loans:
-                if isinstance(r, dict):
-                    shaped = _shape_v1_loan(r)
-                    if str(shaped.get("id")) == str(loan_id):
-                        found = shaped
-                        break
-        if not found:
-            log.warning("payment loan_not_yours cid=%s loan_id=%s", cid, loan_id)
-            return _json_response(403, {"error": "loan_not_yours"})
-        loan = found
-
-    payoff = loan.get("payoffAmount") or loan.get("balance") or 0
-    if amount_num > float(payoff) + 0.01:
-        return _json_response(400, {"error": "amount_invalid", "payoff": payoff})
-
-    store_id = loan.get("storeId") or 0
-
-    # Prime the v1 service token so loans._v1_user_id is populated
-    # (the Repay endpoints accept a UserId field for audit-attribution).
-    _get_v1_token()
-    from handlers import loans as _loans
-    user_id = _loans._v1_user_id or 0
-
-    if pay_method == "card":
-        card_id = body.get("cardId")
-        if card_id is None:
-            return _json_response(400, {"error": "missing_fields"})
-        # Ownership check against saved cards list.
-        st_c, cards_body, _ = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
-        if st_c != 200 or not isinstance(cards_body, list):
-            return _json_response(502, {"error": "upstream_unavailable"})
-        card = next(
-            (c for c in cards_body if isinstance(c, dict)
-             and str(c.get("id")) == str(card_id)),
-            None,
-        )
-        if not card:
-            return _json_response(403, {"error": "card_not_yours"})
-        last4 = "".join(ch for ch in (card.get("card_number") or "")
-                        if ch.isdigit())[-4:]
-
-        log.info("payment-attempt method=card cid=%s loan_id=%s last4=%s amount=%s",
-                 cid, loan_id, last4, amount_num)
-
-        # Charge via v1 /V1/PostCustomerLoanPayment (service-token).
-        # v2 CustomerPortal CreditCardPayment requires customer-JWT
-        # auth via /AuthenticateCognito which crashes server-side
-        # for our tenant (NullReferenceException). The v1
-        # /V1/repay/transaction/card[/sync] endpoints turn out to be
-        # webhook receivers Repay calls back to, not charge-init
-        # endpoints. So v1 PostCustomerLoanPayment is the only real
-        # charge path we have. Earlier attempts crashed at line 3413
-        # of Vergent's controller with NullReferenceException — at
-        # the time we suspected un-tokenized cards, but Vergent admin
-        # has since charged this exact card successfully, proving
-        # the card IS tokenized. Worth retrying with the documented
-        # body shape (CompanyId, StoreId, UserId, HeaderId,
-        # PaymentDate, PaymentAmount, ChangeDue, SelectedCoupon,
-        # CouponAmount, PaymentSource, InstrumentNumber, PaymentMethod).
-        from datetime import datetime, timezone as _tz
-        now_iso = datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
-        hdr_id = int(loan.get("id")) if loan.get("id") else 0
-
-        trail: list = []
-        charge_body = {
-            "CompanyId":        VERGENT_COMPANY_ID,
-            "StoreId":          int(store_id) if store_id else 0,
-            "UserId":           int(user_id),
-            "HeaderId":         hdr_id,
-            "PaymentDate":      now_iso,
-            "PaymentAmount":    round(amount_num, 2),
-            "ChangeDue":        0,
-            "SelectedCoupon":   None,
-            "CouponAmount":     0,
-            "PaymentSource":    0,
-            "InstrumentNumber": "",
-            "PaymentMethod":    {"Type": "Card", "CardId": int(card_id)},
-        }
-        log.info("v1 PostCustomerLoanPayment cid=%s user_id=%s loan_id=%s "
-                 "last4=%s amount=%s",
-                 cid, user_id, loan_id, last4, amount_num)
-        status, parsed, raw = _v1_request(
-            "POST", "/V1/PostCustomerLoanPayment", body=charge_body,
-        )
-        trail.append({
-            "step":    "charge",
-            "via":     "v1_post_customer_loan_payment",
-            "status":  status,
-            "rawHead": (raw or "")[:400],
+    log.info("payment-handoff cid=%s target=%s authority=%s",
+             cid, PAYMENT_HANDOFF_TARGET, HANDOFF_AUTHORITY)
+    status, body, raw = _http(
+        f"{APIM_BASE}/api/authenticate/handoff/create",
+        "POST",
+        body={
+            "customerId":               int(cid),
+            "TargetRelativePage":       PAYMENT_HANDOFF_TARGET,
+            "ExpectedReferrerAuthority": HANDOFF_AUTHORITY,
+        },
+        headers={
+            "x-api-key": creds["xApiKey"],
+            "Authorization": f"Bearer {tok}",
+        },
+    )
+    if status != 200 or not isinstance(body, dict):
+        log.warning("payment-handoff upstream status=%s raw=%s",
+                    status, (raw or "")[:400])
+        return _json_response(502, {
+            "error":          "handoff_failed",
+            "upstreamStatus": status,
+            "upstreamBody":   (raw or "")[:400],
         })
 
-        if status not in (200, 201):
-            log.warning("v1 PostCustomerLoanPayment upstream status=%s raw=%s",
-                        status, (raw or "")[:600])
-            return _json_response(502, {
-                "success":        False,
-                "error":          "upstream_unavailable",
-                "upstreamStatus": status,
-                "upstreamBody":   (raw or "")[:600],
-                "_debug":         {"trail": trail},
-            })
-
-        # Success-shape: 2xx with {TransactionId, ...} OR with Errors array
-        # (Vergent uses 200 + Errors for declines).
-        if isinstance(parsed, dict) and parsed.get("Errors"):
-            log.warning("v1 payment declined cid=%s loan_id=%s errors=%s",
-                        cid, loan_id, parsed.get("Errors"))
-            return _json_response(200, {
-                "success":        False,
-                "error":          "card_declined",
-                "upstreamErrors": parsed.get("Errors"),
-                "upstreamBody":   (raw or "")[:600],
-                "_debug":         {"trail": trail},
-            })
-
-        refreshed = _fetch_active_loan(cid)
-        new_balance = refreshed.get("balance") if refreshed else None
-        trans_id = (parsed.get("TransactionId")
-                    if isinstance(parsed, dict) else None)
-        confirmation_id = str(trans_id) if trans_id else now_iso
-        log.info("v1 payment success cid=%s loan_id=%s last4=%s amount=%s "
-                 "trans=%s new_balance=%s",
-                 cid, loan_id, last4, amount_num, trans_id, new_balance)
-        return _json_response(200, {
-            "success":        True,
-            "confirmationId": confirmation_id,
-            "transactionId":  trans_id,
-            "amount":         round(float(amount_num), 2),
-            "last4":          last4,
-            "paymentMethod":  "card",
-            "newBalance":     new_balance,
-            "via":            "v1_post_customer_loan_payment",
-        })
-
-    elif pay_method == "bank":
-        bank_id = body.get("bankId")
-        if bank_id is None:
-            return _json_response(400, {"error": "missing_fields"})
-        st_b, banks_body, _ = _v1_request("GET", f"/V1/GetCustomerBanks?custId={cid}")
-        if st_b != 200 or not isinstance(banks_body, list):
-            return _json_response(502, {"error": "upstream_unavailable"})
-        bank = next(
-            (b for b in banks_body if isinstance(b, dict)
-             and str(b.get("id")) == str(bank_id)),
-            None,
-        )
-        if not bank:
-            return _json_response(403, {"error": "bank_not_yours"})
-        last4 = "".join(ch for ch in (bank.get("account_number") or "")
-                        if ch.isdigit())[-4:]
-
-        charge_body = _build_repay_body_check(
-            cid=cid, loan_id=loan_id, bank_id=bank_id,
-            amount=amount_num, store_id=store_id, user_id=user_id,
-            idempotency_key=idempotency_key,
-        )
-        log.info("payment-attempt method=ach cid=%s loan_id=%s last4=%s amount=%s",
-                 cid, loan_id, last4, amount_num)
-        status, parsed, raw = _v1_request(
-            "POST", "/V1/repay/transaction/check/sync", body=charge_body,
-        )
-        new_balance = None
-        if status in (200, 201):
-            refreshed = _fetch_active_loan(cid)
-            new_balance = refreshed.get("balance") if refreshed else None
-        return _shape_repay_response(
-            status, parsed, raw,
-            amount=amount_num, last4=last4, method="bank",
-            new_balance=new_balance,
-        )
-
-    return _json_response(400, {"error": "method_invalid"})
+    url = body.get("handoffUrl") or body.get("handoff_url")
+    if not url:
+        return _json_response(502, {"error": "handoff_no_url"})
+    return _json_response(200, {
+        "handoffUrl": url,
+        "token":      body.get("token"),
+    })
 
 
 # ─────────────────────────────────────────
