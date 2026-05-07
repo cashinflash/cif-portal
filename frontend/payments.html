@@ -88,7 +88,7 @@
     <div class="container dash-hero-inner">
       <p class="dash-eyebrow">Payments</p>
       <h1 class="dash-title">Make a payment on your loan.</h1>
-      <p class="dash-sub">Pay with a card you already have on file. Your payment posts to your loan instantly.</p>
+      <p class="dash-sub">Pay using your saved card or bank account on Cash in Flash's secure payment page.</p>
     </div>
   </section>
 
@@ -119,65 +119,12 @@
       </div>
     </section>
 
-    <!-- Payment form -->
+    <!-- Continue-to-payment card -->
     <section class="dash-card pay-form-card" id="payFormCard" hidden>
-      <div class="pay-tabs" role="tablist" aria-label="Payment method">
-        <button type="button" class="pay-tab is-active" role="tab" aria-selected="true" data-tab="card" id="payTabCard">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-          Debit card
-        </button>
-        <button type="button" class="pay-tab" role="tab" aria-selected="false" data-tab="bank" id="payTabBank">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="10" width="18" height="11" rx="1"/><path d="M12 3l9 6H3l9-6z"/><line x1="7" y1="14" x2="7" y2="17"/><line x1="12" y1="14" x2="12" y2="17"/><line x1="17" y1="14" x2="17" y2="17"/></svg>
-          Bank account
-        </button>
-      </div>
-
-      <!-- Card panel -->
-      <div class="pay-panel" data-panel="card" role="tabpanel" aria-labelledby="payTabCard">
-        <div class="pay-section">
-          <label class="pay-label">Card on file</label>
-          <div id="payCardList" class="pay-card-list">
-            <div class="dash-card-skeleton">
-              <div class="skeleton-line w-60"></div>
-              <div class="skeleton-line w-60"></div>
-            </div>
-          </div>
-          <div class="pay-secure-panel" role="note">
-            <span class="pay-secure-icon" aria-hidden="true">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            </span>
-            <div class="pay-secure-body">
-              <strong>Adding a new debit card</strong>
-              <p>For your security, debit cards can only be added by an agent. Call us at <a href="tel:+17472707121">(747) 270-7121</a> or visit any Cash in Flash location and we'll have it on your account in minutes.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bank account panel -->
-      <div class="pay-panel" data-panel="bank" role="tabpanel" aria-labelledby="payTabBank" hidden>
-        <div class="pay-section">
-          <label class="pay-label">Bank account on file</label>
-          <div id="payBankList" class="pay-card-list">
-            <div class="dash-card-skeleton">
-              <div class="skeleton-line w-60"></div>
-            </div>
-          </div>
-          <p class="pay-note">
-            To update or replace your bank account, please visit any Cash in Flash location. For your security, bank account changes can't be made online.
-          </p>
-        </div>
-      </div>
-
-      <!-- Shared amount + pay controls -->
-      <div class="pay-section">
-        <label class="pay-label" for="payAmount">Amount</label>
-        <div class="pay-amount-wrap">
-          <span class="pay-amount-prefix">$</span>
-          <input type="number" inputmode="decimal" min="0.01" step="0.01" id="payAmount" class="pay-amount-input" value="0.00">
-        </div>
-        <small class="pay-amount-hint" id="payAmountHint">&nbsp;</small>
-      </div>
+      <h2 style="margin:0 0 8px 0;font-size:1.25rem;">Continue to secure payment</h2>
+      <p style="margin:0 0 20px 0;color:#475569;line-height:1.5;">
+        We'll open Cash in Flash's secure payment page right here. Pick your saved card or bank, confirm the amount, and we'll show your updated balance when you finish.
+      </p>
 
       <div class="pay-trust">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -187,20 +134,50 @@
       <p class="pay-error" id="payError" hidden></p>
 
       <div class="pay-actions">
-        <button type="button" class="btn-apply" id="payBtn" disabled>Pay</button>
+        <button type="button" class="btn-apply" id="payContinueBtn">Continue to secure payment</button>
         <a href="/dashboard.html" class="btn-login">Cancel</a>
       </div>
     </section>
 
-    <!-- Receipt view -->
+    <!-- Iframe modal — opens when payContinueBtn is clicked -->
+    <div id="payIframeModal" class="pay-iframe-modal" hidden>
+      <div class="pay-iframe-overlay" data-action="pay-modal-close"></div>
+      <div class="pay-iframe-wrap" role="dialog" aria-modal="true" aria-labelledby="payIframeTitle">
+        <div class="pay-iframe-head">
+          <h3 id="payIframeTitle">Secure payment page</h3>
+          <button type="button" class="pay-iframe-close" data-action="pay-modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="pay-iframe-body">
+          <iframe id="payIframe"
+                  title="Cash in Flash secure payment"
+                  referrerpolicy="no-referrer-when-downgrade"
+                  allow="payment"
+                  src="about:blank"></iframe>
+          <!-- X-Frame-Options fallback. If the iframe is blocked we
+               show this so the customer can still complete the payment. -->
+          <div id="payIframeBlocked" class="pay-iframe-blocked" hidden>
+            <p><strong>Heads up:</strong> the secure payment page didn't load inside our site. Click below to open it in a new tab — it's the same page either way.</p>
+            <a id="payIframeBlockedLink" href="#" target="_blank" rel="noopener noreferrer" class="btn-apply">Open secure payment page</a>
+          </div>
+        </div>
+        <div class="pay-iframe-foot">
+          <p class="pay-iframe-hint">When you've finished paying, click <strong>I'm done</strong> below to refresh your balance.</p>
+          <div class="pay-iframe-actions">
+            <button type="button" class="btn-apply" id="payIframeDoneBtn">I'm done — refresh my balance</button>
+            <button type="button" class="btn-login" data-action="pay-modal-close">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Receipt view (shown after balance refresh detects payment) -->
     <section class="dash-card pay-receipt" id="payReceipt" hidden>
       <div class="pay-receipt-icon" aria-hidden="true">
         <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
       </div>
       <h2>Payment received</h2>
-      <p class="pay-receipt-amount"><span data-receipt-amount>$0.00</span> charged to <span data-receipt-card></span></p>
+      <p class="pay-receipt-amount"><span data-receipt-amount>$0.00</span> applied to your loan</p>
       <div class="pay-receipt-detail">
-        <div><small>Confirmation</small><strong data-receipt-confirmation>—</strong></div>
         <div><small>New balance</small><strong data-receipt-balance>—</strong></div>
       </div>
       <div class="pay-actions pay-actions--center">
@@ -213,11 +190,67 @@
     </p>
   </main>
 
-  <!--
-    Self-service Add Card UI removed for PCI SAQ A compliance — card
-    data must never traverse our infrastructure. Re-add a Repay
-    Hosted Fields iframe here once Repay sends the integration docs.
-  -->
+  <style>
+    /* Iframe modal — full-bleed overlay with the iframe inside.
+       Inline so we don't have to touch dashboard.css for this one
+       page's modal. */
+    .pay-iframe-modal {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pay-iframe-modal[hidden] { display: none; }
+    .pay-iframe-overlay {
+      position: absolute; inset: 0;
+      background: rgba(15, 23, 42, .55);
+    }
+    .pay-iframe-wrap {
+      position: relative;
+      width: min(960px, 96vw);
+      height: min(820px, 92vh);
+      background: #fff; border-radius: 16px;
+      display: flex; flex-direction: column;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .3);
+      overflow: hidden;
+    }
+    .pay-iframe-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+    .pay-iframe-head h3 { margin: 0; font-size: 1rem; }
+    .pay-iframe-close {
+      background: none; border: 0; font-size: 1.6rem; line-height: 1;
+      cursor: pointer; color: #475569; padding: 4px 10px; border-radius: 6px;
+    }
+    .pay-iframe-close:hover { background: #f1f5f9; }
+    .pay-iframe-body { flex: 1 1 auto; position: relative; min-height: 0; }
+    .pay-iframe-body iframe {
+      width: 100%; height: 100%; border: 0; display: block;
+    }
+    .pay-iframe-blocked {
+      position: absolute; inset: 0; padding: 24px;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 16px; text-align: center;
+      background: #fff;
+    }
+    .pay-iframe-blocked p { max-width: 480px; color: #475569; line-height: 1.5; }
+    .pay-iframe-foot {
+      padding: 12px 18px; border-top: 1px solid #e5e7eb;
+      flex-shrink: 0; background: #fafafa;
+    }
+    .pay-iframe-hint {
+      margin: 0 0 8px 0; font-size: .9rem; color: #475569;
+    }
+    .pay-iframe-actions {
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    @media (max-width: 640px) {
+      .pay-iframe-wrap {
+        width: 100vw; height: 100vh; border-radius: 0;
+      }
+      .pay-iframe-head h3 { font-size: .95rem; }
+    }
+  </style>
 
   <footer class="dash-footer">
     <div class="container dash-footer-inner">

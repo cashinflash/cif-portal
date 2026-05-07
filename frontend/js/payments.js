@@ -1,9 +1,16 @@
 /* ═══════════════════════════════════════
-   CASH IN FLASH — Payments page controller.
-   - Fetches the customer's active loan summary and saved cards.
-   - Lets them pick a card, set amount (defaults to amount due), pay.
-   - On success, writes a sessionStorage flag so the dashboard can
-     show a one-shot "payment posted" banner on next load.
+   CASH IN FLASH — Payments page controller (iframe-modal flow).
+
+   Why an iframe modal: Vergent's REST surface is locked down for
+   server-to-server card charges (see backend/handlers/payments.py
+   for the full list of broken endpoints). The handoff URL endpoint
+   IS reachable and signs the customer into Vergent's hosted payment
+   page. Embedding that page in an iframe modal makes the UX feel
+   in-portal while letting Vergent handle the actual charge.
+
+   If Vergent's X-Frame-Options blocks the iframe, we show a
+   fallback "Open secure payment page" link that opens it in a new
+   tab — same flow, just a click further.
    ═══════════════════════════════════════ */
 (function () {
   'use strict';
@@ -11,7 +18,6 @@
   const TOKEN_KEY = 'cif_id_token';
   const LOGIN_URL = '/start.html';
   const SUCCESS_KEY = 'cif_payment_success';
-  const REPAY_PORTAL_URL = 'https://cashinflash.repay.io/';
 
   function qs(sel, root) { return (root || document).querySelector(sel); }
   function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
@@ -50,14 +56,9 @@
       body: opts.body ? JSON.stringify(opts.body) : undefined,
       credentials: 'omit',
     }).then(function (res) {
-      // Parse body first so we can distinguish API-Gateway auth rejections
-      // (no JSON body, or {message: "Unauthorized"}) from Lambda-returned
-      // errors with a specific code. Only the former should log the user
-      // out; the latter should surface as a normal error to the caller.
       return res.text().then(function (txt) {
         let body = {};
         try { body = txt ? JSON.parse(txt) : {}; } catch (e) { body = { raw: txt }; }
-
         if (res.status === 401 || res.status === 403) {
           const isLambdaErr = body && typeof body === 'object' && ('error' in body);
           if (!isLambdaErr) {
@@ -65,7 +66,6 @@
             window.location.replace(LOGIN_URL + '?reason=session_expired');
             throw new Error('unauthorized');
           }
-          // Lambda-returned auth error — throw with the body attached.
           const err = new Error('http ' + res.status);
           err.body = body;
           throw err;
@@ -83,12 +83,9 @@
   // ---------- State ----------
   const state = {
     loan: null,
-    cards: [],
-    banks: [],
-    selectedCardId: null,
-    selectedBankId: null,
-    paymentMethod: 'card', // 'card' | 'bank'
     submitting: false,
+    initialBalance: null,    // captured before opening the modal
+    iframeBlockedTimer: null,
   };
 
   // ---------- Loan summary ----------
@@ -124,390 +121,169 @@
     });
   }
 
-  // ---------- Cards ----------
-  function loadCards() {
-    return api('/api/my-cards').then(function (data) {
-      state.cards = (data && data.cards) || [];
-      renderCards();
-      return state.cards;
-    });
+  // ---------- Iframe modal ----------
+  function openIframeModal(handoffUrl) {
+    const modal = qs('#payIframeModal');
+    const iframe = qs('#payIframe');
+    const blocked = qs('#payIframeBlocked');
+    const blockedLink = qs('#payIframeBlockedLink');
+    if (!modal || !iframe || !blocked || !blockedLink) return;
+
+    blocked.hidden = true;
+    blockedLink.href = handoffUrl;
+    iframe.src = handoffUrl;
+    document.body.style.overflow = 'hidden';
+    modal.hidden = false;
+
+    // Detection: if the iframe doesn't reach a same-or-cross-origin
+    // load event within 5s, assume Vergent's X-Frame-Options blocked
+    // it. Show the fallback "open in new tab" link.
+    if (state.iframeBlockedTimer) clearTimeout(state.iframeBlockedTimer);
+    let loaded = false;
+    iframe.addEventListener('load', function () {
+      loaded = true;
+    }, { once: true });
+    state.iframeBlockedTimer = setTimeout(function () {
+      if (!loaded) blocked.hidden = false;
+    }, 5000);
   }
 
-  // ---------- Banks (ACH) ----------
-  function loadBanks() {
-    return api('/api/my-banks').then(function (data) {
-      state.banks = (data && data.banks) || [];
-      renderBanks();
-      return state.banks;
-    }).catch(function () {
-      state.banks = [];
-      renderBanks();
-    });
-  }
-
-  function renderBanks() {
-    const root = qs('#payBankList');
-    if (!root) return;
-    root.innerHTML = '';
-    if (!state.banks.length) {
-      const wrap = document.createElement('div');
-      wrap.className = 'pay-empty-card';
-      wrap.innerHTML =
-        '<div class="pay-empty-icon" aria-hidden="true">' +
-        '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-        '<rect x="3" y="10" width="18" height="11" rx="1"/><path d="M12 3l9 6H3l9-6z"/>' +
-        '</svg></div>' +
-        '<h3>Add a bank account to get started</h3>' +
-        '<p>For your security, bank accounts can only be added in person. Visit any Cash in Flash location and we’ll set it up in minutes.</p>' +
-        '<div class="pay-empty-actions">' +
-        '<a href="tel:+17472707121" class="btn-apply">Call (747) 270-7121</a>' +
-        '</div>' +
-        '<small class="pay-empty-hint">New bank accounts appear here automatically as soon as we save them.</small>';
-      root.appendChild(wrap);
-      return;
+  function closeIframeModal() {
+    const modal = qs('#payIframeModal');
+    const iframe = qs('#payIframe');
+    if (modal) modal.hidden = true;
+    if (iframe) iframe.src = 'about:blank';
+    document.body.style.overflow = '';
+    if (state.iframeBlockedTimer) {
+      clearTimeout(state.iframeBlockedTimer);
+      state.iframeBlockedTimer = null;
     }
-    state.banks.forEach(function (bank, idx) {
-      const opt = document.createElement('label');
-      opt.className = 'pay-card-option';
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = 'bank';
-      input.value = String(bank.id);
-      if (idx === 0) {
-        input.checked = true;
-        state.selectedBankId = bank.id;
-      }
-      input.addEventListener('change', function () {
-        state.selectedBankId = bank.id;
-      });
-      const body = document.createElement('span');
-      body.className = 'pay-card-body';
-      const strong = document.createElement('strong');
-      strong.textContent = (bank.name || 'Bank') +
-        ' · ' + (bank.last4 ? '••••' + bank.last4 : '••••');
-      const small = document.createElement('small');
-      small.textContent = (bank.accountType || 'Checking') +
-        (bank.last4 ? ' · ends in ' + bank.last4 : '');
-      body.appendChild(strong);
-      body.appendChild(small);
-      opt.appendChild(input);
-      opt.appendChild(body);
-      root.appendChild(opt);
-    });
   }
 
-  function renderCards() {
-    const root = qs('#payCardList');
-    if (!root) return;
-    root.innerHTML = '';
-    // Toggle the permanent "Adding a new debit card" secure-panel:
-    // hide it when we're showing the rich empty-state below, since
-    // the empty-state's CTA already covers "call us to add one".
-    const securePanel = root.parentElement
-      ? root.parentElement.querySelector('.pay-secure-panel')
-      : null;
-    if (!state.cards.length) {
-      if (securePanel) securePanel.hidden = true;
-      const wrap = document.createElement('div');
-      wrap.className = 'pay-empty-card';
-      wrap.innerHTML =
-        '<div class="pay-empty-icon" aria-hidden="true">' +
-        '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-        '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>' +
-        '</svg></div>' +
-        '<h3>Add a card to get started</h3>' +
-        '<p>For your security, cards can only be added by a Cash in Flash agent. Call us and we’ll have one on your account in minutes.</p>' +
-        '<div class="pay-empty-actions">' +
-        '<a href="tel:+17472707121" class="btn-apply">Call (747) 270-7121</a>' +
-        '</div>' +
-        '<small class="pay-empty-hint">New cards appear here automatically as soon as your agent saves them.</small>';
-      root.appendChild(wrap);
-      return;
-    }
-    if (securePanel) securePanel.hidden = false;
-    state.cards.forEach(function (card, idx) {
-      const opt = document.createElement('label');
-      opt.className = 'pay-card-option';
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = 'card';
-      input.value = String(card.id);
-      if (idx === 0) {
-        input.checked = true;
-        state.selectedCardId = card.id;
-      }
-      input.addEventListener('change', function () {
-        state.selectedCardId = card.id;
-      });
-      const body = document.createElement('span');
-      body.className = 'pay-card-body';
-      const strong = document.createElement('strong');
-      strong.textContent = (card.brand || 'Card') + ' · ' + (card.last4 ? '•••• ' + card.last4 : '••••');
-      const small = document.createElement('small');
-      const mm = card.expMonth ? String(card.expMonth).padStart(2, '0') : '--';
-      const yy = card.expYear ? String(card.expYear).slice(-2) : '--';
-      small.textContent = 'exp ' + mm + '/' + yy;
-      body.appendChild(strong);
-      body.appendChild(small);
-      opt.appendChild(input);
-      opt.appendChild(body);
-      root.appendChild(opt);
-    });
-  }
-
-  // ---------- Form wiring ----------
-  function initForm() {
-    const formCard = qs('#payFormCard');
-    if (!state.loan) {
-      if (formCard) formCard.hidden = true;
-      return;
-    }
-    if (formCard) formCard.hidden = false;
-
-    const amountEl = qs('#payAmount');
-    const hint = qs('#payAmountHint');
-    const btn = qs('#payBtn');
-    const defaultAmount = state.loan.nextDueAmount || state.loan.payoffAmount || state.loan.balance || 0;
-    amountEl.value = Number(defaultAmount).toFixed(2);
-    const payoff = Number(state.loan.payoffAmount || state.loan.balance || 0);
-    hint.textContent = 'Maximum: ' + money(payoff);
-
-    function updateBtn() {
-      const amt = Number(amountEl.value);
-      const haveMethod =
-        (state.paymentMethod === 'card' && state.cards.length > 0 && state.selectedCardId) ||
-        (state.paymentMethod === 'bank' && state.banks.length > 0 && state.selectedBankId);
-      const ok = haveMethod && amt > 0 && amt <= payoff + 0.01 && !state.submitting;
-      btn.disabled = !ok;
-      btn.textContent = state.submitting ? 'Processing…' : ('Pay ' + money(amt));
-    }
-    amountEl.addEventListener('input', updateBtn);
-    // Re-evaluate on tab / selection changes by polling via a MutationObserver
-    // on the radio inputs — simpler: listen on the container.
-    ['payCardList', 'payBankList'].forEach(function (id) {
-      const root = qs('#' + id);
-      if (root) root.addEventListener('change', updateBtn);
-    });
-    updateBtn();
-
-    btn.addEventListener('click', function () {
-      pay();
-    });
-  }
-
-  // ---------- Tabs ----------
-  function wireTabs() {
-    const tabs = qsa('.pay-tab');
-    tabs.forEach(function (tab) {
-      tab.addEventListener('click', function () {
-        const which = tab.getAttribute('data-tab') || 'card';
-        state.paymentMethod = which;
-        tabs.forEach(function (t) {
-          const isActive = t === tab;
-          t.classList.toggle('is-active', isActive);
-          t.setAttribute('aria-selected', isActive ? 'true' : 'false');
-        });
-        qsa('.pay-panel').forEach(function (p) {
-          p.hidden = p.getAttribute('data-panel') !== which;
-        });
-        initForm();
-      });
-    });
-  }
-
-  // ---------- Submit payment ----------
-  function pay() {
+  // ---------- Continue button ----------
+  function startPayment() {
+    if (state.submitting) return;
+    const btn = qs('#payContinueBtn');
     const errEl = qs('#payError');
-    errEl.hidden = true;
-    errEl.textContent = '';
-
-    if (state.submitting || !state.loan) return;
-    const amountEl = qs('#payAmount');
-    const amount = Number(amountEl.value);
-    if (!(amount > 0)) return;
-
-    let body;
-    if (state.paymentMethod === 'card') {
-      if (!state.selectedCardId) return;
-      body = {
-        method: 'card',
-        loanId: state.loan.id,
-        cardId: state.selectedCardId,
-        amount: Number(amount.toFixed(2)),
-      };
-    } else {
-      if (!state.selectedBankId) return;
-      body = {
-        method: 'bank',
-        loanId: state.loan.id,
-        bankId: state.selectedBankId,
-        amount: Number(amount.toFixed(2)),
-      };
+    if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+    state.submitting = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Opening secure page…';
     }
 
-    state.submitting = true;
-    const btn = qs('#payBtn');
-    btn.disabled = true;
-    btn.textContent = 'Processing…';
+    // Capture balance before the modal opens so we can detect a
+    // payment by looking for a balance decrease on refresh.
+    state.initialBalance = state.loan ? Number(state.loan.balance) : null;
 
-    body.idempotencyKey = Date.now() + '-' + Math.random().toString(16).slice(2, 10);
     api('/api/my-payment', {
       method: 'POST',
-      body: body,
+      body: { loanId: state.loan && state.loan.id },
     }).then(function (res) {
-      if (res && res.success) {
-        showReceipt(res, amount);
-        sessionStorage.setItem(SUCCESS_KEY, JSON.stringify({
-          amount: Number(amount.toFixed(2)),
-          confirmationId: res.confirmationId || '',
-          when: Date.now(),
-        }));
-        return;
-      }
-      const code = (res && res.error) || 'payment_failed';
-      showError(code);
+      const url = res && res.handoffUrl;
+      if (!url) throw new Error('no_url');
+      openIframeModal(url);
     }).catch(function (err) {
-      const code = (err && err.body && err.body.error) || 'network_error';
+      const code = (err && err.body && err.body.error) || 'handoff_failed';
       showError(code);
     }).finally(function () {
       state.submitting = false;
-      const btn = qs('#payBtn');
-      btn.disabled = false;
-      btn.textContent = 'Pay ' + money(Number(qs('#payAmount').value));
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Continue to secure payment';
+      }
     });
   }
 
   function showError(code) {
     const msg = {
-      card_declined: 'Card was declined. Try a different card or call (747) 270-7121.',
-      card_expired: 'That card has expired. Add a new one at a store.',
-      card_not_yours: "We couldn't find that card on your account.",
-      card_not_chargeable: 'This card needs to be set up before it can be charged. Please call us at (747) 270-7121 so we can fix it.',
-      amount_invalid: 'Amount must be greater than $0 and no more than your balance.',
-      loan_not_yours: "We couldn't post this payment to your loan. Call (747) 270-7121.",
-      upstream_unavailable: "Our payment system is temporarily unavailable. Please try again in a minute.",
-      network_error: 'Network error. Please check your connection and try again.',
-      payment_failed: 'Payment failed. Please try again.',
-    }[code] || 'Payment failed. Please try again.';
+      handoff_failed:        "We couldn't open the secure payment page. Please try again, or call (747) 270-7121.",
+      handoff_no_url:        "We couldn't open the secure payment page. Please try again in a minute.",
+      vergent_creds_missing: "Our payment system isn't configured. Please call (747) 270-7121.",
+      no_loan:               "We couldn't find a loan to pay on. Try refreshing the page.",
+      unauthorized:          'Your session expired. Please sign in again.',
+    }[code] || "We couldn't open the secure payment page. Please try again.";
     const el = qs('#payError');
+    if (!el) return;
     el.textContent = msg;
     el.hidden = false;
   }
 
-  function showReceipt(res, amount) {
+  // ---------- "I'm done" — refresh balance, show receipt if changed ----------
+  function refreshAfterPayment() {
+    const btn = qs('#payIframeDoneBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Refreshing…';
+    }
+    return loadLoan().then(function (loan) {
+      const before = state.initialBalance;
+      const after = loan ? Number(loan.balance) : null;
+      const decreased = (before !== null && after !== null && after < before - 0.005);
+
+      closeIframeModal();
+      if (decreased) {
+        const paid = before - after;
+        showReceipt(paid, after);
+        sessionStorage.setItem(SUCCESS_KEY, JSON.stringify({
+          amount: Number(paid.toFixed(2)),
+          when: Date.now(),
+        }));
+      } else {
+        // Balance didn't change — probably canceled or still processing.
+        const errEl = qs('#payError');
+        if (errEl) {
+          errEl.textContent = "We don't see a new payment yet. If you completed a payment, give it a minute and refresh — or call us if it doesn't show up.";
+          errEl.hidden = false;
+        }
+      }
+    }).finally(function () {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "I'm done — refresh my balance";
+      }
+    });
+  }
+
+  function showReceipt(amount, newBalance) {
     qs('#payFormCard').hidden = true;
-    qs('#paySummary').hidden = true;
-    const card = state.cards.find(function (c) { return String(c.id) === String(state.selectedCardId); });
     setText(qs('[data-receipt-amount]'), money(amount));
-    setText(qs('[data-receipt-card]'),
-      card ? ((card.brand || 'Card') + ' •••• ' + (card.last4 || '••••')) : 'card'
-    );
-    setText(qs('[data-receipt-confirmation]'), res.confirmationId || '—');
     setText(qs('[data-receipt-balance]'),
-      res.newBalance !== null && res.newBalance !== undefined ? money(res.newBalance) : '—'
+      newBalance !== null && newBalance !== undefined ? money(newBalance) : '—'
     );
     qs('#payReceipt').hidden = false;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function wireButtons() {
-    wireTabs();
-  }
-
-  // ---------- Auto-refresh of payment methods ----------
-  // No "click to refresh" button — that's bad UX for a customer
-  // who just got off the phone with us. Instead, silently refetch
-  // /api/my-cards + /api/my-banks at moments where a new payment
-  // method is most likely to have just been added by an agent:
-  //
-  //   1. The browser tab regains focus (visibility change). The
-  //      customer was probably on the phone or in a tab with
-  //      Vergent's admin UI; coming back here means they expect
-  //      to see the new card.
-  //   2. A short delay (~3s) after initial page load — catches
-  //      the case where the agent saved the card seconds before
-  //      the customer hit the page.
-  //   3. While the empty-state is showing AND the tab is
-  //      foreground, gentle polling every 12s. We stop polling
-  //      as soon as a card appears (or the customer leaves the
-  //      tab). 12s is slow enough to be invisible, fast enough
-  //      to feel "instant" while a customer waits on the phone.
-  //
-  // All refreshes are silent — no spinner, no flash, no UI churn
-  // unless the underlying state actually changes.
-
-  let pollTimer = null;
-
-  function refreshMethods() {
-    return Promise.all([
-      loadCards().catch(function () {}),
-      loadBanks().catch(function () {}),
-    ]).then(function () {
-      // updateBtn() is wired inside initForm via a listener on
-      // the lists. Re-running initForm is unnecessary; the
-      // re-rendered radios will fire change events when selected
-      // and the existing payBtn watcher will react.
-    });
-  }
-
-  function startPolling() {
-    stopPolling();
-    pollTimer = setInterval(function () {
-      // Only poll while still empty AND tab is visible. Once a
-      // card shows up (or the user leaves the tab), stop.
-      const empty = state.cards.length === 0 && state.banks.length === 0;
-      if (!empty || document.hidden) {
-        stopPolling();
-        return;
-      }
-      refreshMethods();
-    }, 12000);
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  }
-
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
-      stopPolling();
-      return;
-    }
-    // Tab just became visible — refetch immediately, then resume
-    // gentle polling if still empty.
-    refreshMethods().then(function () {
-      const empty = state.cards.length === 0 && state.banks.length === 0;
-      if (empty) startPolling();
-    });
-  });
-
   // ---------- Boot ----------
   document.addEventListener('DOMContentLoaded', function () {
-    wireButtons();
-    Promise.all([loadLoan(), loadCards(), loadBanks()])
-      .then(function () {
-        initForm();
-        // Fire one extra refetch a few seconds after first load —
-        // catches the "agent saved card seconds before customer
-        // hit refresh" case.
-        setTimeout(function () { refreshMethods(); }, 3000);
-        // If still empty, start gentle polling so newly-added
-        // cards surface within ~12s while the customer waits.
-        const empty = state.cards.length === 0 && state.banks.length === 0;
-        if (empty && !document.hidden) startPolling();
-      })
-      .catch(function (err) {
-        if (err && err.message === 'unauthorized') return;
-        const formCard = qs('#payFormCard');
-        if (formCard) formCard.hidden = true;
-        const errEl = qs('#payError');
-        if (errEl) {
-          errEl.textContent = 'Could not load your loan or card details. Please refresh.';
-          errEl.hidden = false;
-        }
-      });
+    const continueBtn = qs('#payContinueBtn');
+    if (continueBtn) continueBtn.addEventListener('click', startPayment);
+
+    const doneBtn = qs('#payIframeDoneBtn');
+    if (doneBtn) doneBtn.addEventListener('click', refreshAfterPayment);
+
+    qsa('[data-action="pay-modal-close"]').forEach(function (el) {
+      el.addEventListener('click', function () { closeIframeModal(); });
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        const modal = qs('#payIframeModal');
+        if (modal && !modal.hidden) closeIframeModal();
+      }
+    });
+
+    loadLoan().then(function (loan) {
+      // Reveal the Continue card once we have an active loan.
+      const formCard = qs('#payFormCard');
+      if (formCard) formCard.hidden = !loan;
+    }).catch(function (err) {
+      if (err && err.message === 'unauthorized') return;
+      const errEl = qs('#payError');
+      if (errEl) {
+        errEl.textContent = 'Could not load your loan details. Please refresh.';
+        errEl.hidden = false;
+      }
+    });
   });
 })();
