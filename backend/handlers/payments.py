@@ -1359,126 +1359,99 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         log.info("payment-attempt method=card cid=%s loan_id=%s last4=%s amount=%s",
                  cid, loan_id, last4, amount_num)
 
-        trail: list = []
-
-        # Primary path: v2 CustomerPortal CreditCardPayment with the
+        # Charge via v2 CustomerPortal CreditCardPayment using the
         # customer's Vergent portal token (obtained by exchanging the
         # request's Cognito JWT via /AuthenticateCognito). This is the
         # (Auth)-annotated path used by Vergent's own customer portal.
-        # Service-token attempts to the same endpoint hit
-        # DependencyResolutionException because the DI graph requires a
-        # customer-scoped auth context — only the customer-JWT exchange
-        # provides that.
+        # The v1 /V1/repay/transaction/card[/sync] endpoints are webhook
+        # receivers Repay calls back to AFTER a payment is processed —
+        # not charge-initiation endpoints — so there is no v1 fallback.
+        trail: list = []
         customer_token = _get_customer_v2_token(event, trail=trail)
-        if customer_token:
-            v2_status, v2_parsed, v2_raw = (
-                _v2_credit_card_payment_with_customer_token(
-                    customer_token=customer_token,
-                    loan_id=int(loan_id),
-                    payment_id=0,
-                    amount=amount_num,
-                    card_id=int(card_id),
-                    customer_id=int(cid) if cid else None,
-                )
-            )
-            trail.append({
-                "step":    "charge",
-                "via":     "v2_customer_token",
-                "status":  v2_status,
-                "rawHead": (v2_raw or "")[:300],
+        if not customer_token:
+            return _json_response(502, {
+                "success": False,
+                "error":   "v2_auth_failed",
+                "_debug":  {"trail": trail},
             })
-            log.info("v2 charge status=%s raw=%s",
-                     v2_status, (v2_raw or "")[:400])
-            if v2_status in (200, 201):
-                v2_success = True
-                if isinstance(v2_parsed, dict):
-                    flag = (v2_parsed.get("success")
-                            if v2_parsed.get("success") is not None
-                            else v2_parsed.get("Success"))
-                    if flag is False:
-                        v2_success = False
-                if v2_success:
-                    refreshed = _fetch_active_loan(cid)
-                    new_balance = (refreshed.get("balance")
-                                   if refreshed else None)
-                    confirmation_id = None
-                    if isinstance(v2_parsed, dict):
-                        confirmation_id = (
-                            v2_parsed.get("transactionId")
-                            or v2_parsed.get("TransactionId")
-                            or v2_parsed.get("scheduleDate")
-                            or v2_parsed.get("ScheduleDate")
-                            or v2_parsed.get("confirmationId")
-                            or v2_parsed.get("ConfirmationId")
-                            or v2_parsed.get("id")
-                            or v2_parsed.get("Id")
-                        )
-                    if not confirmation_id:
-                        from datetime import datetime, timezone as _tz
-                        confirmation_id = (
-                            datetime.now(_tz.utc).isoformat()
-                            .replace("+00:00", "Z")
-                        )
-                    return _json_response(200, {
-                        "success":        True,
-                        "confirmationId": str(confirmation_id),
-                        "transactionId":  confirmation_id,
-                        "amount":         round(float(amount_num), 2),
-                        "last4":          last4,
-                        "paymentMethod":  "card",
-                        "newBalance":     new_balance,
-                        "via":            "v2_customer_jwt",
-                    })
-                # 200 with success: false — clean decline.
-                errs = (v2_parsed.get("errors") or v2_parsed.get("Errors")
-                        or v2_parsed.get("ErrorMessage")
-                        or v2_parsed.get("Error")
-                        if isinstance(v2_parsed, dict) else None)
-                return _json_response(200, {
-                    "success":        False,
-                    "error":          "card_declined",
-                    "upstreamErrors": errs,
-                    "upstreamBody":   (v2_raw or "")[:600],
-                    "_debug":         {"trail": trail},
-                })
-            # v2 charge returned non-2xx — fall through to v1 repay sync.
 
-        # Fallback: v1 Repay sync. Used when AuthenticateCognito returned
-        # no token, or v2 charge returned a non-2xx (network / DI error).
-        charge_body = _build_repay_body_card(
-            cid=cid, loan_id=loan_id, card_id=card_id,
-            amount=amount_num, store_id=store_id, user_id=user_id,
-            idempotency_key=idempotency_key,
-        )
-        log.info("payment-attempt fallback=v1_repay method=card "
-                 "cid=%s loan_id=%s last4=%s amount=%s",
-                 cid, loan_id, last4, amount_num)
-        status, parsed, raw = _v1_request(
-            "POST", "/V1/repay/transaction/card/sync", body=charge_body,
+        v2_status, v2_parsed, v2_raw = (
+            _v2_credit_card_payment_with_customer_token(
+                customer_token=customer_token,
+                loan_id=int(loan_id),
+                payment_id=0,
+                amount=amount_num,
+                card_id=int(card_id),
+                customer_id=int(cid) if cid else None,
+            )
         )
         trail.append({
             "step":    "charge",
-            "via":     "v1_repay_sync",
-            "status":  status,
-            "rawHead": (raw or "")[:300],
+            "via":     "v2_customer_token",
+            "status":  v2_status,
+            "rawHead": (v2_raw or "")[:300],
         })
-        new_balance = None
-        if status in (200, 201):
-            refreshed = _fetch_active_loan(cid)
-            new_balance = refreshed.get("balance") if refreshed else None
-        resp = _shape_repay_response(
-            status, parsed, raw,
-            amount=amount_num, last4=last4, method="card",
-            new_balance=new_balance,
-        )
-        # Surface the trail so we can see which path failed and why.
-        try:
-            resp_body = json.loads(resp.get("body") or "{}")
-            resp_body.setdefault("_debug", {})["trail"] = trail
-            resp["body"] = json.dumps(resp_body)
-        except Exception:
-            pass
-        return resp
+        log.info("v2 charge status=%s raw=%s",
+                 v2_status, (v2_raw or "")[:400])
+
+        if v2_status not in (200, 201):
+            return _json_response(502, {
+                "success":        False,
+                "error":          "upstream_unavailable",
+                "upstreamStatus": v2_status,
+                "upstreamBody":   (v2_raw or "")[:600],
+                "_debug":         {"trail": trail},
+            })
+
+        v2_success = True
+        if isinstance(v2_parsed, dict):
+            flag = (v2_parsed.get("success")
+                    if v2_parsed.get("success") is not None
+                    else v2_parsed.get("Success"))
+            if flag is False:
+                v2_success = False
+        if not v2_success:
+            errs = (v2_parsed.get("errors") or v2_parsed.get("Errors")
+                    or v2_parsed.get("ErrorMessage")
+                    or v2_parsed.get("Error")
+                    if isinstance(v2_parsed, dict) else None)
+            return _json_response(200, {
+                "success":        False,
+                "error":          "card_declined",
+                "upstreamErrors": errs,
+                "upstreamBody":   (v2_raw or "")[:600],
+                "_debug":         {"trail": trail},
+            })
+
+        refreshed = _fetch_active_loan(cid)
+        new_balance = refreshed.get("balance") if refreshed else None
+        confirmation_id = None
+        if isinstance(v2_parsed, dict):
+            confirmation_id = (
+                v2_parsed.get("transactionId")
+                or v2_parsed.get("TransactionId")
+                or v2_parsed.get("scheduleDate")
+                or v2_parsed.get("ScheduleDate")
+                or v2_parsed.get("confirmationId")
+                or v2_parsed.get("ConfirmationId")
+                or v2_parsed.get("id")
+                or v2_parsed.get("Id")
+            )
+        if not confirmation_id:
+            from datetime import datetime, timezone as _tz
+            confirmation_id = (
+                datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+            )
+        return _json_response(200, {
+            "success":        True,
+            "confirmationId": str(confirmation_id),
+            "transactionId":  confirmation_id,
+            "amount":         round(float(amount_num), 2),
+            "last4":          last4,
+            "paymentMethod":  "card",
+            "newBalance":     new_balance,
+            "via":            "v2_customer_jwt",
+        })
 
     elif pay_method == "bank":
         bank_id = body.get("bankId")
