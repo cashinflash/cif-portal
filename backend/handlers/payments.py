@@ -5,36 +5,36 @@ Routes (bound to HttpApi with Cognito JWT authorizer):
   GET  /api/my-cards                 -> list the customer's saved cards
   GET  /api/my-banks                 -> list the customer's saved banks
   GET  /api/my-payment/loan-summary  -> active loan data formatted for the pay page
-  POST /api/my-payment               -> create a Vergent customer-portal handoff
-                                        URL the customer follows to pay
+  POST /api/my-payment               -> charge the customer's saved card (in-portal,
+                                        no redirect)
 
-Why a handoff: Vergent's REST surface for charging cards is a maze of
-broken endpoints for our tenant — v1 PostCustomerLoanPayment crashes
-with NullReferenceException at line 3413 of their controller, v2
-CustomerPortal/CreditCardPayment requires a customer JWT but
-AuthenticateCognito itself crashes server-side, and the
-v1/repay/transaction/* endpoints are webhook receivers rather than
-charge endpoints. The handoff endpoint (/api/authenticate/handoff/
-create) is the path Vergent maintains and tests themselves; it
-returns a single-use URL that signs the customer into Vergent's
-hosted customer portal where they can pay using whichever payment
-method they have on file. After the customer pays and returns,
-the loan summary refresh shows the updated balance.
+Charge flow (the in-portal UX captured from Vergent's own customer portal):
+
+  1. Mint a customer-scoped Vergent JWT by exchanging our Cognito ID
+     token via /api/CustomerPortal/AuthenticateCognito on the DIRECT
+     host (https://prod.api.vergentlms.com — NOT the APIM proxy).
+  2. POST /api/CustomerPortal/Loans/Payments/CreditCardPayment on the
+     same direct host with body:
+       { LoanId, PaymentId (=cardId — Vergent's naming is misleading),
+         AmountDue, ConvenienceFee: 0.0000, IsInRescindPeriod: false,
+         PaymentDate: null, AuthCode: null }
+     Auth: just `Authorization: Bearer <customer-jwt>`. No x-api-key.
+  3. Vergent routes to Repay; success → 2xx, decline → 200 + Errors.
 
 Auth model:
   - API Gateway's Cognito JWT authorizer identifies the customer
     (custom:vergentCustomerId claim).
-  - Vergent is called with the SERVICE APIM token (JWT from
-    /api/authenticate at the APIM host) plus the x-api-key header.
+  - The customer's own Cognito ID token is forwarded to
+    AuthenticateCognito which mints a Vergent customer JWT.
 
 Environment:
-  VERGENT_APIM_BASE_URL  default https://prod.apim.vergentlms.com/external/shared
-  VERGENT_V1_BASE_URL    default https://shared.vergentlms.com/api/api
-  VERGENT_SECRET_ARN     Secrets Manager ARN (same secret as loans.py)
-  VERGENT_HANDOFF_AUTHORITY  default cashinflash.apply.vergentlms.com (loans.py
-                             import; same value used for all handoffs)
-  VERGENT_PAYMENT_HANDOFF_TARGET  default "/" (relative URL inside Vergent's
-                                  customer portal where the customer lands)
+  VERGENT_APIM_BASE_URL    default https://prod.apim.vergentlms.com/external/shared
+                           (used for v2 service-token paths from loans.py)
+  VERGENT_API_DIRECT_BASE  default https://prod.api.vergentlms.com
+                           (Vergent's direct API host — the host
+                           Vergent's own customer portal calls)
+  VERGENT_V1_BASE_URL      default https://shared.vergentlms.com/api/api
+  VERGENT_SECRET_ARN       Secrets Manager ARN (same secret as loans.py)
 """
 from __future__ import annotations
 
@@ -48,7 +48,6 @@ from typing import Any, Dict, Optional
 from handlers.loans import (
     APIM_BASE,
     CORS_HEADERS,
-    HANDOFF_AUTHORITY,
     V1_BASE,
     _claims,
     _customer_id,
@@ -63,15 +62,12 @@ from handlers.loans import (
 )
 
 VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
-PAYMENT_HANDOFF_TARGET = os.environ.get("VERGENT_PAYMENT_HANDOFF_TARGET", "/")
-# The customer portal lives on a different subdomain than the apply
-# portal (e.g. cashinflash.my.vergentlms.com vs
-# cashinflash.apply.vergentlms.com). The shared VERGENT_HANDOFF_AUTHORITY
-# default points at the apply host (used by the new-loan flow); if
-# VERGENT_PAYMENT_HANDOFF_AUTHORITY isn't set we fall back to it.
-PAYMENT_HANDOFF_AUTHORITY = os.environ.get(
-    "VERGENT_PAYMENT_HANDOFF_AUTHORITY", HANDOFF_AUTHORITY,
-)
+# Direct host for the customer-portal API. Vergent's own customer
+# portal calls this host directly (no APIM proxy, no x-api-key).
+# Captured empirically from a real signed-in customer session.
+VERGENT_API_DIRECT_BASE = os.environ.get(
+    "VERGENT_API_DIRECT_BASE", "https://prod.api.vergentlms.com",
+).rstrip("/")
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -761,62 +757,282 @@ def _fallback_bank_from_loan(cid: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _mint_customer_jwt(event: Dict[str, Any],
+                       trail: Optional[list] = None) -> Optional[str]:
+    """Exchange the request's Cognito ID token for a Vergent customer JWT
+    via /api/CustomerPortal/AuthenticateCognito on the DIRECT host.
+
+    Earlier session attempts hit this endpoint on the APIM proxy
+    (prod.apim.vergentlms.com/external/shared/...) and got 500
+    NullReferenceException — but Vergent's own customer portal calls
+    the direct host (prod.api.vergentlms.com), which has different
+    ingress and may have different code-path behavior. Worth trying
+    here. Returns the minted Vergent JWT, or None if exchange fails.
+    """
+    def _record(entry: Dict[str, Any]) -> None:
+        if trail is not None:
+            trail.append(entry)
+
+    headers = event.get("headers") or {}
+    auth_header = ""
+    for k in ("authorization", "Authorization"):
+        if k in headers and headers[k]:
+            auth_header = headers[k]
+            break
+    cognito_jwt = (auth_header.replace("Bearer ", "")
+                              .replace("bearer ", "").strip())
+    if not cognito_jwt:
+        _record({"step": "auth", "status": 0, "note": "no_cognito_jwt"})
+        return None
+
+    url = f"{VERGENT_API_DIRECT_BASE}/api/CustomerPortal/AuthenticateCognito"
+    status, parsed, raw = _http(
+        url, "POST",
+        body={"jwt": cognito_jwt},
+        headers={"Content-Type": "application/json"},
+    )
+    log.info("AuthenticateCognito direct status=%s rawHead=%s",
+             status, (raw or "")[:300])
+    if status != 200 or not isinstance(parsed, dict):
+        _record({
+            "step":    "auth",
+            "via":     "AuthenticateCognito_direct",
+            "status":  status,
+            "rawHead": (raw or "")[:300],
+        })
+        return None
+    tok = parsed.get("token") or parsed.get("Token")
+    if isinstance(tok, str) and tok.strip():
+        _record({
+            "step": "auth", "via": "AuthenticateCognito_direct",
+            "status": 200, "tokenLen": len(tok.strip()),
+        })
+        return tok.strip()
+    _record({
+        "step": "auth", "via": "AuthenticateCognito_direct",
+        "status": 200, "note": "no_token",
+        "responseKeys": sorted(parsed.keys()),
+    })
+    return None
+
+
+def _v2_credit_card_payment_direct(customer_jwt: str,
+                                   loan_id: int,
+                                   card_id: int,
+                                   amount: float) -> tuple:
+    """POST /api/CustomerPortal/Loans/Payments/CreditCardPayment.
+
+    Body shape captured empirically from a real signed-in customer
+    session in Vergent's own portal:
+
+      {
+        "LoanId":            <int>,
+        "PaymentId":         <int>,    // ← Vergent's misleading name —
+                                       //   this is actually the cardId
+        "AmountDue":         <float>,
+        "ConvenienceFee":    0.0000,
+        "IsInRescindPeriod": false,
+        "PaymentDate":       null,
+        "AuthCode":          null
+      }
+
+    Auth: just `Authorization: Bearer <customer-jwt>`. No x-api-key,
+    no APIM proxy.
+    """
+    url = f"{VERGENT_API_DIRECT_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
+    body = {
+        "LoanId":            int(loan_id),
+        "PaymentId":         int(card_id),
+        "AmountDue":         round(float(amount), 2),
+        "ConvenienceFee":    0.0000,
+        "IsInRescindPeriod": False,
+        "PaymentDate":       None,
+        "AuthCode":          None,
+    }
+    h = {
+        "Content-Type":  "application/json; charset=UTF-8",
+        "Authorization": f"Bearer {customer_jwt}",
+    }
+    return _http(url, "POST", body=body, headers=h)
+
+
 def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/my-payment — return a single-use Vergent customer-portal
-    handoff URL the customer follows to make a payment.
+    """POST /api/my-payment — charge a saved card on the active loan.
 
-    Body: ignored. We use the Cognito JWT to identify the customer.
+    Body: { method: 'card' | 'bank',
+            loanId, cardId|bankId, amount, idempotencyKey? }
 
-    Response: { handoffUrl: "https://...", token: "..." }
+    Card flow: mints a Vergent customer JWT via direct-host
+    AuthenticateCognito, then POSTs the captured CreditCardPayment
+    body to the same direct host.
 
-    The customer's browser opens the URL in a new tab; Vergent's hosted
-    customer portal is the actual payment surface (it works, it's
-    PCI-compliant on Vergent's infrastructure, and Vergent maintains
-    it). When the customer comes back to our portal, the loan summary
-    refresh shows the updated balance.
+    Bank flow: temporarily disabled — we don't have the captured ACH
+    request shape yet. Returns ach_not_yet_supported so the customer
+    sees a clear "use card or call us" message.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(401, {"error": "unauthorized"})
 
-    tok = _get_apim_token()
-    if not tok:
-        return _json_response(502, {"error": "apim_unavailable"})
-    creds = _get_creds()
-    if not creds:
-        return _json_response(502, {"error": "vergent_creds_missing"})
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
 
-    log.info("payment-handoff cid=%s target=%s authority=%s",
-             cid, PAYMENT_HANDOFF_TARGET, PAYMENT_HANDOFF_AUTHORITY)
-    status, body, raw = _http(
-        f"{APIM_BASE}/api/authenticate/handoff/create",
-        "POST",
-        body={
-            "customerId":               int(cid),
-            "TargetRelativePage":       PAYMENT_HANDOFF_TARGET,
-            "ExpectedReferrerAuthority": PAYMENT_HANDOFF_AUTHORITY,
-        },
-        headers={
-            "x-api-key": creds["xApiKey"],
-            "Authorization": f"Bearer {tok}",
-        },
-    )
-    if status != 200 or not isinstance(body, dict):
-        log.warning("payment-handoff upstream status=%s raw=%s",
-                    status, (raw or "")[:400])
-        return _json_response(502, {
-            "error":          "handoff_failed",
-            "upstreamStatus": status,
-            "upstreamBody":   (raw or "")[:400],
+    pay_method = (body.get("method") or "card").lower()
+    loan_id = body.get("loanId")
+    amount = body.get("amount")
+
+    if loan_id is None or amount is None:
+        return _json_response(400, {"error": "missing_fields"})
+    try:
+        amount_num = float(amount)
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "amount_invalid"})
+    if amount_num <= 0:
+        return _json_response(400, {"error": "amount_invalid"})
+
+    # Ownership + payoff guard via v1.
+    loan = _fetch_active_loan(cid)
+    if not loan or str(loan.get("id")) != str(loan_id):
+        status_ok, raw_loans = _v1_get(f"/V1/{cid}/loans")
+        found = None
+        if status_ok == 200 and isinstance(raw_loans, list):
+            for r in raw_loans:
+                if isinstance(r, dict):
+                    shaped = _shape_v1_loan(r)
+                    if str(shaped.get("id")) == str(loan_id):
+                        found = shaped
+                        break
+        if not found:
+            log.warning("payment loan_not_yours cid=%s loan_id=%s",
+                        cid, loan_id)
+            return _json_response(403, {"error": "loan_not_yours"})
+        loan = found
+
+    payoff = loan.get("payoffAmount") or loan.get("balance") or 0
+    if amount_num > float(payoff) + 0.01:
+        return _json_response(400, {
+            "error":  "amount_invalid",
+            "payoff": payoff,
         })
 
-    url = body.get("handoffUrl") or body.get("handoff_url")
-    if not url:
-        return _json_response(502, {"error": "handoff_no_url"})
+    if pay_method == "bank":
+        # ACH disabled until we capture the check-payment request shape
+        # from Vergent's own customer portal. Card flow is shipped first.
+        return _json_response(400, {
+            "error":   "ach_not_yet_supported",
+            "message": "Bank/ACH payments are temporarily unavailable. "
+                       "Please use a debit card or call (747) 270-7121.",
+        })
+
+    if pay_method != "card":
+        return _json_response(400, {"error": "method_invalid"})
+
+    card_id = body.get("cardId")
+    if card_id is None:
+        return _json_response(400, {"error": "missing_fields"})
+    # Ownership: confirm the cardId is in the customer's saved cards.
+    st_c, cards_body, _ = _v1_request(
+        "GET", f"/V1/GetCustomerCards?custId={cid}",
+    )
+    if st_c != 200 or not isinstance(cards_body, list):
+        return _json_response(502, {"error": "upstream_unavailable"})
+    card = next(
+        (c for c in cards_body if isinstance(c, dict)
+         and str(c.get("id")) == str(card_id)),
+        None,
+    )
+    if not card:
+        return _json_response(403, {"error": "card_not_yours"})
+    last4 = "".join(ch for ch in (card.get("card_number") or "")
+                    if ch.isdigit())[-4:]
+
+    log.info("payment-attempt cid=%s loan_id=%s card_id=%s last4=%s amount=%s",
+             cid, loan_id, card_id, last4, amount_num)
+
+    trail: list = []
+    customer_jwt = _mint_customer_jwt(event, trail=trail)
+    if not customer_jwt:
+        return _json_response(502, {
+            "success": False,
+            "error":   "v2_auth_failed",
+            "_debug":  {"trail": trail},
+        })
+
+    status, parsed, raw = _v2_credit_card_payment_direct(
+        customer_jwt=customer_jwt,
+        loan_id=int(loan_id),
+        card_id=int(card_id),
+        amount=amount_num,
+    )
+    trail.append({
+        "step":    "charge",
+        "via":     "CreditCardPayment_direct",
+        "status":  status,
+        "rawHead": (raw or "")[:400],
+    })
+    log.info("CreditCardPayment direct status=%s raw=%s",
+             status, (raw or "")[:400])
+
+    if status not in (200, 201):
+        return _json_response(502, {
+            "success":        False,
+            "error":          "upstream_unavailable",
+            "upstreamStatus": status,
+            "upstreamBody":   (raw or "")[:600],
+            "_debug":         {"trail": trail},
+        })
+
+    # Decline shape: 200 with success: false, or with Errors array.
+    if isinstance(parsed, dict):
+        success_flag = (parsed.get("success")
+                        if parsed.get("success") is not None
+                        else parsed.get("Success"))
+        errs = (parsed.get("Errors") or parsed.get("errors")
+                or parsed.get("ErrorMessage")
+                or parsed.get("Error"))
+        if success_flag is False or errs:
+            log.warning("payment declined cid=%s loan_id=%s parsed=%s",
+                        cid, loan_id, str(parsed)[:400])
+            return _json_response(200, {
+                "success":        False,
+                "error":          "card_declined",
+                "upstreamErrors": errs,
+                "upstreamBody":   (raw or "")[:600],
+                "_debug":         {"trail": trail},
+            })
+
+    refreshed = _fetch_active_loan(cid)
+    new_balance = refreshed.get("balance") if refreshed else None
+    confirmation_id = None
+    if isinstance(parsed, dict):
+        confirmation_id = (parsed.get("transactionId")
+                           or parsed.get("TransactionId")
+                           or parsed.get("scheduleDate")
+                           or parsed.get("ScheduleDate")
+                           or parsed.get("confirmationId")
+                           or parsed.get("ConfirmationId")
+                           or parsed.get("id")
+                           or parsed.get("Id"))
+    if not confirmation_id:
+        from datetime import datetime, timezone as _tz
+        confirmation_id = (
+            datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+        )
+    log.info("payment success cid=%s loan_id=%s last4=%s amount=%s "
+             "confirmation=%s new_balance=%s",
+             cid, loan_id, last4, amount_num, confirmation_id, new_balance)
     return _json_response(200, {
-        "handoffUrl": url,
-        "token":      body.get("token"),
+        "success":        True,
+        "confirmationId": str(confirmation_id),
+        "transactionId":  confirmation_id,
+        "amount":         round(float(amount_num), 2),
+        "last4":          last4,
+        "paymentMethod":  "card",
+        "newBalance":     new_balance,
+        "via":            "v2_customer_jwt_direct",
     })
 
 
