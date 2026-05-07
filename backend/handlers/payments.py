@@ -758,21 +758,67 @@ def _fallback_bank_from_loan(cid: str) -> Optional[Dict[str, Any]]:
 
 
 def _mint_customer_jwt(event: Dict[str, Any],
+                       cid: str,
                        trail: Optional[list] = None) -> Optional[str]:
-    """Exchange the request's Cognito ID token for a Vergent customer JWT
-    via /api/CustomerPortal/AuthenticateCognito on the DIRECT host.
+    """Mint a Vergent customer-scoped JWT.
 
-    Earlier session attempts hit this endpoint on the APIM proxy
-    (prod.apim.vergentlms.com/external/shared/...) and got 500
-    NullReferenceException — but Vergent's own customer portal calls
-    the direct host (prod.api.vergentlms.com), which has different
-    ingress and may have different code-path behavior. Worth trying
-    here. Returns the minted Vergent JWT, or None if exchange fails.
+    Two paths to try, in order:
+      1. /api/authenticate/handoff/create on the APIM proxy. This is
+         already proven working (loans.py uses it for the new-loan
+         handoff). Its response includes a `token` field that may be
+         a real customer JWT usable for direct API calls — never
+         tested before because we always used the handoffUrl instead.
+      2. /api/CustomerPortal/AuthenticateCognito on the direct host.
+         Vergent's own customer portal calls this host but the
+         endpoint may not be exposed there (404 in our last test).
+
+    Returns the minted Vergent JWT, or None if both attempts fail.
     """
     def _record(entry: Dict[str, Any]) -> None:
         if trail is not None:
             trail.append(entry)
 
+    # ── Attempt 1: handoff/create on APIM, extract `token` ──
+    apim_tok = _get_apim_token()
+    creds = _get_creds()
+    if apim_tok and creds:
+        url = f"{APIM_BASE}/api/authenticate/handoff/create"
+        status, parsed, raw = _http(
+            url, "POST",
+            body={
+                "customerId":               int(cid),
+                "TargetRelativePage":       "/",
+                "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
+            },
+            headers={
+                "x-api-key":     creds["xApiKey"],
+                "Authorization": f"Bearer {apim_tok}",
+            },
+        )
+        log.info("handoff/create status=%s rawHead=%s",
+                 status, (raw or "")[:300])
+        if status == 200 and isinstance(parsed, dict):
+            tok = (parsed.get("token") or parsed.get("Token"))
+            if isinstance(tok, str) and tok.strip():
+                _record({
+                    "step": "auth", "via": "handoff_create_token",
+                    "status": 200, "tokenLen": len(tok.strip()),
+                })
+                return tok.strip()
+            _record({
+                "step": "auth", "via": "handoff_create_token",
+                "status": 200, "note": "no_token_in_response",
+                "responseKeys": sorted(parsed.keys()),
+            })
+        else:
+            _record({
+                "step":    "auth",
+                "via":     "handoff_create_token",
+                "status":  status,
+                "rawHead": (raw or "")[:200],
+            })
+
+    # ── Attempt 2: AuthenticateCognito on direct host ──
     headers = event.get("headers") or {}
     auth_header = ""
     for k in ("authorization", "Authorization"):
@@ -781,38 +827,36 @@ def _mint_customer_jwt(event: Dict[str, Any],
             break
     cognito_jwt = (auth_header.replace("Bearer ", "")
                               .replace("bearer ", "").strip())
-    if not cognito_jwt:
-        _record({"step": "auth", "status": 0, "note": "no_cognito_jwt"})
-        return None
+    if cognito_jwt:
+        url = f"{VERGENT_API_DIRECT_BASE}/api/CustomerPortal/AuthenticateCognito"
+        status, parsed, raw = _http(
+            url, "POST",
+            body={"jwt": cognito_jwt},
+            headers={"Content-Type": "application/json"},
+        )
+        log.info("AuthenticateCognito direct status=%s rawHead=%s",
+                 status, (raw or "")[:300])
+        if status == 200 and isinstance(parsed, dict):
+            tok = parsed.get("token") or parsed.get("Token")
+            if isinstance(tok, str) and tok.strip():
+                _record({
+                    "step": "auth", "via": "AuthenticateCognito_direct",
+                    "status": 200, "tokenLen": len(tok.strip()),
+                })
+                return tok.strip()
+            _record({
+                "step": "auth", "via": "AuthenticateCognito_direct",
+                "status": 200, "note": "no_token",
+                "responseKeys": sorted(parsed.keys()),
+            })
+        else:
+            _record({
+                "step":    "auth",
+                "via":     "AuthenticateCognito_direct",
+                "status":  status,
+                "rawHead": (raw or "")[:300],
+            })
 
-    url = f"{VERGENT_API_DIRECT_BASE}/api/CustomerPortal/AuthenticateCognito"
-    status, parsed, raw = _http(
-        url, "POST",
-        body={"jwt": cognito_jwt},
-        headers={"Content-Type": "application/json"},
-    )
-    log.info("AuthenticateCognito direct status=%s rawHead=%s",
-             status, (raw or "")[:300])
-    if status != 200 or not isinstance(parsed, dict):
-        _record({
-            "step":    "auth",
-            "via":     "AuthenticateCognito_direct",
-            "status":  status,
-            "rawHead": (raw or "")[:300],
-        })
-        return None
-    tok = parsed.get("token") or parsed.get("Token")
-    if isinstance(tok, str) and tok.strip():
-        _record({
-            "step": "auth", "via": "AuthenticateCognito_direct",
-            "status": 200, "tokenLen": len(tok.strip()),
-        })
-        return tok.strip()
-    _record({
-        "step": "auth", "via": "AuthenticateCognito_direct",
-        "status": 200, "note": "no_token",
-        "responseKeys": sorted(parsed.keys()),
-    })
     return None
 
 
@@ -953,7 +997,7 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
              cid, loan_id, card_id, last4, amount_num)
 
     trail: list = []
-    customer_jwt = _mint_customer_jwt(event, trail=trail)
+    customer_jwt = _mint_customer_jwt(event, cid, trail=trail)
     if not customer_jwt:
         return _json_response(502, {
             "success": False,
