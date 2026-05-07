@@ -1359,98 +1359,94 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         log.info("payment-attempt method=card cid=%s loan_id=%s last4=%s amount=%s",
                  cid, loan_id, last4, amount_num)
 
-        # Charge via v2 CustomerPortal CreditCardPayment using the
-        # customer's Vergent portal token (obtained by exchanging the
-        # request's Cognito JWT via /AuthenticateCognito). This is the
-        # (Auth)-annotated path used by Vergent's own customer portal.
-        # The v1 /V1/repay/transaction/card[/sync] endpoints are webhook
-        # receivers Repay calls back to AFTER a payment is processed —
-        # not charge-initiation endpoints — so there is no v1 fallback.
-        trail: list = []
-        customer_token = _get_customer_v2_token(event, trail=trail)
-        if not customer_token:
-            return _json_response(502, {
-                "success": False,
-                "error":   "v2_auth_failed",
-                "_debug":  {"trail": trail},
-            })
+        # Charge via v1 /V1/PostCustomerLoanPayment (service-token).
+        # v2 CustomerPortal CreditCardPayment requires customer-JWT
+        # auth via /AuthenticateCognito which crashes server-side
+        # for our tenant (NullReferenceException). The v1
+        # /V1/repay/transaction/card[/sync] endpoints turn out to be
+        # webhook receivers Repay calls back to, not charge-init
+        # endpoints. So v1 PostCustomerLoanPayment is the only real
+        # charge path we have. Earlier attempts crashed at line 3413
+        # of Vergent's controller with NullReferenceException — at
+        # the time we suspected un-tokenized cards, but Vergent admin
+        # has since charged this exact card successfully, proving
+        # the card IS tokenized. Worth retrying with the documented
+        # body shape (CompanyId, StoreId, UserId, HeaderId,
+        # PaymentDate, PaymentAmount, ChangeDue, SelectedCoupon,
+        # CouponAmount, PaymentSource, InstrumentNumber, PaymentMethod).
+        from datetime import datetime, timezone as _tz
+        now_iso = datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+        hdr_id = int(loan.get("id")) if loan.get("id") else 0
 
-        v2_status, v2_parsed, v2_raw = (
-            _v2_credit_card_payment_with_customer_token(
-                customer_token=customer_token,
-                loan_id=int(loan_id),
-                payment_id=0,
-                amount=amount_num,
-                card_id=int(card_id),
-                customer_id=int(cid) if cid else None,
-            )
+        trail: list = []
+        charge_body = {
+            "CompanyId":        VERGENT_COMPANY_ID,
+            "StoreId":          int(store_id) if store_id else 0,
+            "UserId":           int(user_id),
+            "HeaderId":         hdr_id,
+            "PaymentDate":      now_iso,
+            "PaymentAmount":    round(amount_num, 2),
+            "ChangeDue":        0,
+            "SelectedCoupon":   None,
+            "CouponAmount":     0,
+            "PaymentSource":    0,
+            "InstrumentNumber": "",
+            "PaymentMethod":    {"Type": "Card", "CardId": int(card_id)},
+        }
+        log.info("v1 PostCustomerLoanPayment cid=%s user_id=%s loan_id=%s "
+                 "last4=%s amount=%s",
+                 cid, user_id, loan_id, last4, amount_num)
+        status, parsed, raw = _v1_request(
+            "POST", "/V1/PostCustomerLoanPayment", body=charge_body,
         )
         trail.append({
             "step":    "charge",
-            "via":     "v2_customer_token",
-            "status":  v2_status,
-            "rawHead": (v2_raw or "")[:300],
+            "via":     "v1_post_customer_loan_payment",
+            "status":  status,
+            "rawHead": (raw or "")[:400],
         })
-        log.info("v2 charge status=%s raw=%s",
-                 v2_status, (v2_raw or "")[:400])
 
-        if v2_status not in (200, 201):
+        if status not in (200, 201):
+            log.warning("v1 PostCustomerLoanPayment upstream status=%s raw=%s",
+                        status, (raw or "")[:600])
             return _json_response(502, {
                 "success":        False,
                 "error":          "upstream_unavailable",
-                "upstreamStatus": v2_status,
-                "upstreamBody":   (v2_raw or "")[:600],
+                "upstreamStatus": status,
+                "upstreamBody":   (raw or "")[:600],
                 "_debug":         {"trail": trail},
             })
 
-        v2_success = True
-        if isinstance(v2_parsed, dict):
-            flag = (v2_parsed.get("success")
-                    if v2_parsed.get("success") is not None
-                    else v2_parsed.get("Success"))
-            if flag is False:
-                v2_success = False
-        if not v2_success:
-            errs = (v2_parsed.get("errors") or v2_parsed.get("Errors")
-                    or v2_parsed.get("ErrorMessage")
-                    or v2_parsed.get("Error")
-                    if isinstance(v2_parsed, dict) else None)
+        # Success-shape: 2xx with {TransactionId, ...} OR with Errors array
+        # (Vergent uses 200 + Errors for declines).
+        if isinstance(parsed, dict) and parsed.get("Errors"):
+            log.warning("v1 payment declined cid=%s loan_id=%s errors=%s",
+                        cid, loan_id, parsed.get("Errors"))
             return _json_response(200, {
                 "success":        False,
                 "error":          "card_declined",
-                "upstreamErrors": errs,
-                "upstreamBody":   (v2_raw or "")[:600],
+                "upstreamErrors": parsed.get("Errors"),
+                "upstreamBody":   (raw or "")[:600],
                 "_debug":         {"trail": trail},
             })
 
         refreshed = _fetch_active_loan(cid)
         new_balance = refreshed.get("balance") if refreshed else None
-        confirmation_id = None
-        if isinstance(v2_parsed, dict):
-            confirmation_id = (
-                v2_parsed.get("transactionId")
-                or v2_parsed.get("TransactionId")
-                or v2_parsed.get("scheduleDate")
-                or v2_parsed.get("ScheduleDate")
-                or v2_parsed.get("confirmationId")
-                or v2_parsed.get("ConfirmationId")
-                or v2_parsed.get("id")
-                or v2_parsed.get("Id")
-            )
-        if not confirmation_id:
-            from datetime import datetime, timezone as _tz
-            confirmation_id = (
-                datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
-            )
+        trans_id = (parsed.get("TransactionId")
+                    if isinstance(parsed, dict) else None)
+        confirmation_id = str(trans_id) if trans_id else now_iso
+        log.info("v1 payment success cid=%s loan_id=%s last4=%s amount=%s "
+                 "trans=%s new_balance=%s",
+                 cid, loan_id, last4, amount_num, trans_id, new_balance)
         return _json_response(200, {
             "success":        True,
-            "confirmationId": str(confirmation_id),
-            "transactionId":  confirmation_id,
+            "confirmationId": confirmation_id,
+            "transactionId":  trans_id,
             "amount":         round(float(amount_num), 2),
             "last4":          last4,
             "paymentMethod":  "card",
             "newBalance":     new_balance,
-            "via":            "v2_customer_jwt",
+            "via":            "v1_post_customer_loan_payment",
         })
 
     elif pay_method == "bank":
