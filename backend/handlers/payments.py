@@ -64,6 +64,14 @@ from handlers.loans import (
 
 VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
 PAYMENT_HANDOFF_TARGET = os.environ.get("VERGENT_PAYMENT_HANDOFF_TARGET", "/")
+# The customer portal lives on a different subdomain than the apply
+# portal (e.g. cashinflash.my.vergentlms.com vs
+# cashinflash.apply.vergentlms.com). The shared VERGENT_HANDOFF_AUTHORITY
+# default points at the apply host (used by the new-loan flow); if
+# VERGENT_PAYMENT_HANDOFF_AUTHORITY isn't set we fall back to it.
+PAYMENT_HANDOFF_AUTHORITY = os.environ.get(
+    "VERGENT_PAYMENT_HANDOFF_AUTHORITY", HANDOFF_AUTHORITY,
+)
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -780,14 +788,14 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(502, {"error": "vergent_creds_missing"})
 
     log.info("payment-handoff cid=%s target=%s authority=%s",
-             cid, PAYMENT_HANDOFF_TARGET, HANDOFF_AUTHORITY)
+             cid, PAYMENT_HANDOFF_TARGET, PAYMENT_HANDOFF_AUTHORITY)
     status, body, raw = _http(
         f"{APIM_BASE}/api/authenticate/handoff/create",
         "POST",
         body={
             "customerId":               int(cid),
             "TargetRelativePage":       PAYMENT_HANDOFF_TARGET,
-            "ExpectedReferrerAuthority": HANDOFF_AUTHORITY,
+            "ExpectedReferrerAuthority": PAYMENT_HANDOFF_AUTHORITY,
         },
         headers={
             "x-api-key": creds["xApiKey"],

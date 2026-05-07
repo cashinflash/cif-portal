@@ -231,6 +231,10 @@ Resources:
         Variables:
           VERGENT_APIM_BASE_URL: !Ref VergentBaseUrl
           VERGENT_SECRET_ARN: !Ref VergentSecretArn
+          # Customer portal — different subdomain than the apply portal
+          # the loans Lambda hands off to. Override per-deploy if Vergent
+          # ever moves it.
+          VERGENT_PAYMENT_HANDOFF_AUTHORITY: cashinflash.my.vergentlms.com
       Policies:
         - Statement:
             - Effect: Allow
