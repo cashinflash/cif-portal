@@ -1,16 +1,14 @@
 /* ═══════════════════════════════════════
-   CASH IN FLASH — Payments page controller (iframe-modal flow).
+   CASH IN FLASH — Payments page controller (handoff via new tab).
 
-   Why an iframe modal: Vergent's REST surface is locked down for
-   server-to-server card charges (see backend/handlers/payments.py
-   for the full list of broken endpoints). The handoff URL endpoint
-   IS reachable and signs the customer into Vergent's hosted payment
-   page. Embedding that page in an iframe modal makes the UX feel
-   in-portal while letting Vergent handle the actual charge.
+   Vergent's customer portal is the actual payment surface. We mint
+   a single-use handoff URL (so the customer is auto-signed-in there)
+   and open it in a new tab. Our page transitions to a "waiting"
+   state with an "I'm done — refresh balance" button.
 
-   If Vergent's X-Frame-Options blocks the iframe, we show a
-   fallback "Open secure payment page" link that opens it in a new
-   tab — same flow, just a click further.
+   Why not iframe: Vergent serves X-Frame-Options: DENY (or CSP
+   frame-ancestors) so the page can never load inside our site. The
+   new-tab approach is the only path that works.
    ═══════════════════════════════════════ */
 (function () {
   'use strict';
@@ -20,7 +18,6 @@
   const SUCCESS_KEY = 'cif_payment_success';
 
   function qs(sel, root) { return (root || document).querySelector(sel); }
-  function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
   function money(n) {
     if (n === null || n === undefined || isNaN(Number(n))) return '—';
@@ -80,12 +77,12 @@
     });
   }
 
-  // ---------- State ----------
   const state = {
     loan: null,
     submitting: false,
-    initialBalance: null,    // captured before opening the modal
-    iframeBlockedTimer: null,
+    refreshing: false,
+    initialBalance: null,    // captured before opening the new tab
+    lastHandoffUrl: null,
   };
 
   // ---------- Loan summary ----------
@@ -121,46 +118,7 @@
     });
   }
 
-  // ---------- Iframe modal ----------
-  function openIframeModal(handoffUrl) {
-    const modal = qs('#payIframeModal');
-    const iframe = qs('#payIframe');
-    const blocked = qs('#payIframeBlocked');
-    const blockedLink = qs('#payIframeBlockedLink');
-    if (!modal || !iframe || !blocked || !blockedLink) return;
-
-    blocked.hidden = true;
-    blockedLink.href = handoffUrl;
-    iframe.src = handoffUrl;
-    document.body.style.overflow = 'hidden';
-    modal.hidden = false;
-
-    // Detection: if the iframe doesn't reach a same-or-cross-origin
-    // load event within 5s, assume Vergent's X-Frame-Options blocked
-    // it. Show the fallback "open in new tab" link.
-    if (state.iframeBlockedTimer) clearTimeout(state.iframeBlockedTimer);
-    let loaded = false;
-    iframe.addEventListener('load', function () {
-      loaded = true;
-    }, { once: true });
-    state.iframeBlockedTimer = setTimeout(function () {
-      if (!loaded) blocked.hidden = false;
-    }, 5000);
-  }
-
-  function closeIframeModal() {
-    const modal = qs('#payIframeModal');
-    const iframe = qs('#payIframe');
-    if (modal) modal.hidden = true;
-    if (iframe) iframe.src = 'about:blank';
-    document.body.style.overflow = '';
-    if (state.iframeBlockedTimer) {
-      clearTimeout(state.iframeBlockedTimer);
-      state.iframeBlockedTimer = null;
-    }
-  }
-
-  // ---------- Continue button ----------
+  // ---------- Open Vergent's secure payment page in a new tab ----------
   function startPayment() {
     if (state.submitting) return;
     const btn = qs('#payContinueBtn');
@@ -172,8 +130,6 @@
       btn.textContent = 'Opening secure page…';
     }
 
-    // Capture balance before the modal opens so we can detect a
-    // payment by looking for a balance decrease on refresh.
     state.initialBalance = state.loan ? Number(state.loan.balance) : null;
 
     api('/api/my-payment', {
@@ -182,7 +138,13 @@
     }).then(function (res) {
       const url = res && res.handoffUrl;
       if (!url) throw new Error('no_url');
-      openIframeModal(url);
+      state.lastHandoffUrl = url;
+      const w = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!w) {
+        showError('popup_blocked');
+        return;
+      }
+      transitionToWaiting();
     }).catch(function (err) {
       const code = (err && err.body && err.body.error) || 'handoff_failed';
       showError(code);
@@ -195,10 +157,19 @@
     });
   }
 
+  function transitionToWaiting() {
+    const formCard = qs('#payFormCard');
+    const waitingCard = qs('#payWaitingCard');
+    if (formCard) formCard.hidden = true;
+    if (waitingCard) waitingCard.hidden = false;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   function showError(code) {
     const msg = {
       handoff_failed:        "We couldn't open the secure payment page. Please try again, or call (747) 270-7121.",
       handoff_no_url:        "We couldn't open the secure payment page. Please try again in a minute.",
+      popup_blocked:         "Your browser blocked the new tab. Please allow pop-ups for this site, then try again.",
       vergent_creds_missing: "Our payment system isn't configured. Please call (747) 270-7121.",
       no_loan:               "We couldn't find a loan to pay on. Try refreshing the page.",
       unauthorized:          'Your session expired. Please sign in again.',
@@ -209,9 +180,13 @@
     el.hidden = false;
   }
 
-  // ---------- "I'm done" — refresh balance, show receipt if changed ----------
+  // ---------- Refresh balance after the customer comes back ----------
   function refreshAfterPayment() {
-    const btn = qs('#payIframeDoneBtn');
+    if (state.refreshing) return;
+    state.refreshing = true;
+    const btn = qs('#payDoneBtn');
+    const note = qs('#payWaitingNote');
+    if (note) { note.hidden = true; note.textContent = ''; }
     if (btn) {
       btn.disabled = true;
       btn.textContent = 'Refreshing…';
@@ -221,7 +196,6 @@
       const after = loan ? Number(loan.balance) : null;
       const decreased = (before !== null && after !== null && after < before - 0.005);
 
-      closeIframeModal();
       if (decreased) {
         const paid = before - after;
         showReceipt(paid, after);
@@ -229,15 +203,12 @@
           amount: Number(paid.toFixed(2)),
           when: Date.now(),
         }));
-      } else {
-        // Balance didn't change — probably canceled or still processing.
-        const errEl = qs('#payError');
-        if (errEl) {
-          errEl.textContent = "We don't see a new payment yet. If you completed a payment, give it a minute and refresh — or call us if it doesn't show up.";
-          errEl.hidden = false;
-        }
+      } else if (note) {
+        note.textContent = "We don't see a new payment yet. If you completed a payment, give it a minute and click again.";
+        note.hidden = false;
       }
     }).finally(function () {
+      state.refreshing = false;
       if (btn) {
         btn.disabled = false;
         btn.textContent = "I'm done — refresh my balance";
@@ -245,8 +216,18 @@
     });
   }
 
+  function reopenPaymentTab() {
+    if (state.lastHandoffUrl) {
+      window.open(state.lastHandoffUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      // No prior URL — re-mint and open.
+      startPayment();
+    }
+  }
+
   function showReceipt(amount, newBalance) {
     qs('#payFormCard').hidden = true;
+    qs('#payWaitingCard').hidden = true;
     setText(qs('[data-receipt-amount]'), money(amount));
     setText(qs('[data-receipt-balance]'),
       newBalance !== null && newBalance !== undefined ? money(newBalance) : '—'
@@ -260,21 +241,13 @@
     const continueBtn = qs('#payContinueBtn');
     if (continueBtn) continueBtn.addEventListener('click', startPayment);
 
-    const doneBtn = qs('#payIframeDoneBtn');
+    const doneBtn = qs('#payDoneBtn');
     if (doneBtn) doneBtn.addEventListener('click', refreshAfterPayment);
 
-    qsa('[data-action="pay-modal-close"]').forEach(function (el) {
-      el.addEventListener('click', function () { closeIframeModal(); });
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') {
-        const modal = qs('#payIframeModal');
-        if (modal && !modal.hidden) closeIframeModal();
-      }
-    });
+    const reopenBtn = qs('#payReopenBtn');
+    if (reopenBtn) reopenBtn.addEventListener('click', reopenPaymentTab);
 
     loadLoan().then(function (loan) {
-      // Reveal the Continue card once we have an active loan.
       const formCard = qs('#payFormCard');
       if (formCard) formCard.hidden = !loan;
     }).catch(function (err) {
@@ -284,6 +257,18 @@
         errEl.textContent = 'Could not load your loan details. Please refresh.';
         errEl.hidden = false;
       }
+    });
+
+    // When the customer returns to this tab from the Vergent payment
+    // page, auto-refresh the loan summary in the background. If the
+    // balance dropped, we surface it without making them click anything.
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) return;
+      const waitingCard = qs('#payWaitingCard');
+      if (!waitingCard || waitingCard.hidden) return;
+      // We're in the waiting state and the tab just regained focus —
+      // soft-refresh balance to detect a payment.
+      refreshAfterPayment();
     });
   });
 })();

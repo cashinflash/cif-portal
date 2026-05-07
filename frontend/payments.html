@@ -139,36 +139,22 @@
       </div>
     </section>
 
-    <!-- Iframe modal — opens when payContinueBtn is clicked -->
-    <div id="payIframeModal" class="pay-iframe-modal" hidden>
-      <div class="pay-iframe-overlay" data-action="pay-modal-close"></div>
-      <div class="pay-iframe-wrap" role="dialog" aria-modal="true" aria-labelledby="payIframeTitle">
-        <div class="pay-iframe-head">
-          <h3 id="payIframeTitle">Secure payment page</h3>
-          <button type="button" class="pay-iframe-close" data-action="pay-modal-close" aria-label="Close">×</button>
-        </div>
-        <div class="pay-iframe-body">
-          <iframe id="payIframe"
-                  title="Cash in Flash secure payment"
-                  referrerpolicy="no-referrer-when-downgrade"
-                  allow="payment"
-                  src="about:blank"></iframe>
-          <!-- X-Frame-Options fallback. If the iframe is blocked we
-               show this so the customer can still complete the payment. -->
-          <div id="payIframeBlocked" class="pay-iframe-blocked" hidden>
-            <p><strong>Heads up:</strong> the secure payment page didn't load inside our site. Click below to open it in a new tab — it's the same page either way.</p>
-            <a id="payIframeBlockedLink" href="#" target="_blank" rel="noopener noreferrer" class="btn-apply">Open secure payment page</a>
-          </div>
-        </div>
-        <div class="pay-iframe-foot">
-          <p class="pay-iframe-hint">When you've finished paying, click <strong>I'm done</strong> below to refresh your balance.</p>
-          <div class="pay-iframe-actions">
-            <button type="button" class="btn-apply" id="payIframeDoneBtn">I'm done — refresh my balance</button>
-            <button type="button" class="btn-login" data-action="pay-modal-close">Cancel</button>
-          </div>
-        </div>
+    <!-- Waiting state — shown after customer clicks Continue and the
+         secure payment page opens in a new tab. -->
+    <section class="dash-card pay-form-card" id="payWaitingCard" hidden>
+      <div class="pay-receipt-icon" aria-hidden="true">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       </div>
-    </div>
+      <h2 style="margin:0 0 8px 0;">Finishing up?</h2>
+      <p style="margin:0 0 20px 0;color:#475569;line-height:1.5;">
+        We opened Cash in Flash's secure payment page in a new tab. Once you've finished paying there, come back here and click <strong>I'm done</strong> — we'll show your updated balance.
+      </p>
+      <p class="pay-error" id="payWaitingNote" hidden></p>
+      <div class="pay-actions">
+        <button type="button" class="btn-apply" id="payDoneBtn">I'm done &mdash; refresh my balance</button>
+        <button type="button" class="btn-login" id="payReopenBtn">Reopen secure payment page</button>
+      </div>
+    </section>
 
     <!-- Receipt view (shown after balance refresh detects payment) -->
     <section class="dash-card pay-receipt" id="payReceipt" hidden>
@@ -190,67 +176,6 @@
     </p>
   </main>
 
-  <style>
-    /* Iframe modal — full-bleed overlay with the iframe inside.
-       Inline so we don't have to touch dashboard.css for this one
-       page's modal. */
-    .pay-iframe-modal {
-      position: fixed; inset: 0; z-index: 10000;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .pay-iframe-modal[hidden] { display: none; }
-    .pay-iframe-overlay {
-      position: absolute; inset: 0;
-      background: rgba(15, 23, 42, .55);
-    }
-    .pay-iframe-wrap {
-      position: relative;
-      width: min(960px, 96vw);
-      height: min(820px, 92vh);
-      background: #fff; border-radius: 16px;
-      display: flex; flex-direction: column;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, .3);
-      overflow: hidden;
-    }
-    .pay-iframe-head {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 18px; border-bottom: 1px solid #e5e7eb;
-      flex-shrink: 0;
-    }
-    .pay-iframe-head h3 { margin: 0; font-size: 1rem; }
-    .pay-iframe-close {
-      background: none; border: 0; font-size: 1.6rem; line-height: 1;
-      cursor: pointer; color: #475569; padding: 4px 10px; border-radius: 6px;
-    }
-    .pay-iframe-close:hover { background: #f1f5f9; }
-    .pay-iframe-body { flex: 1 1 auto; position: relative; min-height: 0; }
-    .pay-iframe-body iframe {
-      width: 100%; height: 100%; border: 0; display: block;
-    }
-    .pay-iframe-blocked {
-      position: absolute; inset: 0; padding: 24px;
-      display: flex; flex-direction: column; align-items: center;
-      justify-content: center; gap: 16px; text-align: center;
-      background: #fff;
-    }
-    .pay-iframe-blocked p { max-width: 480px; color: #475569; line-height: 1.5; }
-    .pay-iframe-foot {
-      padding: 12px 18px; border-top: 1px solid #e5e7eb;
-      flex-shrink: 0; background: #fafafa;
-    }
-    .pay-iframe-hint {
-      margin: 0 0 8px 0; font-size: .9rem; color: #475569;
-    }
-    .pay-iframe-actions {
-      display: flex; gap: 8px; flex-wrap: wrap;
-    }
-    @media (max-width: 640px) {
-      .pay-iframe-wrap {
-        width: 100vw; height: 100vh; border-radius: 0;
-      }
-      .pay-iframe-head h3 { font-size: .95rem; }
-    }
-  </style>
 
   <footer class="dash-footer">
     <div class="container dash-footer-inner">
