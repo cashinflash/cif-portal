@@ -810,13 +810,13 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
 
     handoff_body = {
         "customerId":               int(cid),
-        # Land on the customer portal home (/) so the customer
-        # navigates through Vergent's full payment flow themselves
-        # (amount → date → summary). Earlier we tried sending them
-        # straight to /payment/loan/paymentsummary/{loan_id} but
-        # Vergent's Cancel button errors out from that endpoint
-        # (no flow back-state when entered mid-flow).
-        "TargetRelativePage":       "/",
+        # Vergent's handoff token is payment-flow-scoped — it bounces
+        # to /error if we send the customer anywhere else (e.g. "/").
+        # Only payment-flow paths work. The summary page is the deepest
+        # one we have a confirmed-working URL for; Cancel on it errors
+        # out (no flow back-state when entering mid-flow), but Submit
+        # works.
+        "TargetRelativePage":       f"/payment/loan/paymentsummary/{loan_id}",
         "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
     }
     handoff_headers = {
