@@ -170,6 +170,40 @@ This works but it's a worse UX than what every other partner
 portal offers, and customers get prompted to sign in again
 (separate username + 2FA from our portal sign-in).
 
+## Handoff URL whitelist gaps
+
+Three concrete issues we've hit empirically:
+
+1. **`TargetRelativePage = "/"` redirects to `/error`.** Same for
+   any non-payment-flow URL. The handoff token appears to be
+   scoped to a strict whitelist of payment-flow paths only.
+
+2. **`TargetRelativePage = "/payment/loan/makepayment/<loanId>"`
+   redirects to `/error`** — even though that URL works fine when
+   the customer navigates to it manually after sign-in. So the
+   whitelist excludes the entry-point of your own pay flow,
+   forcing us to send customers to step 2 (`selectpaymentdate`)
+   or step 3 (`paymentsummary`) directly.
+
+3. **Skipping step 1 breaks state.** When we send a customer to
+   `selectpaymentdate/<loanId>` (step 2) via handoff, Vergent's
+   session has no `paymentType` choice, so the subsequent summary
+   page defaults to the scheduled-installment amount (e.g. $4.65)
+   instead of what the customer actually wanted to pay (e.g. full
+   balance $147.06). The customer can recover by clicking Home
+   and navigating to Make Payment, but it's an unnecessary detour.
+
+   **Either of these would fix it**: (a) accept `makepayment/<loanId>`
+   as a valid `TargetRelativePage`, or (b) accept a query parameter
+   like `?paymentType=payoff` (or `?amount=147.06`) on
+   `selectpaymentdate`/`paymentsummary` so we can pre-set the
+   customer's choice before they land.
+
+4. **`TargetRelativePage` with query string redirects to `/error`.**
+   `/payment/loan/paymentsummary/<loanId>?amount=147.06` fails the
+   whitelist. Looks like a strict equality match rather than a
+   prefix or pattern match.
+
 ---
 
 ## What we're asking for
