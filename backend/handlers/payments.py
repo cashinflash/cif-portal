@@ -803,10 +803,28 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     if loan_id is None:
         return _json_response(400, {"error": "no_loan"})
 
+    # Optional amount the customer pre-selected in our Make Payment box.
+    # We append it as ?amount=<n> to the TargetRelativePage. If Vergent's
+    # summary page honors it, great — the customer doesn't have to
+    # re-enter on Vergent's side. If it ignores the param, no harm.
+    target_amount: Optional[float] = None
+    raw_amount = body.get("amount")
+    if raw_amount is not None:
+        try:
+            n = float(raw_amount)
+            if n > 0:
+                target_amount = round(n, 2)
+        except (TypeError, ValueError):
+            pass
+
     apim_tok = _get_apim_token()
     creds = _get_creds()
     if not (apim_tok and creds):
         return _json_response(502, {"error": "vergent_creds_missing"})
+
+    target_path = f"/payment/loan/paymentsummary/{loan_id}"
+    if target_amount is not None:
+        target_path = f"{target_path}?amount={target_amount:.2f}"
 
     handoff_body = {
         "customerId":               int(cid),
@@ -816,7 +834,7 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
         # loan/makepayment/<id>, and arbitrary other customer-portal
         # URLs all fail. The summary page pre-fills with the loan's
         # current-amount-due; submit works from there.
-        "TargetRelativePage":       f"/payment/loan/paymentsummary/{loan_id}",
+        "TargetRelativePage":       target_path,
         "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
     }
     handoff_headers = {

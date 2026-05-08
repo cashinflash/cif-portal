@@ -119,25 +119,133 @@
       </div>
     </section>
 
-    <!-- Continue-to-payment card -->
+    <!-- Make Payment box — mirrors Vergent's customer-portal makepayment UI
+         so the customer picks their amount in our portal. On click, we mint
+         a handoff URL with the chosen amount appended as ?amount=X and open
+         the new tab. -->
     <section class="dash-card pay-form-card" id="payFormCard" hidden>
-      <h2 style="margin:0 0 8px 0;font-size:1.25rem;">Continue to secure payment</h2>
-      <p style="margin:0 0 20px 0;color:#475569;line-height:1.5;">
-        We'll open Cash in Flash's secure payment page right here. Pick your saved card or bank, confirm the amount, and we'll show your updated balance when you finish.
-      </p>
+      <h2 style="margin:0 0 16px 0;font-size:1.25rem;">Make Payment</h2>
 
-      <div class="pay-trust">
+      <div class="pay-makepayment-header">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="18" rx="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <div>
+          <strong id="payLoanLabel">Loan #—</strong>
+          <small id="payDueLabel">Due on —</small>
+        </div>
+      </div>
+
+      <div class="pay-options">
+        <button type="button" class="pay-option" data-pay-choice="current" id="payOptCurrent" disabled>
+          <span class="pay-option-text">Pay current amount due of <strong data-pay-current-amount>—</strong></span>
+          <span class="pay-option-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <button type="button" class="pay-option" data-pay-choice="full" id="payOptFull" disabled>
+          <span class="pay-option-text">Pay the full balance of <strong data-pay-full-amount>—</strong></span>
+          <span class="pay-option-arrow" aria-hidden="true">›</span>
+        </button>
+
+        <div class="pay-option pay-option--other" id="payOptOther">
+          <div class="pay-option-other-row">
+            <span class="pay-option-text">Pay other amount</span>
+            <div class="pay-option-other-controls">
+              <div class="pay-option-other-input-wrap">
+                <span class="pay-option-other-prefix">$</span>
+                <input type="number" id="payOtherInput" min="0.01" step="0.01" placeholder="0.00" inputmode="decimal" disabled>
+              </div>
+              <button type="button" class="pay-option-arrow-btn" id="payOptOtherGo" aria-label="Continue with this amount" disabled>›</button>
+            </div>
+          </div>
+          <small class="pay-option-hint">The minimum is <strong data-pay-min-amount>—</strong></small>
+        </div>
+      </div>
+
+      <div class="pay-trust" style="margin-top:18px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        Secured with bank-grade encryption
+        Secured with bank-grade encryption · we'll show the final confirmation before charging
       </div>
 
       <p class="pay-error" id="payError" hidden></p>
 
-      <div class="pay-actions">
-        <button type="button" class="btn-apply" id="payContinueBtn">Continue to secure payment</button>
+      <div class="pay-actions" style="margin-top:14px;">
         <a href="/dashboard.html" class="btn-login">Cancel</a>
       </div>
     </section>
+
+    <style>
+      /* Make Payment box — designed to match Vergent's customer-portal
+         makepayment box so the look is familiar. */
+      .pay-makepayment-header {
+        display: flex; gap: 12px; align-items: flex-start;
+        padding: 12px 14px; border-bottom: 1px solid #e5e7eb;
+        margin-bottom: 16px; color: #1e293b;
+      }
+      .pay-makepayment-header strong { display: block; font-size: 1.05rem; }
+      .pay-makepayment-header small { display: block; color: #64748b; margin-top: 2px; }
+      .pay-options { display: flex; flex-direction: column; gap: 12px; }
+      .pay-option {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px;
+        width: 100%; padding: 18px 20px;
+        background: #fff;
+        border: 1px solid #e5e7eb; border-radius: 12px;
+        font: inherit; text-align: left; color: #0f172a;
+        cursor: pointer; transition: all .15s ease;
+      }
+      button.pay-option:hover:not(:disabled) {
+        border-color: #6b5400; background: #fffaef;
+      }
+      button.pay-option:disabled { cursor: progress; opacity: .6; }
+      .pay-option-text { flex: 1; line-height: 1.4; }
+      .pay-option-text strong { color: #0f172a; }
+      .pay-option-arrow {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px;
+        background: #facc15; color: #1e293b;
+        border-radius: 8px; font-size: 1.4rem; font-weight: 700;
+        flex-shrink: 0;
+      }
+      .pay-option--other { flex-direction: column; align-items: stretch; gap: 8px; }
+      .pay-option-other-row {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px;
+      }
+      .pay-option-other-controls {
+        display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+      }
+      .pay-option-other-input-wrap {
+        display: inline-flex; align-items: center;
+        background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+        padding: 6px 10px; gap: 4px;
+      }
+      .pay-option-other-input-wrap:focus-within { border-color: #6b5400; }
+      .pay-option-other-prefix { color: #64748b; font-weight: 500; }
+      .pay-option-other-input-wrap input {
+        border: 0; outline: 0; width: 80px; font: inherit;
+        background: transparent; color: #0f172a;
+      }
+      .pay-option-arrow-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px; background: #facc15; color: #1e293b;
+        border: 0; border-radius: 8px;
+        font-size: 1.4rem; font-weight: 700; cursor: pointer;
+        transition: opacity .15s ease;
+      }
+      .pay-option-arrow-btn:disabled {
+        opacity: .35; cursor: not-allowed;
+      }
+      .pay-option-hint { color: #64748b; font-size: .85rem; }
+      .pay-option-hint strong { color: #0f172a; }
+      @media (max-width: 520px) {
+        .pay-option-other-row { flex-direction: column; align-items: stretch; }
+        .pay-option-other-controls { justify-content: flex-end; }
+      }
+    </style>
 
     <!-- Waiting state — shown after customer clicks Continue and the
          secure payment page opens in a new tab. -->
