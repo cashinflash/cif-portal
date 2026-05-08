@@ -83,7 +83,6 @@
     refreshing: false,
     initialBalance: null,    // captured before opening the new tab
     lastHandoffUrl: null,
-    minimumAmount: 0,
   };
 
   // ---------- Loan summary ----------
@@ -115,75 +114,27 @@
       const pill = qs('[data-pay-loan-status]', card);
       if (pill) pill.textContent = loan.status || 'Current';
       if (body) body.hidden = false;
-
-      // Populate the Make Payment box with this loan's amounts.
-      populateMakePaymentBox(loan);
       return loan;
     });
   }
 
-  // ---------- Make Payment box ----------
-  function populateMakePaymentBox(loan) {
-    if (!loan) return;
-    const current = Number(loan.nextDueAmount || 0);
-    // Vergent's "full balance" is what they show as the payoff amount.
-    const full = Number(loan.payoffAmount || loan.balance || 0);
-    // Vergent enforces a minimum payment equal to the current amount due.
-    const minimum = current > 0 ? current : 0;
-    state.minimumAmount = minimum;
-
-    setText(qs('#payLoanLabel'), 'Loan #' + (loan.publicId || loan.id || '—'));
-    setText(qs('#payDueLabel'),
-      loan.nextDueDate ? ('Due on ' + formatDate(loan.nextDueDate)) : '');
-
-    const curEl = qs('[data-pay-current-amount]');
-    const fullEl = qs('[data-pay-full-amount]');
-    const minEl = qs('[data-pay-min-amount]');
-    if (curEl) curEl.textContent = money(current);
-    if (fullEl) fullEl.textContent = money(full);
-    if (minEl) minEl.textContent = money(minimum);
-
-    const optCurrent = qs('#payOptCurrent');
-    const optFull = qs('#payOptFull');
-    const otherInput = qs('#payOtherInput');
-    const otherGo = qs('#payOptOtherGo');
-
-    if (optCurrent) optCurrent.disabled = !(current > 0);
-    if (optFull) optFull.disabled = !(full > 0);
-    if (otherInput) {
-      otherInput.disabled = false;
-      otherInput.min = minimum > 0 ? String(minimum) : '0.01';
-      otherInput.placeholder = minimum > 0 ? minimum.toFixed(2) : '0.00';
-    }
-    if (otherGo) otherGo.disabled = true;
-  }
-
   // ---------- Open Vergent's secure payment page in a new tab ----------
-  function startPayment(chosenAmount, sourceBtn) {
+  function startPayment() {
     if (state.submitting) return;
+    const btn = qs('#payContinueBtn');
     const errEl = qs('#payError');
     if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
     state.submitting = true;
-
-    // Visual: dim every option button while we're minting the URL.
-    const allOptionBtns = [qs('#payOptCurrent'), qs('#payOptFull'), qs('#payOptOtherGo')].filter(Boolean);
-    allOptionBtns.forEach(function (b) { b.disabled = true; });
-    if (sourceBtn) {
-      sourceBtn.dataset._origText = sourceBtn.textContent;
-      // Don't change text on the arrow buttons (they're just "›") —
-      // the visual disabled state is enough.
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Opening secure page…';
     }
 
     state.initialBalance = state.loan ? Number(state.loan.balance) : null;
 
-    const reqBody = { loanId: state.loan && state.loan.id };
-    if (chosenAmount && chosenAmount > 0) {
-      reqBody.amount = Number(chosenAmount.toFixed(2));
-    }
-
     api('/api/my-payment', {
       method: 'POST',
-      body: reqBody,
+      body: { loanId: state.loan && state.loan.id },
     }).then(function (res) {
       const url = res && res.handoffUrl;
       if (!url) throw new Error('no_url');
@@ -199,8 +150,10 @@
       showError(code);
     }).finally(function () {
       state.submitting = false;
-      // Re-populate to reset disabled state on the option buttons.
-      if (state.loan) populateMakePaymentBox(state.loan);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Continue to secure payment';
+      }
     });
   }
 
@@ -285,44 +238,8 @@
 
   // ---------- Boot ----------
   document.addEventListener('DOMContentLoaded', function () {
-    // Pay current amount due
-    const optCurrent = qs('#payOptCurrent');
-    if (optCurrent) optCurrent.addEventListener('click', function () {
-      const amount = state.loan && Number(state.loan.nextDueAmount);
-      if (amount > 0) startPayment(amount, optCurrent);
-    });
-
-    // Pay full balance
-    const optFull = qs('#payOptFull');
-    if (optFull) optFull.addEventListener('click', function () {
-      const loan = state.loan;
-      if (!loan) return;
-      const amount = Number(loan.payoffAmount || loan.balance || 0);
-      if (amount > 0) startPayment(amount, optFull);
-    });
-
-    // Pay other amount — input enables the arrow button when valid.
-    const otherInput = qs('#payOtherInput');
-    const otherGo = qs('#payOptOtherGo');
-    if (otherInput && otherGo) {
-      function validateOther() {
-        const v = Number(otherInput.value);
-        const min = state.minimumAmount || 0.01;
-        otherGo.disabled = !(v >= min - 0.005);
-      }
-      otherInput.addEventListener('input', validateOther);
-      otherInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !otherGo.disabled) {
-          e.preventDefault();
-          otherGo.click();
-        }
-      });
-      otherGo.addEventListener('click', function () {
-        const amount = Number(otherInput.value);
-        const min = state.minimumAmount || 0.01;
-        if (amount >= min - 0.005) startPayment(amount, otherGo);
-      });
-    }
+    const continueBtn = qs('#payContinueBtn');
+    if (continueBtn) continueBtn.addEventListener('click', startPayment);
 
     const doneBtn = qs('#payDoneBtn');
     if (doneBtn) doneBtn.addEventListener('click', refreshAfterPayment);
