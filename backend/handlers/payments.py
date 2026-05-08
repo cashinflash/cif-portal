@@ -810,12 +810,13 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
 
     handoff_body = {
         "customerId":               int(cid),
-        # /payment/loan/makepayment/<loanId> is Vergent's entry point
-        # to the pay flow — three options: pay current amount due,
-        # pay full balance, or pay other amount. From here Cancel works
-        # and the customer can navigate freely. Captured empirically
-        # from a real customer-portal session.
-        "TargetRelativePage":       f"/payment/loan/makepayment/{loan_id}",
+        # Vergent's handoff endpoint has a whitelist of allowed
+        # redirect targets — the only path we've found that doesn't
+        # bounce to /error is the payment-summary page. /, /payment/
+        # loan/makepayment/<id>, and arbitrary other customer-portal
+        # URLs all fail. The summary page pre-fills with the loan's
+        # current-amount-due; submit works from there.
+        "TargetRelativePage":       f"/payment/loan/paymentsummary/{loan_id}",
         "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
     }
     handoff_headers = {
