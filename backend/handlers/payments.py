@@ -810,19 +810,13 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
 
     handoff_body = {
         "customerId":               int(cid),
-        # Vergent's handoff endpoint has a strict whitelist of allowed
-        # redirect targets. URLs we've tried for our tenant:
-        #   /                                       → /error
-        #   /payment/loan/makepayment/<id>          → /error
-        #   /payment/loan/paymentsummary/<id>?...   → /error (no query)
-        #   /payment/loan/paymentsummary/<id>       → worked then errored
-        #     (probably depends on loan's current scheduled-payment
-        #     state — fragile)
-        # /payment/loan/selectpaymentdate/<id> appeared as a referer
-        # in a real customer-portal session, so it's reachable.
-        # Try it as TargetRelativePage — earlier step in Vergent's
-        # pay flow, less likely to depend on transient state.
-        "TargetRelativePage":       f"/payment/loan/selectpaymentdate/{loan_id}",
+        # Vergent's pay flow: makepayment → paymentmethod →
+        # selectpaymentdate → paymentsummary. We can't reach
+        # makepayment (whitelist rejects). Try paymentmethod —
+        # one step earlier than selectpaymentdate, customer picks
+        # their card before continuing. May or may not be
+        # whitelisted; falls back to /error if not.
+        "TargetRelativePage":       f"/payment/loan/paymentmethod/{loan_id}",
         "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
     }
     handoff_headers = {
