@@ -811,15 +811,18 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     handoff_body = {
         "customerId":               int(cid),
         # Vergent's handoff endpoint has a strict whitelist of allowed
-        # redirect targets:
-        #   - /                                          → /error
-        #   - /payment/loan/makepayment/<id>             → /error
-        #   - /payment/loan/paymentsummary/<id>?amount=N → /error
-        #     (any query string makes the URL fail the whitelist)
-        #   - /payment/loan/paymentsummary/<id>          → works
-        # So we ALWAYS land on the summary page with the default
-        # amount (Vergent fills in the loan's current amount due).
-        "TargetRelativePage":       f"/payment/loan/paymentsummary/{loan_id}",
+        # redirect targets. URLs we've tried for our tenant:
+        #   /                                       → /error
+        #   /payment/loan/makepayment/<id>          → /error
+        #   /payment/loan/paymentsummary/<id>?...   → /error (no query)
+        #   /payment/loan/paymentsummary/<id>       → worked then errored
+        #     (probably depends on loan's current scheduled-payment
+        #     state — fragile)
+        # /payment/loan/selectpaymentdate/<id> appeared as a referer
+        # in a real customer-portal session, so it's reachable.
+        # Try it as TargetRelativePage — earlier step in Vergent's
+        # pay flow, less likely to depend on transient state.
+        "TargetRelativePage":       f"/payment/loan/selectpaymentdate/{loan_id}",
         "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
     }
     handoff_headers = {
