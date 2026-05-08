@@ -810,13 +810,12 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
 
     handoff_body = {
         "customerId":               int(cid),
-        # Vergent's handoff token is payment-flow-scoped — it bounces
-        # to /error if we send the customer anywhere else (e.g. "/").
-        # Only payment-flow paths work. The summary page is the deepest
-        # one we have a confirmed-working URL for; Cancel on it errors
-        # out (no flow back-state when entering mid-flow), but Submit
-        # works.
-        "TargetRelativePage":       f"/payment/loan/paymentsummary/{loan_id}",
+        # /payment/loan/makepayment/<loanId> is Vergent's entry point
+        # to the pay flow — three options: pay current amount due,
+        # pay full balance, or pay other amount. From here Cancel works
+        # and the customer can navigate freely. Captured empirically
+        # from a real customer-portal session.
+        "TargetRelativePage":       f"/payment/loan/makepayment/{loan_id}",
         "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
     }
     handoff_headers = {
