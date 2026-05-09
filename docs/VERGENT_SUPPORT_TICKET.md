@@ -140,7 +140,42 @@ your own customer portal calls):
 
 **Result:** HTTP 404. Endpoint is not exposed on the direct host.
 
-### 6. `/api/authenticate/handoff/create` `token` field
+### 6. v2 `POST /api/CustomerPortal/Authenticate` (the non-Cognito sibling)
+Tested via Swagger UI on the direct host
+(`https://api-external.vergentlms.com`) with a real customer-portal
+username + password:
+
+```json
+POST /api/CustomerPortal/Authenticate
+Content-Type: application/json
+
+{ "userName": "<real customer username>", "password": "<real password>" }
+```
+
+**Result:** HTTP 500 `DependencyResolutionException` — same family of
+error as #3, but on a different concrete type:
+
+```json
+{
+  "ErrorMessage": "An exception was thrown while activating
+  Vergent.Lms.Api.Customers.Domain.Implementation.CustomerDomain ->
+  Vergent.Lms.Api.ExternalProvider.LegacyApi.VergentCustomerProvider.",
+  "ErrorType": "DependencyResolutionException",
+  "CorrelationId": "dd6ccf14-8c51-4363-855a-4c7be28fa788"
+}
+```
+
+**This is critical evidence.** `/Authenticate` is a pure auth
+endpoint — no customer context to resolve, no payment processor to
+involve. The fact that it ALSO fails at DI activation
+(`VergentCustomerProvider` can't be instantiated) for our tenant
+suggests the entire `Vergent.Lms.Api.Customers.Domain` chain is
+mis-configured for CompanyId `386`. Every `/api/CustomerPortal/*`
+endpoint we've tried fails the same way (different concrete
+types in the activation chain — `CustomerDomain` here,
+`VergentDataHelperProvider` in #3 — but same root cause).
+
+### 7. `/api/authenticate/handoff/create` `token` field
 Tried using the `token` field in the handoff response as a customer
 JWT for `CreditCardPayment`:
 
@@ -148,7 +183,7 @@ JWT for `CreditCardPayment`:
 When we send it as a Bearer token to `CreditCardPayment` we get the
 same `DependencyResolutionException` from #3.
 
-### 7. Customer portal sign-in (email + 2FA code)
+### 8. Customer portal sign-in (email + 2FA code)
 The only customer-scoped JWT we can get is by completing the email
 + 2FA sign-in in a real browser. We can't replicate that flow from
 a Lambda — we don't have the customer's email or SMS to capture
@@ -208,21 +243,34 @@ Three concrete issues we've hit empirically:
 
 ## What we're asking for
 
-Either of these would unblock us — we don't need both:
+The pattern across #3, #4, #5, and #6 is consistent: **every
+`/api/CustomerPortal/*` endpoint fails at DI activation for our
+tenant (CompanyId `386`)**, including pure auth endpoints with
+no customer context. The same v2 surface works fine for your
+own customer portal at `cashinflash.my.vergentlms.com`. Something
+in our tenant's DI registration is broken.
 
-**Option A: Fix `AuthenticateCognito`.** Make `POST /api/CustomerPortal/
+Any one of these would unblock us — we don't need all three:
+
+**Option A: Fix the CustomerPortal DI graph for tenant 386.** The
+`VergentCustomerProvider` and `VergentDataHelperProvider`
+activation failures suggest a missing tenant-level configuration
+binding. Once those resolve, both `/Authenticate` and
+`CreditCardPayment` should start working for us.
+
+**Option B: Fix `AuthenticateCognito`.** Make `POST /api/CustomerPortal/
 AuthenticateCognito` (on whichever host you prefer) return a
 customer-scoped JWT for the customer in the supplied Cognito ID
 token. Once we have that JWT we can call your existing
 `CreditCardPayment` endpoint exactly the way your own portal does.
 
-**Option B: Expose a server-to-server charge endpoint.** Anything
+**Option C: Expose a server-to-server charge endpoint.** Anything
 we can call with our service APIM token + customerId + cardId +
 amount that actually charges the card and posts the payment to
 the loan. The schema doesn't matter — we'll match whatever you
 give us.
 
-If there's a third option (a partner-portal SDK, a different
+If there's a fourth option (a partner-portal SDK, a different
 admin endpoint, etc.) we haven't found yet, please point us at
 the docs.
 
@@ -232,7 +280,10 @@ the docs.
 
 - DependencyResolutionException correlation IDs:
   `4c8c64b7-a6b8-4690-8890-6c6fccebb7cf`,
-  `48a8928a-d987-4324-8144-408f0b2792ec`
+  `48a8928a-d987-4324-8144-408f0b2792ec`,
+  `dd6ccf14-8c51-4363-855a-4c7be28fa788` (this one from
+  `/api/CustomerPortal/Authenticate` — pure auth, no customer
+  context, still fails at DI activation)
 - Test customer: `601488`
 - Test loan: `4830592`
 - Our service APIM `x-api-key` and JWT auth flow are working — we
