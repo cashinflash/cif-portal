@@ -929,10 +929,70 @@ def get_payment_config(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# One-shot diagnostic — POST /api/MobileApi/PostPaymentAndRefi
+# ─────────────────────────────────────────
+# Body shape from the v1 PDF (page 214). MobileApi is a separate
+# controller from V1Controller, so this avoids the line-3413
+# NullReferenceException that breaks /V1/PostCustomerLoanPayment
+# for our tenant. Same v1 service Token auth as every other v1 call
+# we make. If this returns 200 + a TransactionId, we have a working
+# in-portal charge path — wire post_payment to call this and delete
+# the handoff flow.
+#
+# Invoke directly (bypassing API Gateway):
+#   aws lambda invoke --function-name cif-portal-payments-dev \
+#     --payload '{"probe":"mobileapi-payment","loanId":4830592,
+#                 "cardId":237669,"amount":1.00,"storeId":618}' \
+#     /tmp/probe.json
+def _probe_mobileapi_payment(event: Dict[str, Any]) -> Dict[str, Any]:
+    from handlers import loans as _loans
+    # Force token + service userId fetch so _v1_user_id is populated.
+    _get_v1_token()
+    user_id = _loans._v1_user_id or 0
+
+    body = {
+        "CompanyId": VERGENT_COMPANY_ID,
+        "StoreId": int(event.get("storeId") or 618),
+        "UserId": user_id,
+        "HeaderId": int(event["loanId"]),
+        "PaymentInfo": {
+            "PaymentDate": event.get("paymentDate") or "2026-05-09T00:00:00Z",
+            "PaymentAmount": float(event.get("amount") or 1.00),
+            "PaymentMethod": {"Type": "Card", "CardId": int(event["cardId"])},
+            "PaymentSource": 0,
+            "InstrumentNumber": "",
+            "ChangeDue": 0,
+            "SelectedCoupon": None,
+            "CouponAmount": 0,
+        },
+    }
+    log.info("[PROBE] POST /api/MobileApi/PostPaymentAndRefi body=%s",
+             json.dumps({**body, "PaymentInfo": {**body["PaymentInfo"]}}))
+    status, parsed, raw = _v1_request(
+        "POST", "/api/MobileApi/PostPaymentAndRefi", body=body)
+    log.info("[PROBE] status=%s parsed=%s raw_head=%s",
+             status, json.dumps(parsed)[:500] if parsed else None,
+             (raw or "")[:500])
+    return {
+        "probe": "mobileapi-payment",
+        "request": {"path": "/api/MobileApi/PostPaymentAndRefi",
+                    "method": "POST", "body": body,
+                    "userIdSource": "loans._v1_user_id",
+                    "userIdValue": user_id},
+        "response": {"status": status, "parsed": parsed,
+                     "raw_head": (raw or "")[:1000]},
+    }
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     try:
+        # Direct-invoke probe path (no API Gateway).
+        if event.get("probe") == "mobileapi-payment":
+            return _probe_mobileapi_payment(event)
+
         http = (event.get("requestContext") or {}).get("http") or {}
         method = (http.get("method") or event.get("httpMethod") or "GET").upper()
         if method == "OPTIONS":
