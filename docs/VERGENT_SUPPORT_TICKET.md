@@ -41,6 +41,33 @@ Either is fine. We currently have neither.
 
 ## What we tried (every documented path)
 
+## Summary: three different controllers all NullRef
+
+**Headline finding:** every payment-posting endpoint we can reach
+crashes with NullReferenceException at a specific line number in
+your codebase, OR with DependencyResolutionException at DI activation.
+The bugs are scattered across three different controllers, suggesting
+this is tenant-config related rather than per-endpoint.
+
+| Endpoint | HTTP | Vergent crash site |
+|---|---|---|
+| `POST /V1/PostCustomerLoanPayment` | 500 | `V1Controller.vb` line **3413** NullRef |
+| `PUT  /V1/PutCustomerLoanPayment/{id}` | 500 | `V1Controller.vb` line **3473** NullRef |
+| `POST /MobileApi/PostPaymentAndRefi` | 500 | `MobileApiController.vb` line **1279** NullRef |
+| `POST /CustomerPortal/Loans/Payments/CreditCardPayment` | 500 | DI: `CustomerDomain → VergentDataHelperProvider` |
+| `POST /CustomerPortal/Authenticate` | 500 | DI: `CustomerDomain → VergentCustomerProvider` |
+| `POST /CustomerPortal/AuthenticateCognito` | 500 | NullRef (correlation IDs below) |
+
+Working v1 endpoints we use successfully every day for the same
+tenant: `/V1/{cid}/loans`, `/V1/GetCustomerCards`, `/V1/GetCustomerBanks`,
+`/V1/GetCustomer/{id}`, `/V1/GetCustomerLoanHistory`,
+`/V1/customer/{cid}/docs/loan/{hdr}`, `/V1/docs/{docId}/download`,
+`/api/authenticate`, `/api/authenticate/handoff/create`. So the
+service-token auth and tenant config are partly working — just not
+for any payment-posting code path.
+
+---
+
 ### 1. v1 `POST /V1/PostCustomerLoanPayment`
 Documented as the v1 charge endpoint. Body shape per the v1 PDF:
 ```json
@@ -183,7 +210,55 @@ JWT for `CreditCardPayment`:
 When we send it as a Bearer token to `CreditCardPayment` we get the
 same `DependencyResolutionException` from #3.
 
-### 8. Customer portal sign-in (email + 2FA code)
+### 8. v1 `PUT /api/V1/PutCustomerLoanPayment/{id}`
+PUT variant of #1, sibling method in `V1Controller`. We hoped a
+different action method might avoid the line-3413 crash:
+
+```
+PUT /api/V1/PutCustomerLoanPayment/4830592
+Token: <service token>
+Content-Type: application/json
+{ ...same body shape as #1... }
+```
+
+**Result:** HTTP 500 NullReferenceException at
+`eCashWebAPIV1.Controllers.V1Controller.PutCustomerLoanPayment(Int32 id, PaymentInfo value)`
+line **3473** of `V1Controller.vb`. Sibling bug to #1, very
+similar surface.
+
+### 9. v1 `POST /api/MobileApi/PostPaymentAndRefi`
+Listed in the v1 PDF as "Post payment to a loan" — different
+controller (`MobileApiController`, not `V1Controller`), so we
+expected a clean code path. Body shape from PDF page 214:
+`{CompanyId, StoreId, UserId, HeaderId, PaymentInfo}` where
+`PaymentInfo` has the same fields as #1's flat body.
+
+**Result:** HTTP 500 NullReferenceException at
+`eCashWebAPIV1.Controllers.MobileApiController.PostPaymentAndRefi(MobileRefiDto value)`
+line **1279** of `MobileApiController.vb`. Tried with `Refi: null`,
+`RefiInfo: null`, `RefinanceInfo: null`, `IsRefinance: false` at
+top level (in case the controller dereferences a refi field even
+when not refinancing) — same crash, no field combination fixed it.
+
+### 10. v1 `POST /api/V1/PostBankPayment`
+Tried as a parallel path to #1. **Result:** HTTP 200, but body
+returns `{"Errors": ["No payments found"]}`. Reading the PDF
+schema (page 421 in the published v1 docs at
+`https://training.vergentlms.com/api/swagger/ui/index`), this
+endpoint is for **referral payouts** (`[{ReferralId, PaymentAmount,
+PaymentDate, InstrumentId}]`), not loan charges. Not applicable
+to our use case.
+
+### 11. v1 settlement endpoints
+- `POST /api/V1/loan/settlementpayment` — body `{HeaderId,
+  PaymentDate, SettlementAmount, StoreId}`, no card field.
+- `POST /api/V1/PaymentPlan/{loanId}/CreateSettlement` — body
+  `{settlementAmount, waiveBalance}`, no card field.
+
+Both are accounting endpoints to record a settled balance; neither
+initiates a card charge. Not applicable.
+
+### 12. Customer portal sign-in (email + 2FA code)
 The only customer-scoped JWT we can get is by completing the email
 + 2FA sign-in in a real browser. We can't replicate that flow from
 a Lambda — we don't have the customer's email or SMS to capture
