@@ -969,13 +969,13 @@ def _probe_mobileapi_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     log.info("[PROBE] POST /api/MobileApi/PostPaymentAndRefi body=%s",
              json.dumps({**body, "PaymentInfo": {**body["PaymentInfo"]}}))
     status, parsed, raw = _v1_request(
-        "POST", "/api/MobileApi/PostPaymentAndRefi", body=body)
+        "POST", "/MobileApi/PostPaymentAndRefi", body=body)
     log.info("[PROBE] status=%s parsed=%s raw_head=%s",
              status, json.dumps(parsed)[:500] if parsed else None,
              (raw or "")[:500])
     return {
         "probe": "mobileapi-payment",
-        "request": {"path": "/api/MobileApi/PostPaymentAndRefi",
+        "request": {"path": "/MobileApi/PostPaymentAndRefi",
                     "method": "POST", "body": body,
                     "userIdSource": "loans._v1_user_id",
                     "userIdValue": user_id},
