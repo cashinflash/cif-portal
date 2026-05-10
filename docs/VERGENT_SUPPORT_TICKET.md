@@ -283,7 +283,10 @@ the docs.
   `48a8928a-d987-4324-8144-408f0b2792ec`,
   `dd6ccf14-8c51-4363-855a-4c7be28fa788` (this one from
   `/api/CustomerPortal/Authenticate` — pure auth, no customer
-  context, still fails at DI activation)
+  context, still fails at DI activation),
+  `d4d10e15-e9e1-4e8b-afee-6e88981b4daf` (also from
+  `CreditCardPayment`, retested 2026-05-10 — same activation
+  chain, different correlation, confirms reproducibility)
 - Test customer: `601488`
 - Test loan: `4830592`
 - Our service APIM `x-api-key` and JWT auth flow are working — we
