@@ -950,37 +950,49 @@ def _probe_mobileapi_payment(event: Dict[str, Any]) -> Dict[str, Any]:
     _get_v1_token()
     user_id = _loans._v1_user_id or 0
 
-    body = {
-        "CompanyId": VERGENT_COMPANY_ID,
-        "StoreId": int(event.get("storeId") or 618),
-        "UserId": user_id,
-        "HeaderId": int(event["loanId"]),
-        "PaymentInfo": {
-            "PaymentDate": event.get("paymentDate") or "2026-05-09T00:00:00Z",
-            "PaymentAmount": float(event.get("amount") or 1.00),
-            "PaymentMethod": {"Type": "Card", "CardId": int(event["cardId"])},
-            "PaymentSource": 0,
-            "InstrumentNumber": "",
-            "ChangeDue": 0,
-            "SelectedCoupon": None,
-            "CouponAmount": 0,
-        },
-    }
-    log.info("[PROBE] POST /api/MobileApi/PostPaymentAndRefi body=%s",
-             json.dumps({**body, "PaymentInfo": {**body["PaymentInfo"]}}))
+    # Path + method are overrideable via the test event so we can
+    # iterate body shapes and try other endpoints without redeploying.
+    path = event.get("path") or "/MobileApi/PostPaymentAndRefi"
+    method = (event.get("method") or "POST").upper()
+
+    # Body precedence: if event has a `body` field, use it verbatim.
+    # Otherwise auto-build the standard PostPaymentAndRefi body. The
+    # placeholder "{{userId}}" inside a custom body is substituted with
+    # the real service user id so callers don't have to type it.
+    custom_body = event.get("body")
+    if isinstance(custom_body, dict):
+        body = json.loads(json.dumps(custom_body).replace("{{userId}}", str(user_id)))
+    else:
+        body = {
+            "CompanyId": VERGENT_COMPANY_ID,
+            "StoreId": int(event.get("storeId") or 618),
+            "UserId": user_id,
+            "HeaderId": int(event["loanId"]),
+            "PaymentInfo": {
+                "PaymentDate": event.get("paymentDate") or "2026-05-09T00:00:00Z",
+                "PaymentAmount": float(event.get("amount") or 1.00),
+                "PaymentMethod": {"Type": "Card", "CardId": int(event["cardId"])},
+                "PaymentSource": 0,
+                "InstrumentNumber": "",
+                "ChangeDue": 0,
+                "SelectedCoupon": None,
+                "CouponAmount": 0,
+            },
+        }
+
+    log.info("[PROBE] %s %s body=%s", method, path, json.dumps(body)[:1500])
     status, parsed, raw = _v1_request(
-        "POST", "/MobileApi/PostPaymentAndRefi", body=body)
+        method, path, body=body if method != "GET" else None)
     log.info("[PROBE] status=%s parsed=%s raw_head=%s",
              status, json.dumps(parsed)[:500] if parsed else None,
              (raw or "")[:500])
     return {
         "probe": "mobileapi-payment",
-        "request": {"path": "/MobileApi/PostPaymentAndRefi",
-                    "method": "POST", "body": body,
+        "request": {"path": path, "method": method, "body": body,
                     "userIdSource": "loans._v1_user_id",
                     "userIdValue": user_id},
         "response": {"status": status, "parsed": parsed,
-                     "raw_head": (raw or "")[:1000]},
+                     "raw_head": (raw or "")[:2000]},
     }
 
 
