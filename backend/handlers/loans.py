@@ -104,7 +104,13 @@ V1_BASE = os.environ.get(
 APIM_BASE = os.environ.get(
     "VERGENT_APIM_BASE_URL", "https://prod.apim.vergentlms.com/external/shared"
 ).rstrip("/")
-VERGENT_SECRET_ARN = os.environ["VERGENT_SECRET_ARN"]
+# Tolerate missing VERGENT_SECRET_ARN at import time — the loans
+# Lambda will always have it set, but other Lambdas that import
+# this module (payments, etc.) may not yet have caught up to a
+# provisioning change. A missing env var produces a clear runtime
+# error at the call site (_get_v1_token), not an opaque 500 from
+# API-Gateway's default body on a failed Lambda construction.
+VERGENT_SECRET_ARN = os.environ.get("VERGENT_SECRET_ARN", "")
 HANDOFF_AUTHORITY = os.environ.get("VERGENT_HANDOFF_AUTHORITY", "cashinflash.apply.vergentlms.com")
 
 _secrets = boto3.client("secretsmanager")

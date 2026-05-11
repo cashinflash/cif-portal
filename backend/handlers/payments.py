@@ -1046,6 +1046,16 @@ def _probe_customerportal_flow(event: Dict[str, Any]) -> Dict[str, Any]:
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
+    # Unconditional one-line breadcrumb at request entry so a
+    # CloudWatch tail always shows that the handler reached the
+    # body even if downstream code raises. Prior debugging hit a
+    # case where API Gateway's default 500 body fired with NO
+    # corresponding log line in the payments Lambda's log group —
+    # this print() makes that scenario distinguishable from "Lambda
+    # crashed before any code ran" (import error / handler-init).
+    http_for_log = (event.get("requestContext") or {}).get("http") or {}
+    print(f"[payments] entry path={http_for_log.get('path')!r} "
+          f"method={http_for_log.get('method')!r}")
     try:
         # Direct-invoke probe path (no API Gateway, no CORS).
         if event.get("probe") == "customerportal-flow":
