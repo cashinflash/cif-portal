@@ -810,13 +810,21 @@ def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
 
     handoff_body = {
         "customerId":               int(cid),
-        # Vergent's pay flow: makepayment → paymentmethod →
-        # selectpaymentdate → paymentsummary. We can't reach
-        # makepayment (whitelist rejects). Try paymentmethod —
-        # one step earlier than selectpaymentdate, customer picks
-        # their card before continuing. May or may not be
-        # whitelisted; falls back to /error if not.
-        "TargetRelativePage":       f"/payment/loan/paymentmethod/{loan_id}",
+        # Vergent's whitelist for handoff redirects is restrictive on
+        # payment subpaths. Per the docstring above + a 2026-05 test:
+        #   /payment/loan/makepayment/{id}    → whitelist rejects → /error
+        #   /payment/loan/paymentmethod/{id}  → whitelist rejects → /error
+        # The customer-portal ROOT, however, is always allowed because
+        # it's the natural post-auth landing. Send them there; they
+        # land signed in on their Vergent dashboard and click
+        # "Make a Payment" once to start the flow. One extra click
+        # vs. a guaranteed-broken /error redirect.
+        #
+        # If/when Vergent whitelists a specific payment subpath for
+        # us, swap this back to "/payment/loan/makepayment/{loan_id}"
+        # and test (the customer's handoff will land directly on the
+        # pay page).
+        "TargetRelativePage":       "/",
         "ExpectedReferrerAuthority": "cashinflash.my.vergentlms.com",
     }
     handoff_headers = {
