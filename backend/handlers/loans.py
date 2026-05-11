@@ -3261,7 +3261,12 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
 # index keyed on vergentCustomerId to make this O(1).
 
 def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
-    """GET /api/admin/customers/search?q=<term>&source=portal|vergent"""
+    """GET /api/admin/customers/search?q=<term>&source=portal|vergent
+
+    For source=portal an empty q is allowed and returns the first
+    100 portal users (no filter). For source=vergent an empty q
+    returns 400 — listing the LMS's full base would be ~50k+ rows.
+    """
     claims = _claims(event)
     err = plaid._require_admin_group(claims)
     if err:
@@ -3269,8 +3274,6 @@ def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
 
     qs = event.get("queryStringParameters") or {}
     q = ((qs or {}).get("q") or "").strip()
-    if not q:
-        return _json_response(400, {"error": "missing_q"})
 
     # Default to portal — the safer choice. Operators usually
     # want portal customers; the Vergent tab is for cross-checking
@@ -3280,23 +3283,73 @@ def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
         source = "portal"
 
     if source == "vergent":
-        rows = _search_vergent_customers(q)
+        if not q:
+            return _json_response(400, {"error": "missing_q"})
+        rows, err_detail = _search_vergent_customers(q)
     else:
-        rows = _search_portal_customers(q)
+        rows, err_detail = _search_portal_customers(q)
 
-    return _json_response(200, {"q": q, "source": source, "results": rows})
+    body = {"q": q, "source": source, "results": rows}
+    if err_detail:
+        # Surface the upstream error so the dashboard can display
+        # it instead of silently rendering "no matches" on what is
+        # actually a permissions / API failure.
+        body["error"] = err_detail
+    return _json_response(200, body)
 
 
-def _search_portal_customers(q: str) -> List[Dict[str, Any]]:
-    """Cognito User Pool search. Returns trimmed customer rows
-    sourced from Cognito attributes + custom:vergentCustomerId."""
+def _search_portal_customers(q: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Cognito User Pool search. Returns (rows, error_detail). When
+    `q` is empty, lists all portal users (capped at 100). When `q`
+    is digits, falls back to a full pool scan via auth_mfa's
+    helper. Otherwise issues a Cognito ListUsers Filter call."""
+    # Empty q → list-all mode. Used by the Customers tab to show
+    # every portal-registered user when no search is in progress.
+    if not q:
+        rows: List[Dict[str, Any]] = []
+        token: Optional[str] = None
+        try:
+            while len(rows) < 100:
+                kwargs: Dict[str, Any] = {
+                    "UserPoolId": auth_mfa.USER_POOL_ID,
+                    "Limit": 60,
+                }
+                if token:
+                    kwargs["PaginationToken"] = token
+                resp = auth_mfa.cognito.list_users(**kwargs)
+                for u in resp.get("Users") or []:
+                    attrs = {a["Name"]: a["Value"]
+                             for a in u.get("Attributes", [])}
+                    rows.append(_shape_cognito_customer_row({
+                        "Username": u.get("Username"),
+                        "Attrs": attrs,
+                        "Status": u.get("UserStatus"),
+                        "UserCreateDate": u.get("UserCreateDate"),
+                    }))
+                    if len(rows) >= 100:
+                        break
+                token = resp.get("PaginationToken")
+                if not token:
+                    break
+        except Exception as exc:
+            log.warning("portal customer list-all list_users failed: %s", exc)
+            return rows, f"{type(exc).__name__}: {str(exc)[:200]}"
+        # Sort newest signups first so the most recent registrations
+        # are visible at the top.
+        rows.sort(key=lambda r: r.get("signupAt") or "", reverse=True)
+        return rows, None
+
     digits_only = q.isdigit()
 
     if digits_only and 4 <= len(q) <= 8:
-        user = auth_mfa._find_cognito_user_by_vergent_id(q)
+        try:
+            user = auth_mfa._find_cognito_user_by_vergent_id(q)
+        except Exception as exc:
+            log.warning("portal cid scan failed q=%s: %s", q, exc)
+            return [], f"{type(exc).__name__}: {str(exc)[:200]}"
         if not user:
-            return []
-        return [_shape_cognito_customer_row(user)]
+            return [], None
+        return [_shape_cognito_customer_row(user)], None
 
     safe_q = q.replace('"', "")
     if "@" in q:
@@ -3313,7 +3366,7 @@ def _search_portal_customers(q: str) -> List[Dict[str, Any]]:
     except Exception as exc:
         log.warning("portal customer search list_users failed filter=%r: %s",
                     cognito_filter, exc)
-        return []
+        return [], f"{type(exc).__name__}: {str(exc)[:200]}"
 
     rows: List[Dict[str, Any]] = []
     for u in resp.get("Users") or []:
@@ -3324,17 +3377,16 @@ def _search_portal_customers(q: str) -> List[Dict[str, Any]]:
             "Status": u.get("UserStatus"),
             "UserCreateDate": u.get("UserCreateDate"),
         }))
-    return rows
+    return rows, None
 
 
-def _search_vergent_customers(q: str) -> List[Dict[str, Any]]:
-    """Vergent v1 API search. Returns up to 25 trimmed rows from
-    the LMS's full customer base (whether or not they have a
-    portal account)."""
+def _search_vergent_customers(q: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Vergent v1 API search. Returns (rows, error_detail). Capped
+    at 25 rows."""
     tok = _get_v1_token()
     if not tok:
         log.warning("vergent customer search: no v1 token")
-        return []
+        return [], "vergent_unavailable"
 
     digits_only = q.isdigit()
     if digits_only and 4 <= len(q) <= 8:
@@ -3342,8 +3394,8 @@ def _search_vergent_customers(q: str) -> List[Dict[str, Any]]:
         status, body, _raw = _http(
             f"{V1_BASE}{path}", "GET", headers={"Token": tok})
         if status != 200 or not isinstance(body, dict):
-            return []
-        return [_shape_vergent_customer_row(body)]
+            return [], None
+        return [_shape_vergent_customer_row(body)], None
 
     if "@" in q:
         path = f"/V1/GetCustomers?email={urllib.parse.quote(q)}"
@@ -3355,7 +3407,7 @@ def _search_vergent_customers(q: str) -> List[Dict[str, Any]]:
     if status != 200:
         log.warning("vergent customer search v1 status=%s path=%s",
                     status, path)
-        return []
+        return [], f"vergent_v1_status_{status}"
 
     items = body if isinstance(body, list) else None
     if isinstance(body, dict):
@@ -3364,8 +3416,8 @@ def _search_vergent_customers(q: str) -> List[Dict[str, Any]]:
     if not isinstance(items, list):
         items = []
 
-    return [_shape_vergent_customer_row(it) for it in items[:25]
-            if isinstance(it, dict)]
+    return ([_shape_vergent_customer_row(it) for it in items[:25]
+            if isinstance(it, dict)]), None
 
 
 def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
