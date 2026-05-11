@@ -82,11 +82,19 @@ jobs:
             exit 0
           fi
 
-          jq -r '.events[] | "\(.timestamp|tostring)  \(.message|rtrimstr("\n"))"' /tmp/events.json \
-            | while IFS= read -r line; do
-                TS="${line%%  *}"
-                MSG="${line#*  }"
-                # Convert epoch ms to HH:MM:SS UTC
+          # jq replaces embedded newlines in the message with " | "
+          # so each event prints on exactly one line — multi-line
+          # tracebacks + XRAY headers stay on the same row instead
+          # of bleeding into the bash loop as headerless lines that
+          # break `$(( TS / 1000 ))`.
+          jq -r '.events[] | "\(.timestamp|tostring)\t\((.message|rtrimstr("\n")) | gsub("\n"; " | "))"' /tmp/events.json \
+            | while IFS=$'\t' read -r TS MSG; do
+                # Defensive: if TS isn't all digits, print the line
+                # raw and continue. Keeps the loop alive on
+                # unexpected log shapes.
+                case "$TS" in
+                  ''|*[!0-9]*) echo "??:??:??  $TS $MSG"; continue;;
+                esac
                 SECS=$(( TS / 1000 ))
                 HHMMSS=$(date -u -d "@$SECS" +"%H:%M:%S")
                 echo "$HHMMSS  $MSG"
