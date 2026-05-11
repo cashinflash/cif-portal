@@ -3542,6 +3542,14 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return plaid.list_admin_customers(event)
         if path.endswith("/admin/customers/search") and method == "GET":
             return search_admin_customers(event)
+        # Admin impersonation (Phase 3) — mint short-lived tokens so
+        # operators can "View as customer" into the portal frontend.
+        if path.endswith("/admin/impersonate") and method == "POST":
+            from handlers import impersonation
+            return impersonation.mint_token(event)
+        if path.endswith("/admin/end-impersonate") and method == "POST":
+            from handlers import impersonation
+            return impersonation.end_token(event)
         if ("/admin/plaid/customer/" in path
                 and method == "GET"):
             parts = [p for p in path.split("/") if p]
