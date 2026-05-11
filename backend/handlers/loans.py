@@ -180,10 +180,13 @@ def _json_response(status: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _claims(event: Dict[str, Any]) -> Dict[str, Any]:
-    rc = event.get("requestContext") or {}
-    auth = rc.get("authorizer") or {}
-    jwt = auth.get("jwt") or {}
-    return jwt.get("claims") or {}
+    """JWT claims for the request — or, if X-Impersonation-Token is
+    present, synthesized claims for the target customer. See
+    handlers/impersonation.py for the override logic. Each call
+    is cached on the event dict so we only hit DDB once per
+    invocation."""
+    from handlers import impersonation
+    return impersonation.claims_with_impersonation(event)
 
 
 def _customer_id(claims: Dict[str, Any]) -> Optional[str]:
@@ -3487,6 +3490,17 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return {"statusCode": 204, "headers": CORS_HEADERS, "body": ""}
 
         path = http.get("path") or event.get("rawPath") or ""
+
+        # Impersonation write-block: if an admin is viewing as a
+        # customer (X-Impersonation-Token in headers) and the
+        # method mutates state, return 403 before any handler
+        # touches state. Reads pass through unchanged with
+        # synthesized target-customer claims.
+        from handlers import impersonation
+        blocked = impersonation.maybe_block_write(
+            event, impersonation.claims_with_impersonation(event))
+        if blocked:
+            return blocked
 
         if path.endswith("/my-profile") and method == "GET":
             return get_my_profile(event)

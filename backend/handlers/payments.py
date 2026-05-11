@@ -1058,6 +1058,15 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
         path = http.get("path") or event.get("rawPath") or ""
 
+        # Impersonation write-block: block POST/PUT/DELETE when the
+        # caller is acting as another customer via an
+        # X-Impersonation-Token header. See handlers/impersonation.py.
+        from handlers import impersonation
+        blocked = impersonation.maybe_block_write(
+            event, impersonation.claims_with_impersonation(event))
+        if blocked:
+            return blocked
+
         if path.endswith("/my-cards") and method == "GET":
             return get_my_cards(event)
         if path.endswith("/my-cards") and method == "POST":

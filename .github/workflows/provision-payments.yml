@@ -211,6 +211,19 @@ jobs:
             --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":$RESOURCE_LIST}]}"
           echo "IAM policy payments-read-vendor-secrets attached."
 
+          # Phase 3 — let payments read the impersonations table so
+          # X-Impersonation-Token requests resolve to the target
+          # customer instead of falling back to the operator's
+          # admin JWT (which would expose the wrong card data).
+          # Same table the loans Lambda owns; we only need GetItem.
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          IMPERSONATIONS_TABLE_ARN="arn:aws:dynamodb:$AWS_REGION:$ACCT:table/cif-portal-impersonations-dev"
+          aws iam put-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name payments-impersonations-read \
+            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"dynamodb:GetItem\",\"Resource\":\"$IMPERSONATIONS_TABLE_ARN\"}]}"
+          echo "IAM policy payments-impersonations-read attached."
+
           # Drop the older single-secret policy if present (cleanup).
           aws iam delete-role-policy \
             --role-name "$ROLE_NAME" \
@@ -233,6 +246,11 @@ jobs:
           if [ -n "$OMNIAPAY_ARN" ] && [ "$OMNIAPAY_ARN" != "None" ]; then
             NEW_ENV=$(echo "$NEW_ENV" | jq --arg v "$OMNIAPAY_ARN" '. + {OMNIAPAY_SECRET_ARN: $v}')
           fi
+          # Phase 3 — point payments at the same impersonations
+          # table the loans Lambda uses (provisioned by
+          # provision-loans.yml). Defaulted in the handler too,
+          # but explicit env keeps cross-stage configurability.
+          NEW_ENV=$(echo "$NEW_ENV" | jq '. + {IMPERSONATIONS_TABLE: "cif-portal-impersonations-dev"}')
           aws lambda update-function-configuration \
             --function-name "$FN" \
             --environment "{\"Variables\": $NEW_ENV}" \

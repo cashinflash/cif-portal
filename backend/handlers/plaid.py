@@ -421,10 +421,11 @@ ADMIN_GROUP_NAME = "cif-admin"
 
 
 def _claims_from_event(event: Dict[str, Any]) -> Dict[str, Any]:
-    """JWT claims live under requestContext.authorizer.jwt.claims
-    on HttpApi events with a JWT authorizer attached."""
-    return (((event.get("requestContext") or {}).get("authorizer") or {})
-            .get("jwt", {}).get("claims") or {})
+    """JWT claims for the request — or, if X-Impersonation-Token is
+    present, synthesized claims for the target customer. See
+    handlers/impersonation.py for the override logic."""
+    from handlers import impersonation
+    return impersonation.claims_with_impersonation(event)
 
 
 def _require_admin_group(claims: Dict[str, Any]) -> Optional[Dict[str, Any]]:

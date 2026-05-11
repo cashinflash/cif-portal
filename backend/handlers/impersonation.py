@@ -217,6 +217,76 @@ def lookup_token(token: str) -> Optional[Dict[str, Any]]:
     }
 
 
+def claims_with_impersonation(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop-in replacement for the per-Lambda _claims() helper.
+
+    Returns the JWT claims for the request — but if the request
+    carries a valid X-Impersonation-Token header, returns
+    synthesized claims for the target customer instead. The
+    returned dict includes a `_impersonation` key when synthesized
+    so the caller can detect this state for the write-block check
+    below.
+
+    Result is cached on the event dict so repeated calls within
+    the same Lambda invocation skip the DDB lookup."""
+    cached = event.get("_impersonation_resolved_claims")
+    if cached is not None:
+        return cached
+
+    headers = {(k or "").lower(): v
+               for k, v in (event.get("headers") or {}).items()}
+    token = headers.get("x-impersonation-token") or ""
+    info = lookup_token(token) if token else None
+
+    if info:
+        claims: Dict[str, Any] = {
+            "sub": info["targetCognitoSub"] or "",
+            "email": info["targetEmail"] or "",
+            "custom:vergentCustomerId": info["targetCustomerId"] or "",
+            "given_name": info.get("targetFirstName") or "",
+            "family_name": info.get("targetLastName") or "",
+            "_impersonation": info,
+        }
+    else:
+        rc = event.get("requestContext") or {}
+        auth = rc.get("authorizer") or {}
+        jwt = auth.get("jwt") or {}
+        claims = dict(jwt.get("claims") or {})
+
+    event["_impersonation_resolved_claims"] = claims
+    return claims
+
+
+def maybe_block_write(event: Dict[str, Any],
+                       claims: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return a 403 response dict if the request is impersonated
+    AND the HTTP method is a write (POST/PUT/PATCH/DELETE),
+    otherwise None.
+
+    The "End impersonation" endpoint is exempt — the in-portal
+    banner must be able to revoke its own token. Admin endpoints
+    (the cif-admin operator session) shouldn't ever carry an
+    impersonation token, so they fall through this check
+    untouched."""
+    if not claims.get("_impersonation"):
+        return None
+    http = (event.get("requestContext") or {}).get("http") or {}
+    method = (http.get("method") or "").upper()
+    path = http.get("path") or ""
+    if method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return None
+    if path.endswith("/admin/end-impersonate"):
+        return None
+    return {
+        "statusCode": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "error": "impersonation_read_only",
+            "message": "This action is disabled while viewing as customer.",
+        }),
+    }
+
+
 def end_token(event: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/admin/end-impersonate — operator-triggered token
     revocation. Marks the row endedAt so subsequent lookups
