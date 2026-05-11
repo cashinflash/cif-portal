@@ -929,10 +929,128 @@ def get_payment_config(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# Phase ZZ'.0 — Vergent CustomerPortal flow probe
+# ─────────────────────────────────────────
+# Vergent's support reply (2026-05-11) recommends:
+#   1. POST /api/CustomerPortal/AuthenticateCognito {jwt: <cognito-id-token>}
+#      → returns customer-scoped Vergent JWT
+#   2. GET /api/CustomerPortal/Loans/{loanId}/Source/Active/PaymentSchedule
+#      → returns scheduled-payment items (transactionItemId is the
+#        `paymentId` for the charge endpoint)
+#   3. POST /api/CustomerPortal/Loans/Payments/CreditCardPayment
+#      {loanId, paymentId, amountDue, isInRescindPeriod, authCode}
+#      → charges the customer's default saved card
+#
+# This probe exercises steps 1 + 2 ONLY (no charge) against three
+# host candidates in order. Vergent points us at api-external,
+# which we have never tested. Direct-invoke only.
+#
+# Invoke from the Lambda console Test tab with:
+#   {"probe": "customerportal-flow",
+#    "cognitoJwt": "<raw Cognito ID token from sessionStorage>",
+#    "loanId": 4830592}
+_CP_HOSTS = [
+    "https://api-external.vergentlms.com",
+    "https://prod.apim.vergentlms.com/external/shared",
+    "https://prod.api.vergentlms.com",
+]
+
+
+def _probe_customerportal_flow(event: Dict[str, Any]) -> Dict[str, Any]:
+    cognito_jwt = (event.get("cognitoJwt") or "").strip()
+    loan_id = event.get("loanId")
+    if not cognito_jwt or not loan_id:
+        return {"error": "missing cognitoJwt or loanId in event"}
+
+    creds = _get_creds() or {}
+    x_api_key = creds.get("xApiKey") or ""
+    if not x_api_key:
+        return {"error": "no xApiKey in vergent credentials secret"}
+
+    trail = {"auth": [], "schedule": None}
+
+    # Step 1: try AuthenticateCognito on each host until one returns 200 + JWT.
+    vergent_jwt: Optional[str] = None
+    winning_host: Optional[str] = None
+    for host in _CP_HOSTS:
+        url = f"{host}/api/CustomerPortal/AuthenticateCognito"
+        status, parsed, raw = _http(
+            url, "POST",
+            body={"jwt": cognito_jwt},
+            headers={"x-api-key": x_api_key, "Content-Type": "application/json"},
+        )
+        tok = None
+        if isinstance(parsed, dict):
+            tok = parsed.get("token") or parsed.get("Token") or parsed.get("jwt")
+        trail["auth"].append({
+            "host": host,
+            "status": status,
+            "has_token": bool(tok),
+            "jwt_prefix": (tok[:30] + "...") if tok else None,
+            "raw_head": (raw or "")[:600],
+        })
+        log.info("[VERGENT-CP-PROBE] auth host=%s status=%s has_token=%s",
+                 host, status, bool(tok))
+        if status == 200 and tok:
+            vergent_jwt = tok
+            winning_host = host
+            break
+
+    if not vergent_jwt:
+        return {"probe": "customerportal-flow", "auth_passed": False, "trail": trail}
+
+    # Step 2: PaymentSchedule on the winning host with the new JWT.
+    sched_url = (f"{winning_host}/api/CustomerPortal/Loans/"
+                 f"{int(loan_id)}/Source/Active/PaymentSchedule")
+    s_status, s_parsed, s_raw = _http(
+        sched_url, "GET", body=None,
+        headers={
+            "x-api-key": x_api_key,
+            "Authorization": f"Bearer {vergent_jwt}",
+        },
+    )
+    log.info("[VERGENT-CP-PROBE] schedule host=%s loan=%s status=%s",
+             winning_host, loan_id, s_status)
+
+    # Normalize parsed shape — Vergent often wraps lists in {Items: [...]}
+    items: list = []
+    if isinstance(s_parsed, list):
+        items = s_parsed
+    elif isinstance(s_parsed, dict):
+        for k in ("Items", "items", "Schedule", "schedule", "loanTransactionHistoryList"):
+            v = s_parsed.get(k)
+            if isinstance(v, list):
+                items = v
+                break
+
+    trail["schedule"] = {
+        "host": winning_host,
+        "url": sched_url,
+        "status": s_status,
+        "raw_head": (s_raw or "")[:1500],
+        "item_count": len(items),
+        "first_item": items[0] if items else None,
+        "last_item": items[-1] if items else None,
+    }
+
+    return {
+        "probe": "customerportal-flow",
+        "auth_passed": True,
+        "schedule_passed": s_status == 200 and len(items) > 0,
+        "winning_host": winning_host,
+        "trail": trail,
+    }
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     try:
+        # Direct-invoke probe path (no API Gateway, no CORS).
+        if event.get("probe") == "customerportal-flow":
+            return _probe_customerportal_flow(event)
+
         http = (event.get("requestContext") or {}).get("http") or {}
         method = (http.get("method") or event.get("httpMethod") or "GET").upper()
         if method == "OPTIONS":
