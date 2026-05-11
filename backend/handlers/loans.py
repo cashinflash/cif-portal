@@ -3234,28 +3234,34 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
 # for a customer to support / impersonate. Auth gate is the same
 # cif-admin group check that /api/admin/plaid/* uses.
 #
-# Source of truth: the Cognito User Pool (portal registrations).
-# This is intentionally NOT the full Vergent customer base —
-# operators searching here are looking for customers who created
-# a portal account at apply.cashinflash.com, not the LMS's
-# historical population.
+# Two source paths, dispatched on the ?source= query param:
 #
-# Search heuristics:
-#   - q is 4-8 digits   → match against custom:vergentCustomerId
-#                          (pool scan via auth_mfa helper)
-#   - q contains "@"    → Cognito ListUsers Filter='email ^= "<q>"'
-#   - otherwise         → Cognito ListUsers Filter='family_name ^= "<q>"'
+#   source=portal (default) — searches the Cognito User Pool.
+#     Returns only customers who actually registered for the portal
+#     at apply.cashinflash.com. Each row carries Cognito UserStatus
+#     (CONFIRMED / UNCONFIRMED) + signup date.
+#
+#   source=vergent — searches the LMS's full customer base via the
+#     Vergent v1 API. Returns every customer that exists in
+#     Vergent regardless of portal-account status. Each row carries
+#     the Vergent customer status + store.
+#
+# Search heuristics (apply to both sources):
+#   - q is 4-8 digits → customerId lookup (exact)
+#   - q contains "@"  → email lookup (prefix match on portal,
+#                       exact-match query on Vergent)
+#   - otherwise       → last-name lookup (prefix match)
 #
 # Cognito ListUsers Filter only supports `=` and `^=` (prefix)
-# on a small set of standard attributes. Custom attributes
-# (like custom:vergentCustomerId) can't be filtered server-side,
-# which is why the customerId path falls back to a full pool
-# scan via auth_mfa._find_cognito_user_by_vergent_id. That's
-# OK while the pool is small (< ~10k users); Phase 2 will
-# replace it with a DDB index keyed on vergentCustomerId.
+# on standard attributes. Custom attributes (like
+# custom:vergentCustomerId) can't be filtered server-side, so the
+# customerId path on the portal source falls back to a full pool
+# scan via auth_mfa._find_cognito_user_by_vergent_id. OK while
+# the pool is small (< ~10k users); Phase 2 will add a DDB
+# index keyed on vergentCustomerId to make this O(1).
 
 def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
-    """GET /api/admin/customers/search?q=<term>"""
+    """GET /api/admin/customers/search?q=<term>&source=portal|vergent"""
     claims = _claims(event)
     err = plaid._require_admin_group(claims)
     if err:
@@ -3266,23 +3272,32 @@ def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
     if not q:
         return _json_response(400, {"error": "missing_q"})
 
+    # Default to portal — the safer choice. Operators usually
+    # want portal customers; the Vergent tab is for cross-checking
+    # against the LMS's broader population.
+    source = ((qs or {}).get("source") or "portal").strip().lower()
+    if source not in ("portal", "vergent"):
+        source = "portal"
+
+    if source == "vergent":
+        rows = _search_vergent_customers(q)
+    else:
+        rows = _search_portal_customers(q)
+
+    return _json_response(200, {"q": q, "source": source, "results": rows})
+
+
+def _search_portal_customers(q: str) -> List[Dict[str, Any]]:
+    """Cognito User Pool search. Returns trimmed customer rows
+    sourced from Cognito attributes + custom:vergentCustomerId."""
     digits_only = q.isdigit()
 
-    # By-customerId: walk the pool looking for the
-    # custom:vergentCustomerId match. Cognito's filter syntax
-    # doesn't support custom attributes, so this is a scan.
     if digits_only and 4 <= len(q) <= 8:
         user = auth_mfa._find_cognito_user_by_vergent_id(q)
         if not user:
-            return _json_response(200, {"q": q, "results": []})
-        return _json_response(200, {
-            "q": q,
-            "results": [_shape_cognito_customer_row(user)],
-        })
+            return []
+        return [_shape_cognito_customer_row(user)]
 
-    # Strip double-quotes to avoid breaking the Cognito filter
-    # expression. Cognito filter values are wrapped in double
-    # quotes; embedded quotes have no escape mechanism.
     safe_q = q.replace('"', "")
     if "@" in q:
         cognito_filter = f'email ^= "{safe_q}"'
@@ -3296,13 +3311,12 @@ def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
             Limit=25,
         )
     except Exception as exc:
-        log.warning("admin search cognito list_users failed filter=%r: %s",
+        log.warning("portal customer search list_users failed filter=%r: %s",
                     cognito_filter, exc)
-        return _json_response(200, {"q": q, "results": []})
+        return []
 
-    users = resp.get("Users") or []
-    rows = []
-    for u in users:
+    rows: List[Dict[str, Any]] = []
+    for u in resp.get("Users") or []:
         attrs = {a["Name"]: a["Value"] for a in u.get("Attributes", [])}
         rows.append(_shape_cognito_customer_row({
             "Username": u.get("Username"),
@@ -3310,14 +3324,52 @@ def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
             "Status": u.get("UserStatus"),
             "UserCreateDate": u.get("UserCreateDate"),
         }))
-    return _json_response(200, {"q": q, "results": rows})
+    return rows
+
+
+def _search_vergent_customers(q: str) -> List[Dict[str, Any]]:
+    """Vergent v1 API search. Returns up to 25 trimmed rows from
+    the LMS's full customer base (whether or not they have a
+    portal account)."""
+    tok = _get_v1_token()
+    if not tok:
+        log.warning("vergent customer search: no v1 token")
+        return []
+
+    digits_only = q.isdigit()
+    if digits_only and 4 <= len(q) <= 8:
+        path = f"/V1/GetCustomer/{q}"
+        status, body, _raw = _http(
+            f"{V1_BASE}{path}", "GET", headers={"Token": tok})
+        if status != 200 or not isinstance(body, dict):
+            return []
+        return [_shape_vergent_customer_row(body)]
+
+    if "@" in q:
+        path = f"/V1/GetCustomers?email={urllib.parse.quote(q)}"
+    else:
+        path = f"/V1/GetCustomers?lastName={urllib.parse.quote(q)}"
+
+    status, body, _raw = _http(
+        f"{V1_BASE}{path}", "GET", headers={"Token": tok})
+    if status != 200:
+        log.warning("vergent customer search v1 status=%s path=%s",
+                    status, path)
+        return []
+
+    items = body if isinstance(body, list) else None
+    if isinstance(body, dict):
+        items = (body.get("Items") or body.get("Customers")
+                 or body.get("customers") or [])
+    if not isinstance(items, list):
+        items = []
+
+    return [_shape_vergent_customer_row(it) for it in items[:25]
+            if isinstance(it, dict)]
 
 
 def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
-    """Trim a Cognito user record to what cif-dashboard needs to
-    render a search-results row. `user` is the shape returned by
-    auth_mfa._find_cognito_user_by_vergent_id, with an optional
-    UserCreateDate added by list_users responses."""
+    """Trim a Cognito user record to a portal-source search row."""
     attrs = user.get("Attrs") or {}
     cid = attrs.get("custom:vergentCustomerId") or ""
     email = (attrs.get("email") or "").strip()
@@ -3326,7 +3378,6 @@ def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
     last = (attrs.get("family_name") or "").strip()
     cognito_status = (user.get("Status") or "").strip() or None
     created = user.get("UserCreateDate")
-    # list_users returns datetimes; serialize to ISO date for JSON.
     signup_at = None
     if created is not None:
         try:
@@ -3334,6 +3385,7 @@ def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             signup_at = str(created)[:10]
     return {
+        "source": "portal",
         "customerId": str(cid) if cid else None,
         "cognitoSub": attrs.get("sub") or user.get("Username"),
         "firstName": first or None,
@@ -3341,13 +3393,34 @@ def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
         "fullName": (" ".join(p for p in (first, last) if p)).strip() or None,
         "email": email or None,
         "phoneLast4": (phone[-4:] if phone else None),
-        # statusName is the Cognito user status (CONFIRMED, UNCONFIRMED,
-        # FORCE_CHANGE_PASSWORD, etc.) — surfaces signup completion in
-        # the dashboard.
         "statusName": cognito_status,
-        # signupAt repurposes the "storeName" slot from the old shape:
-        # the dashboard renderer shows it as the second meta-line item.
         "signupAt": signup_at,
+    }
+
+
+def _shape_vergent_customer_row(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Trim a Vergent customer record to a vergent-source search row."""
+    cid = (rec.get("customerId") or rec.get("CustomerId")
+           or rec.get("id") or rec.get("Id") or "")
+    email = (rec.get("email") or rec.get("Email") or "").strip()
+    phone = (rec.get("phoneNumber") or rec.get("PhoneNumber")
+             or rec.get("phone") or rec.get("Phone") or "").strip()
+    first = (rec.get("firstName") or rec.get("FirstName") or "").strip()
+    last = (rec.get("lastName") or rec.get("LastName") or "").strip()
+    status = (rec.get("statusName") or rec.get("StatusName")
+              or rec.get("status") or "").strip() or None
+    store = (rec.get("storeName") or rec.get("StoreName")
+             or rec.get("store") or "").strip() or None
+    return {
+        "source": "vergent",
+        "customerId": str(cid) if cid else None,
+        "firstName": first or None,
+        "lastName": last or None,
+        "fullName": (" ".join(p for p in (first, last) if p)).strip() or None,
+        "email": email or None,
+        "phoneLast4": (phone[-4:] if phone else None),
+        "statusName": status,
+        "storeName": store,
     }
 
 
