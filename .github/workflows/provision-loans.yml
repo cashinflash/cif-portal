@@ -198,14 +198,17 @@ jobs:
         run: |
           set -e
           # Merge into existing env, preserving everything else (PORTAL_ORIGIN,
-          # COGNITO_*, etc.). Same pattern as set-portal-origin.yml.
+          # COGNITO_*, etc.). Use jq -c to keep the output single-line, and
+          # the JSON form of --environment (not the Variables= shorthand)
+          # so multi-line JSON doesn't confuse the CLI parser.
           EXISTING=$(aws lambda get-function-configuration --function-name "$FN" \
             --query 'Environment.Variables' --output json 2>/dev/null || echo '{}')
-          NEW=$(echo "$EXISTING" | jq --arg v "$IMPERSONATIONS_TABLE" '. + {IMPERSONATIONS_TABLE: $v}')
+          NEW=$(echo "$EXISTING" | jq -c --arg v "$IMPERSONATIONS_TABLE" '. + {IMPERSONATIONS_TABLE: $v}')
           aws lambda update-function-configuration \
             --function-name "$FN" \
-            --environment "Variables=$NEW" \
+            --environment "{\"Variables\": $NEW}" \
             --no-cli-pager >/dev/null
+          aws lambda wait function-updated --function-name "$FN"
           echo "Set IMPERSONATIONS_TABLE=$IMPERSONATIONS_TABLE on $FN."
 
       - name: Grant Lambda DynamoDB + SES + Telnyx-secret permissions
