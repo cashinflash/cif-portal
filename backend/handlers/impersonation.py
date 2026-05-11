@@ -163,8 +163,14 @@ def mint_token(event: Dict[str, Any]) -> Dict[str, Any]:
                            "detail": f"{type(exc).__name__}: {exc}"})
 
     portal_url = (
-        f"{PORTAL_ORIGIN.rstrip('/')}/dashboard.html?impersonationToken={token}"
+        f"{PORTAL_ORIGIN.rstrip('/')}/dashboard.html"
+        f"#impersonationToken={token}"
     )
+    # Note: cif-dashboard's /api/portal-customers/impersonate proxy
+    # rebuilds this URL with additional fragment params (operator's
+    # service JWT, target name, customerId, expiry epoch). The value
+    # we return here is only useful for direct testing of the mint
+    # endpoint — the production flow goes through that proxy.
     log.info("impersonate: minted admin=%s target_sub=%s cid=%s expires=%d",
              admin_user, final_sub, final_cid, expires_at)
     return _json(200, {
