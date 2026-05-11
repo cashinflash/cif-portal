@@ -283,6 +283,14 @@
   // ─────────────────────────────────────────
   function init() {
     if (!sessionStorage.getItem(TOKEN_KEY)) return;  // not signed in
+    // Impersonation sessions don't carry a refresh token and have
+    // their own 15-min server-side expiry — let impersonation.js
+    // manage the lifecycle. Skip idle-tracking + silent refresh
+    // here so the operator's session isn't forced-logged-out
+    // mid-impersonation.
+    if (sessionStorage.getItem('cif_impersonation_active') === '1') {
+      return;
+    }
     // If the token is already expired on load, log out cleanly.
     if (tokenRemainingMs() <= 0) {
       forceLogout('session_expired');
