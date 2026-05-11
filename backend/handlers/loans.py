@@ -85,7 +85,13 @@ from handlers import resend_email
 # Plaid bank-link — used by the Profile page "Connect your bank"
 # flow + the dashboard CTA card. See handlers/plaid.py.
 from handlers import plaid
-from handlers import auth_mfa
+# auth_mfa is imported lazily inside the customer-search helpers
+# (search_admin_customers / _search_portal_customers). Its module
+# body reads os.environ["COGNITO_USER_POOL_ID"] with square brackets
+# — required-by-shape — and many Lambdas that import loans.py
+# (payments, etc.) don't carry that env var. Top-level importing
+# auth_mfa here KeyError'd those Lambdas on cold start, returning
+# the API Gateway default 500 to every customer call.
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -3306,6 +3312,11 @@ def _search_portal_customers(q: str) -> Tuple[List[Dict[str, Any]], Optional[str
     `q` is empty, lists all portal users (capped at 100). When `q`
     is digits, falls back to a full pool scan via auth_mfa's
     helper. Otherwise issues a Cognito ListUsers Filter call."""
+    # Lazy import — see top-level note. auth_mfa's module body reads
+    # required Cognito env vars with os.environ[...], so importing
+    # it here keeps non-auth Lambdas (payments) from KeyError-ing on
+    # cold start.
+    from handlers import auth_mfa
     # Empty q → list-all mode. Used by the Customers tab to show
     # every portal-registered user when no search is in progress.
     if not q:
