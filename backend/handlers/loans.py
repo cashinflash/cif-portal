@@ -3227,6 +3227,103 @@ def submit_esign(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# Admin customer search (cif-admin Cognito group)
+# ─────────────────────────────────────────
+# Called by cif-dashboard's admin UI when an operator searches
+# for a customer to support / impersonate. Auth gate is the same
+# cif-admin group check that /api/admin/plaid/* uses — the JWT
+# arrives from cif-dashboard's portal-admin-svc service account.
+#
+# Search heuristics (looser than the pre-signup search, which
+# requires firstName+lastName+DOB+SSN):
+#   - q is all digits + length 4-8 → customerId lookup
+#     (/V1/GetCustomer/{q})
+#   - q contains "@"               → email lookup
+#     (/V1/GetCustomers?email=q)
+#   - otherwise                    → last-name lookup
+#     (/V1/GetCustomers?lastName=q)
+#
+# Returns up to 25 hits to keep payloads small.
+
+def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/admin/customers/search?q=<term>"""
+    claims = _claims(event)
+    err = plaid._require_admin_group(claims)
+    if err:
+        return err
+
+    qs = event.get("queryStringParameters") or {}
+    q = ((qs or {}).get("q") or "").strip()
+    if not q:
+        return _json_response(400, {"error": "missing_q"})
+
+    tok = _get_v1_token()
+    if not tok:
+        return _json_response(502, {"error": "vergent_unavailable"})
+
+    digits_only = q.isdigit()
+
+    if digits_only and 4 <= len(q) <= 8:
+        path = f"/V1/GetCustomer/{q}"
+        status, body, _raw = _http(
+            f"{V1_BASE}{path}", "GET", headers={"Token": tok})
+        if status != 200 or not isinstance(body, dict):
+            return _json_response(200, {"q": q, "results": []})
+        return _json_response(200, {
+            "q": q,
+            "results": [_shape_admin_customer_row(body)],
+        })
+
+    if "@" in q:
+        path = f"/V1/GetCustomers?email={urllib.parse.quote(q)}"
+    else:
+        path = f"/V1/GetCustomers?lastName={urllib.parse.quote(q)}"
+
+    status, body, _raw = _http(
+        f"{V1_BASE}{path}", "GET", headers={"Token": tok})
+    if status != 200:
+        log.warning("admin customer search v1 status=%s path=%s", status, path)
+        return _json_response(200, {"q": q, "results": []})
+
+    items = body if isinstance(body, list) else None
+    if isinstance(body, dict):
+        items = (body.get("Items") or body.get("Customers")
+                 or body.get("customers") or [])
+    if not isinstance(items, list):
+        items = []
+
+    rows = [_shape_admin_customer_row(it) for it in items[:25]
+            if isinstance(it, dict)]
+    return _json_response(200, {"q": q, "results": rows})
+
+
+def _shape_admin_customer_row(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Trim a Vergent customer record to what cif-dashboard needs to
+    render the search-results row + decide whether to impersonate."""
+    cid = (rec.get("customerId") or rec.get("CustomerId")
+           or rec.get("id") or rec.get("Id") or "")
+    email = (rec.get("email") or rec.get("Email") or "").strip()
+    phone = (rec.get("phoneNumber") or rec.get("PhoneNumber")
+             or rec.get("phone") or rec.get("Phone") or "").strip()
+    first = (rec.get("firstName") or rec.get("FirstName") or "").strip()
+    last = (rec.get("lastName") or rec.get("LastName") or "").strip()
+    status = (rec.get("statusName") or rec.get("StatusName")
+              or rec.get("status") or "").strip() or None
+    store = (rec.get("storeName") or rec.get("StoreName")
+             or rec.get("store") or "").strip() or None
+    return {
+        "customerId": str(cid) if cid else None,
+        "firstName": first or None,
+        "lastName": last or None,
+        "fullName": (" ".join(p for p in (first, last) if p)).strip() or None,
+        "email": email or None,
+        "phoneLast4": (phone[-4:] if phone else None),
+        "statusName": status,
+        "storeName": store,
+    }
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -3290,6 +3387,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         # Admin (cif-admin Cognito group) — list/detail
         if path.endswith("/admin/plaid/customers") and method == "GET":
             return plaid.list_admin_customers(event)
+        if path.endswith("/admin/customers/search") and method == "GET":
+            return search_admin_customers(event)
         if ("/admin/plaid/customer/" in path
                 and method == "GET"):
             parts = [p for p in path.split("/") if p]
