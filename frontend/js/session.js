@@ -291,6 +291,33 @@
     _lastActivity = Date.now();
     startActivityTracking();
     _idleCheckInterval = setInterval(checkIdle, IDLE_CHECK_INTERVAL_MS);
+    revealAdminNav();
+  }
+
+  // Reveals any element marked `.admin-only` (with a `hidden`
+  // attribute by default) when the signed-in user's Cognito JWT
+  // carries the `admins` group claim. Customer accounts never see
+  // these elements; admin accounts see them on every signed-in
+  // page automatically. Group membership is managed via the
+  // Cognito console — there is no self-serve admin promotion.
+  function revealAdminNav() {
+    var t = sessionStorage.getItem(TOKEN_KEY);
+    if (!t) return;
+    var c = decodeJwt(t);
+    if (!c) return;
+    var groups = c['cognito:groups'] || c.cognito_groups || [];
+    if (typeof groups === 'string') {
+      groups = groups.split(/[,\s]+/);
+    }
+    var isAdmin = false;
+    for (var i = 0; i < groups.length; i++) {
+      if (String(groups[i]).trim() === 'admins') { isAdmin = true; break; }
+    }
+    if (!isAdmin) return;
+    var els = document.querySelectorAll('.admin-only');
+    for (var j = 0; j < els.length; j++) {
+      els[j].hidden = false;
+    }
   }
 
   if (document.readyState === 'loading') {

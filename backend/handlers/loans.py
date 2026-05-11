@@ -194,6 +194,20 @@ def _customer_id(claims: Dict[str, Any]) -> Optional[str]:
     return str(cid) if cid else None
 
 
+def _is_admin(claims: Dict[str, Any]) -> bool:
+    """True if the caller's Cognito JWT has the `admins` group claim.
+    Cognito surfaces group membership as `cognito:groups` (a list).
+    Admin accounts are added to the `admins` group manually via the
+    Cognito console; only those accounts can hit /api/admin/* routes
+    or impersonate customers."""
+    groups = claims.get("cognito:groups") or claims.get("cognito_groups") or []
+    if isinstance(groups, str):
+        # API Gateway sometimes flattens a single-element list to a
+        # comma-or-space-separated string.
+        groups = [g.strip() for g in groups.replace(",", " ").split() if g.strip()]
+    return "admins" in groups
+
+
 def _http(url: str, method: str = "GET", *, body: Optional[Dict[str, Any]] = None,
           headers: Optional[Dict[str, str]] = None, timeout: int = 12) -> Tuple[int, Optional[Any], str]:
     h = {"Accept": "application/json", "User-Agent": "cif-portal/1.0"}
@@ -744,6 +758,7 @@ def get_my_profile(event: Dict[str, Any]) -> Dict[str, Any]:
         "phone": claims.get("phone_number"),
         "phoneVerified": claims.get("phone_number_verified") in (True, "true"),
         "vergentCustomerId": cid,
+        "isAdmin": _is_admin(claims),
         "statusName": None,
         "storeName": None,
         "vergentPhoneHint": None,
