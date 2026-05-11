@@ -19,9 +19,12 @@ on:
         type: choice
         options:
           - cif-portal-loans-dev
+          - cif-portal-payments-dev
           - cif-portal-auth-mfa-dev
           - cif-portal-search-dev
           - cif-portal-pre-signup-dev
+          - cif-portal-if-submit-dev
+          - cif-portal-doc-pdf-dev
       minutes:
         description: How many minutes of logs to fetch
         required: true
