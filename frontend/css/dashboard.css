@@ -2293,6 +2293,62 @@ button.dash-doc-download:disabled {
 .pay-actions--center { justify-content: center; }
 .pay-actions .btn-apply { min-width: 140px; }
 
+/* Pay-charge form (Path 1 / Repay RgAPI direct-charge). Card-entry
+   inputs styled to match the existing portal forms (signup, profile).
+   Inline-feel, comfortable touch targets, clear focus states. */
+.pay-field-label {
+  display: block;
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: #475569;
+  margin: 14px 0 6px;
+  letter-spacing: 0.01em;
+}
+.pay-field-label:first-child { margin-top: 0; }
+.pay-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pay-input:focus {
+  border-color: var(--cif-green, #0E8741);
+  box-shadow: 0 0 0 3px rgba(14, 135, 65, 0.12);
+}
+.pay-input--narrow { max-width: 160px; }
+.pay-amount-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pay-amount-prefix {
+  position: absolute;
+  left: 14px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #475569;
+  pointer-events: none;
+}
+.pay-input--amount {
+  padding-left: 28px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.pay-field-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pay-field-col { flex: 1; min-width: 140px; }
+.pay-field-col--cvv { flex: 0 0 110px; }
+
 .pay-empty {
   color: var(--cif-muted);
   font-size: .9rem;

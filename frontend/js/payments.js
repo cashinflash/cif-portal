@@ -1,14 +1,16 @@
 /* ═══════════════════════════════════════
-   CASH IN FLASH — Payments page controller (handoff via new tab).
+   CASH IN FLASH — Payments page controller (Path 1 / direct-charge).
 
-   Vergent's customer portal is the actual payment surface. We mint
-   a single-use handoff URL (so the customer is auto-signed-in there)
-   and open it in a new tab. Our page transitions to a "waiting"
-   state with an "I'm done — refresh balance" button.
+   The customer enters their card + amount in OUR portal; we POST
+   to /api/my-payment/charge which calls Repay's RgAPI REST endpoint
+   directly (no Vergent handoff).
 
-   Why not iframe: Vergent serves X-Frame-Options: DENY (or CSP
-   frame-ancestors) so the page can never load inside our site. The
-   new-tab approach is the only path that works.
+   Why direct-charge: Vergent's customer-portal payment routes
+   reject our handoff redirects and their /V1/PostCustomerLoanPayment
+   API is broken for our tenant (full archeology in
+   handlers/payments.py docstring). Direct Repay charge sidesteps
+   both — money moves, we record the transaction in our own DDB
+   ledger, Vergent reconciliation is best-effort.
    ═══════════════════════════════════════ */
 (function () {
   'use strict';
@@ -80,9 +82,7 @@
   const state = {
     loan: null,
     submitting: false,
-    refreshing: false,
-    initialBalance: null,    // captured before opening the new tab
-    lastHandoffUrl: null,
+    initialBalance: null,
   };
 
   // ---------- Loan summary ----------
@@ -114,120 +114,160 @@
       const pill = qs('[data-pay-loan-status]', card);
       if (pill) pill.textContent = loan.status || 'Current';
       if (body) body.hidden = false;
+      // Pre-fill the amount field with the next-due (or balance) so
+      // the customer can pay in one click without typing.
+      const amountInput = qs('#payAmount');
+      if (amountInput && !amountInput.value) {
+        const preset = Number(loan.nextDueAmount || loan.balance || 0);
+        if (preset > 0) {
+          amountInput.value = preset.toFixed(2);
+        }
+      }
       return loan;
     });
   }
 
-  // ---------- Open Vergent's secure payment page in a new tab ----------
-  function startPayment() {
+  // ---------- Form input helpers (card number / exp formatting) ----------
+  function formatCardNumber(value) {
+    // Strip non-digits, group in 4s. Max 19 digits (Visa/MC/Discover
+    // are 16; Amex 15; Diners 14; some others up to 19).
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 19);
+    return digits.replace(/(\d{4})(?=\d)/g, '$1 ');
+  }
+  function formatExp(value) {
+    // MM/YY auto-insert. Strip non-digits, slash after 2 digits.
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 4);
+    if (digits.length < 3) return digits;
+    return digits.slice(0, 2) + '/' + digits.slice(2);
+  }
+
+  // ---------- Charge ----------
+  function showError(msg) {
+    const el = qs('#payError');
+    if (!el) return;
+    el.textContent = msg || "We couldn't process your payment. Please try again.";
+    el.hidden = false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function clearError() {
+    const el = qs('#payError');
+    if (el) { el.hidden = true; el.textContent = ''; }
+  }
+
+  function readForm() {
+    const amount = parseFloat(String(qs('#payAmount').value || '').replace(/[^\d.]/g, ''));
+    const cardNumber = String(qs('#payCardNumber').value || '').replace(/\s+/g, '');
+    const expRaw = String(qs('#payExp').value || '');
+    const expDigits = expRaw.replace(/\D/g, '');
+    const expMonth = parseInt(expDigits.slice(0, 2), 10);
+    const expYearShort = parseInt(expDigits.slice(2, 4), 10);
+    const expYear = isNaN(expYearShort) ? 0 : (2000 + expYearShort);
+    const cvv = String(qs('#payCvv').value || '').trim();
+    const nameOnCard = String(qs('#payName').value || '').trim();
+    const zip = String(qs('#payZip').value || '').trim();
+    return {
+      amount: amount,
+      cardNumber: cardNumber,
+      expMonth: expMonth,
+      expYear: expYear,
+      cvv: cvv,
+      nameOnCard: nameOnCard,
+      zip: zip,
+      loanId: state.loan && state.loan.id,
+    };
+  }
+
+  function validateForm(f) {
+    if (!f.amount || isNaN(f.amount) || f.amount <= 0) return 'Please enter a valid amount.';
+    if (f.amount > 5000) return 'Amount must be $5,000 or less.';
+    if (!f.cardNumber || f.cardNumber.length < 13) return 'Please enter a valid card number.';
+    if (!f.expMonth || f.expMonth < 1 || f.expMonth > 12) return 'Please enter a valid expiration month (01-12).';
+    if (!f.expYear || f.expYear < 2026 || f.expYear > 2050) return 'Please enter a valid expiration year.';
+    if (f.cvv && !/^\d{3,4}$/.test(f.cvv)) return 'CVV must be 3 or 4 digits.';
+    return null;
+  }
+
+  function submitPayment(e) {
+    if (e) e.preventDefault();
     if (state.submitting) return;
-    const btn = qs('#payContinueBtn');
-    const errEl = qs('#payError');
-    if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
-    state.submitting = true;
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Opening secure page…';
-    }
+    clearError();
+
+    const form = readForm();
+    const err = validateForm(form);
+    if (err) { showError(err); return; }
 
     state.initialBalance = state.loan ? Number(state.loan.balance) : null;
 
-    api('/api/my-payment', {
+    const btn = qs('#payChargeBtn');
+    state.submitting = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Processing payment…';
+    }
+
+    api('/api/my-payment/charge', {
       method: 'POST',
-      body: { loanId: state.loan && state.loan.id },
+      body: {
+        amount: form.amount,
+        cardNumber: form.cardNumber,
+        expMonth: form.expMonth,
+        expYear: form.expYear,
+        cvv: form.cvv,
+        nameOnCard: form.nameOnCard,
+        zip: form.zip,
+        loanId: form.loanId,
+      },
     }).then(function (res) {
-      const url = res && res.handoffUrl;
-      if (!url) throw new Error('no_url');
-      state.lastHandoffUrl = url;
-      const w = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!w) {
-        showError('popup_blocked');
-        return;
+      if (res && res.success && res.transactionId) {
+        // Approved — refresh balance + show receipt.
+        sessionStorage.setItem(SUCCESS_KEY, JSON.stringify({
+          amount: Number(res.authAmount || form.amount),
+          last4: res.last4 || '',
+          brand: res.brand || '',
+          transactionId: res.transactionId,
+          when: Date.now(),
+        }));
+        return loadLoan().then(function (loan) {
+          const newBal = loan ? Number(loan.balance) : null;
+          showReceipt(Number(res.authAmount || form.amount), newBal);
+        }).catch(function () {
+          showReceipt(Number(res.authAmount || form.amount), null);
+        });
       }
-      transitionToWaiting();
-    }).catch(function (err) {
-      const code = (err && err.body && err.body.error) || 'handoff_failed';
-      showError(code);
-    }).finally(function () {
+      // success:false → declined.
+      const reason = (res && res.resultText) || 'Card declined.';
+      showError(reason + ' Please try a different card or call (747) 270-7121.');
+    }).catch(function (e) {
+      let msg = "We couldn't process your payment.";
+      const errBody = e && e.body;
+      if (errBody && typeof errBody === 'object') {
+        const code = errBody.error || errBody.code || '';
+        msg = {
+          invalid_amount:         'Please enter a valid amount.',
+          amount_out_of_range:    'Amount must be between $0.01 and $5,000.',
+          invalid_card_number:    'Card number is invalid.',
+          card_failed_luhn:       'Card number is invalid — please double-check.',
+          invalid_expiry:         'Expiration is invalid.',
+          invalid_exp_month:      'Expiration month is invalid.',
+          invalid_exp_year:       'Expiration year is invalid.',
+          invalid_cvv:            'CVV is invalid.',
+          repay_creds_missing:    'Payments are temporarily unavailable. Please call (747) 270-7121.',
+          repay_creds_incomplete: 'Payments are temporarily unavailable. Please call (747) 270-7121.',
+          repay_http_error:       'Our payment processor returned an error. Please try again or call (747) 270-7121.',
+        }[code] || msg;
+      }
+      showError(msg);
+    }).then(function () {
       state.submitting = false;
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Continue to secure payment';
+        btn.textContent = 'Pay now';
       }
     });
-  }
-
-  function transitionToWaiting() {
-    const formCard = qs('#payFormCard');
-    const waitingCard = qs('#payWaitingCard');
-    if (formCard) formCard.hidden = true;
-    if (waitingCard) waitingCard.hidden = false;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function showError(code) {
-    const msg = {
-      handoff_failed:        "We couldn't open the secure payment page. Please try again, or call (747) 270-7121.",
-      handoff_no_url:        "We couldn't open the secure payment page. Please try again in a minute.",
-      popup_blocked:         "Your browser blocked the new tab. Please allow pop-ups for this site, then try again.",
-      vergent_creds_missing: "Our payment system isn't configured. Please call (747) 270-7121.",
-      no_loan:               "We couldn't find a loan to pay on. Try refreshing the page.",
-      unauthorized:          'Your session expired. Please sign in again.',
-    }[code] || "We couldn't open the secure payment page. Please try again.";
-    const el = qs('#payError');
-    if (!el) return;
-    el.textContent = msg;
-    el.hidden = false;
-  }
-
-  // ---------- Refresh balance after the customer comes back ----------
-  function refreshAfterPayment() {
-    if (state.refreshing) return;
-    state.refreshing = true;
-    const btn = qs('#payDoneBtn');
-    const note = qs('#payWaitingNote');
-    if (note) { note.hidden = true; note.textContent = ''; }
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Refreshing…';
-    }
-    return loadLoan().then(function (loan) {
-      const before = state.initialBalance;
-      const after = loan ? Number(loan.balance) : null;
-      const decreased = (before !== null && after !== null && after < before - 0.005);
-
-      if (decreased) {
-        const paid = before - after;
-        showReceipt(paid, after);
-        sessionStorage.setItem(SUCCESS_KEY, JSON.stringify({
-          amount: Number(paid.toFixed(2)),
-          when: Date.now(),
-        }));
-      } else if (note) {
-        note.textContent = "We don't see a new payment yet. If you completed a payment, give it a minute and click again.";
-        note.hidden = false;
-      }
-    }).finally(function () {
-      state.refreshing = false;
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = "I'm done — refresh my balance";
-      }
-    });
-  }
-
-  function reopenPaymentTab() {
-    if (state.lastHandoffUrl) {
-      window.open(state.lastHandoffUrl, '_blank', 'noopener,noreferrer');
-    } else {
-      // No prior URL — re-mint and open.
-      startPayment();
-    }
   }
 
   function showReceipt(amount, newBalance) {
     qs('#payFormCard').hidden = true;
-    qs('#payWaitingCard').hidden = true;
     setText(qs('[data-receipt-amount]'), money(amount));
     setText(qs('[data-receipt-balance]'),
       newBalance !== null && newBalance !== undefined ? money(newBalance) : '—'
@@ -238,37 +278,38 @@
 
   // ---------- Boot ----------
   document.addEventListener('DOMContentLoaded', function () {
-    const continueBtn = qs('#payContinueBtn');
-    if (continueBtn) continueBtn.addEventListener('click', startPayment);
+    const form = qs('#payChargeForm');
+    if (form) form.addEventListener('submit', submitPayment);
 
-    const doneBtn = qs('#payDoneBtn');
-    if (doneBtn) doneBtn.addEventListener('click', refreshAfterPayment);
-
-    const reopenBtn = qs('#payReopenBtn');
-    if (reopenBtn) reopenBtn.addEventListener('click', reopenPaymentTab);
+    // Live formatting for card number + expiry.
+    const cardInput = qs('#payCardNumber');
+    if (cardInput) cardInput.addEventListener('input', function () {
+      this.value = formatCardNumber(this.value);
+    });
+    const expInput = qs('#payExp');
+    if (expInput) expInput.addEventListener('input', function () {
+      this.value = formatExp(this.value);
+    });
+    const cvvInput = qs('#payCvv');
+    if (cvvInput) cvvInput.addEventListener('input', function () {
+      this.value = (this.value || '').replace(/\D/g, '').slice(0, 4);
+    });
+    const zipInput = qs('#payZip');
+    if (zipInput) zipInput.addEventListener('input', function () {
+      this.value = (this.value || '').replace(/\D/g, '').slice(0, 5);
+    });
+    const amtInput = qs('#payAmount');
+    if (amtInput) amtInput.addEventListener('blur', function () {
+      const v = parseFloat(String(this.value || '').replace(/[^\d.]/g, ''));
+      if (!isNaN(v) && v > 0) this.value = v.toFixed(2);
+    });
 
     loadLoan().then(function (loan) {
       const formCard = qs('#payFormCard');
       if (formCard) formCard.hidden = !loan;
     }).catch(function (err) {
       if (err && err.message === 'unauthorized') return;
-      const errEl = qs('#payError');
-      if (errEl) {
-        errEl.textContent = 'Could not load your loan details. Please refresh.';
-        errEl.hidden = false;
-      }
-    });
-
-    // When the customer returns to this tab from the Vergent payment
-    // page, auto-refresh the loan summary in the background. If the
-    // balance dropped, we surface it without making them click anything.
-    document.addEventListener('visibilitychange', function () {
-      if (document.hidden) return;
-      const waitingCard = qs('#payWaitingCard');
-      if (!waitingCard || waitingCard.hidden) return;
-      // We're in the waiting state and the tab just regained focus —
-      // soft-refresh balance to detect a payment.
-      refreshAfterPayment();
+      showError('Could not load your loan details. Please refresh the page.');
     });
   });
 })();
