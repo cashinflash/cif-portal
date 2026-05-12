@@ -191,6 +191,9 @@ jobs:
           REPAY_ARN=$(aws secretsmanager describe-secret \
             --secret-id cif-portal/repay/credentials \
             --query ARN --output text 2>/dev/null || echo "")
+          REPAY_SANDBOX_ARN=$(aws secretsmanager describe-secret \
+            --secret-id cif-portal/repay/sandbox-credentials \
+            --query ARN --output text 2>/dev/null || echo "")
           OMNIAPAY_ARN=$(aws secretsmanager describe-secret \
             --secret-id cif-portal/omniapay/credentials \
             --query ARN --output text 2>/dev/null || echo "")
@@ -211,8 +214,8 @@ jobs:
             echo "OmniaPay secret ARN: $OMNIAPAY_ARN"
           fi
 
-          if [ -z "$REPAY_ARN$OMNIAPAY_ARN" ] || \
-             { [ "$REPAY_ARN" = "None" ] && [ "$OMNIAPAY_ARN" = "None" ]; }; then
+          if [ -z "$REPAY_ARN$REPAY_SANDBOX_ARN$OMNIAPAY_ARN" ] || \
+             { [ "$REPAY_ARN" = "None" ] && [ "$REPAY_SANDBOX_ARN" = "None" ] && [ "$OMNIAPAY_ARN" = "None" ]; }; then
             echo "::warning::No payment-vendor secrets present yet — skipping IAM grant."
             exit 0
           fi
@@ -227,6 +230,10 @@ jobs:
           SEP=""
           if [ -n "$REPAY_ARN" ] && [ "$REPAY_ARN" != "None" ]; then
             RESOURCE_LIST="$RESOURCE_LIST$SEP\"$REPAY_ARN\""
+            SEP=","
+          fi
+          if [ -n "$REPAY_SANDBOX_ARN" ] && [ "$REPAY_SANDBOX_ARN" != "None" ]; then
+            RESOURCE_LIST="$RESOURCE_LIST$SEP\"$REPAY_SANDBOX_ARN\""
             SEP=","
           fi
           if [ -n "$OMNIAPAY_ARN" ] && [ "$OMNIAPAY_ARN" != "None" ]; then
@@ -280,6 +287,9 @@ jobs:
           NEW_ENV="$EXISTING_ENV"
           if [ -n "$REPAY_ARN" ] && [ "$REPAY_ARN" != "None" ]; then
             NEW_ENV=$(echo "$NEW_ENV" | jq --arg v "$REPAY_ARN" '. + {REPAY_SECRET_ARN: $v}')
+          fi
+          if [ -n "$REPAY_SANDBOX_ARN" ] && [ "$REPAY_SANDBOX_ARN" != "None" ]; then
+            NEW_ENV=$(echo "$NEW_ENV" | jq --arg v "$REPAY_SANDBOX_ARN" '. + {REPAY_SANDBOX_SECRET_ARN: $v}')
           fi
           if [ -n "$OMNIAPAY_ARN" ] && [ "$OMNIAPAY_ARN" != "None" ]; then
             NEW_ENV=$(echo "$NEW_ENV" | jq --arg v "$OMNIAPAY_ARN" '. + {OMNIAPAY_SECRET_ARN: $v}')

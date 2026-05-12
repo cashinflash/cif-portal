@@ -1353,20 +1353,48 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
 # Cache for the RgAPI creds (same Secrets Manager secret CardSafe
 # uses — gatewayApiUser/gatewaySecureToken values are shared
 # across CardSafe and RgAPI per Repay's account model).
+# Two separate secrets — production and sandbox creds aren't
+# interchangeable (Repay returns 404 "User not found" if a prod
+# user hits the sandbox host or vice-versa). The hostname env
+# var drives which secret we read.
 _repay_rgapi_creds_cache: Optional[Dict[str, Any]] = None
+_repay_rgapi_creds_cache_env: Optional[str] = None
 
 
 def _get_repay_rgapi_creds() -> Optional[Dict[str, Any]]:
-    global _repay_rgapi_creds_cache
-    if _repay_rgapi_creds_cache is not None:
+    """Return Repay RgAPI creds dict {gatewayApiUser,
+    gatewaySecureToken, ...}. Picks the sandbox secret when
+    REPAY_API_HOSTNAME contains 'sandbox', else the production
+    secret. Cache is keyed on the choice so toggling hostnames
+    via env var (no code change) immediately reads the right
+    secret on the next cold start.
+    """
+    global _repay_rgapi_creds_cache, _repay_rgapi_creds_cache_env
+    hostname = os.environ.get("REPAY_API_HOSTNAME", "")
+    is_sandbox = "sandbox" in hostname.lower()
+    env = "sandbox" if is_sandbox else "prod"
+
+    if _repay_rgapi_creds_cache is not None and _repay_rgapi_creds_cache_env == env:
         return _repay_rgapi_creds_cache
-    arn = os.environ.get("REPAY_SECRET_ARN", "cif-portal/repay/credentials")
+
+    if is_sandbox:
+        arn = os.environ.get(
+            "REPAY_SANDBOX_SECRET_ARN",
+            "cif-portal/repay/sandbox-credentials",
+        )
+    else:
+        arn = os.environ.get(
+            "REPAY_SECRET_ARN", "cif-portal/repay/credentials",
+        )
     try:
         resp = _secrets.get_secret_value(SecretId=arn)
         _repay_rgapi_creds_cache = json.loads(resp["SecretString"])
+        _repay_rgapi_creds_cache_env = env
+        log.info("repay rgapi creds loaded env=%s arn=%s", env, arn[-30:])
         return _repay_rgapi_creds_cache
     except Exception as exc:
-        log.warning("repay rgapi creds read failed (arn=%s): %s", arn, exc)
+        log.warning("repay rgapi creds read failed env=%s arn=%s: %s",
+                    env, arn, exc)
         return None
 
 
