@@ -123,9 +123,18 @@ jobs:
             "GET /api/my-payment-config"
           )
           for RK in "${ROUTES[@]}"; do
+            # Query for all matching RouteIds. With --output text and
+            # the projection `Items[?RouteKey=='X'].RouteId`, the CLI
+            # returns each match on its own line (whitespace-separated)
+            # — or nothing at all when no match. Earlier we used
+            # `| [0]` to take the first, but AWS CLI's --output text
+            # rendering of a single-string JMESPath result still emits
+            # "None\nNone\nNone" patterns that fooled the -n check.
+            # Plain Items[?].RouteId + head -n 1 is unambiguous: a
+            # single real RouteId, or empty.
             EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
-              --query "Items[?RouteKey=='$RK'].RouteId | [0]" \
-              --output text 2>/dev/null || echo "")
+              --query "Items[?RouteKey=='$RK'].RouteId" \
+              --output text 2>/dev/null | tr -d '\t' | head -n 1)
             if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
               echo "Route '$RK' already exists ($EXISTING)"
               continue
