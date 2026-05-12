@@ -15,11 +15,11 @@ on:
       function:
         description: Lambda function name
         required: true
-        default: cif-portal-loans-dev
+        default: cif-portal-payments-dev
         type: choice
         options:
-          - cif-portal-loans-dev
           - cif-portal-payments-dev
+          - cif-portal-loans-dev
           - cif-portal-auth-mfa-dev
           - cif-portal-search-dev
           - cif-portal-pre-signup-dev
