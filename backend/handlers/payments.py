@@ -1051,6 +1051,326 @@ def _probe_customerportal_flow(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# Repay RgAPI — direct-charge endpoint (no Vergent dependency)
+# ─────────────────────────────────────────
+# Path 1 implementation (see prior session docstring above).
+# Vergent's /V1/PostCustomerLoanPayment is broken for our tenant
+# and Vergent doesn't expose the saved-card Repay token in its
+# GetCustomerCards response (cardRef + cardGuid come back empty).
+# So we charge the customer's card directly via Repay's modern
+# REST API ("RgAPI"). Customer enters their card in our portal;
+# Repay returns a transaction_id (PNRef) on success; we record
+# the payment in our own DDB ledger.
+#
+# Endpoint docs (per Repay's Postman collection, 2026-05):
+#   POST {hostname}/rgapi/v1.0/transactions/card/sale
+#   Headers:
+#     Content-Type:      application/json
+#     rg-api-user:       gatewayApiUser    (same field that CardSafe uses)
+#     rg-api-secure-token: gatewaySecureToken
+#   Body:
+#     amount        decimal   required — sale amount in dollars
+#     card_number   string    required — PAN (we proxy from customer browser)
+#     exp_date      "MMYY"    required — Repay's format
+#     cvv           string    optional but recommended (lower fees, fewer declines)
+#     name_on_card  string    optional but used for AVS
+#     street, zip   strings   optional, used for AVS
+#     customer_id   string    optional — our internal CID, helps Repay group activity
+#     invoice_id    string    optional — we pass loanId here so reconciliation joins
+#     card_not_present  bool  required — true (we're never card-present)
+#   200 Response:
+#     transaction_id  int    Repay's PNRef — store as payment proof
+#     result          "0"    "0" = approved; non-zero = declined/error
+#     result_text     str    "Approved" / decline reason
+#     auth_amount     decimal — what was actually authorized (may be partial)
+#     approval_code   str    issuer auth code
+#     last4, payment_type_id — display fields for receipts
+#
+# Sandbox: api.sandbox.repayonline.com (test cards only, no real money)
+# Prod:    api.repayonline.com         (REAL CARDS — flip via env var)
+#
+# PCI scope note: PAN passes through this Lambda exactly the same
+# way it does in handlers/if_submit.py's CardSafe flow today —
+# already SAQ A-EP. The Lambda never persists PAN; the body is
+# request-scoped only. Long-term plan is Repay Hosted Fields
+# (PAN goes browser→Repay directly), which would tighten back
+# to SAQ A.
+
+REPAY_API_HOSTNAME = os.environ.get(
+    "REPAY_API_HOSTNAME", "api.sandbox.repayonline.com",
+).rstrip("/")
+
+# Ledger DDB table — every charge attempt logs a row here. Source
+# of truth for "did this customer pay?" until/unless we get
+# /V1/PostCustomerLoanPayment working for upstream reconciliation.
+PAYMENT_LEDGER_TABLE = os.environ.get(
+    "PAYMENT_LEDGER_TABLE", "cif-portal-payments-ledger-dev",
+)
+
+import time as _time
+import uuid as _uuid
+
+
+def _dynamo_client():
+    """Lazy boto3 dynamodb client — only built when first charge
+    request hits the Lambda (cold-start cost stays off the
+    GET-only paths)."""
+    import boto3
+    return boto3.client(
+        "dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"),
+    )
+
+
+def _strip_digits(s: Any) -> str:
+    """Pull only digits out of a string (PAN/zip/etc.)."""
+    if not s:
+        return ""
+    return "".join(ch for ch in str(s) if ch.isdigit())
+
+
+def _record_payment_ledger(
+    *, cid: str, loan_id: Any, amount: float, result: str,
+    transaction_id: Optional[Any], result_text: str, last4: str,
+    error_detail: Optional[str] = None,
+) -> Optional[str]:
+    """Write a payment-attempt row to DDB. Returns the row's
+    ledgerId on success, None on failure (failure is logged but
+    does NOT block the response — the customer's charge already
+    succeeded with Repay; losing the audit row is recoverable
+    via Repay's reporting if we have transaction_id).
+    """
+    ledger_id = str(_uuid.uuid4())
+    now = int(_time.time())
+    item: Dict[str, Any] = {
+        "ledgerId":      {"S": ledger_id},
+        "customerId":    {"S": str(cid)},
+        "loanId":        {"S": str(loan_id) if loan_id is not None else ""},
+        "amount":        {"N": f"{float(amount):.2f}"},
+        "result":        {"S": str(result)},
+        "resultText":    {"S": str(result_text or "")},
+        "last4":         {"S": str(last4 or "")},
+        "createdAt":     {"N": str(now)},
+        "processor":     {"S": "repay-rgapi"},
+        # Lifecycle: charged → vergent_recorded | vergent_failed |
+        # manual_reconcile. Defaults to "charged" until the Vergent
+        # POST round-trips (next commit).
+        "reconcileState": {"S": "charged" if result == "0" else "declined"},
+    }
+    if transaction_id is not None:
+        item["transactionId"] = {"S": str(transaction_id)}
+    if error_detail:
+        item["errorDetail"] = {"S": error_detail[:500]}
+    try:
+        _dynamo_client().put_item(
+            TableName=PAYMENT_LEDGER_TABLE, Item=item,
+        )
+        return ledger_id
+    except Exception as exc:
+        log.warning("payment ledger put failed cid=%s txn=%s: %s",
+                    cid, transaction_id, exc)
+        return None
+
+
+def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-payment/charge
+
+    Body:
+      amount       (number, required) — dollars, e.g. 100.00
+      cardNumber   (string, required) — PAN
+      expMonth     (number, required) — 1-12
+      expYear      (number, required) — 4-digit (2026) or 2-digit (26)
+      cvv          (string, optional but recommended)
+      nameOnCard   (string, optional)
+      zip          (string, optional)
+      loanId       (number, optional) — defaults to customer's active loan
+
+    Response:
+      success     bool
+      transactionId  int (Repay PNRef) — on success only
+      authAmount     number — what Repay actually authorized (may be partial)
+      approvalCode   string — issuer auth code (on success)
+      last4          string
+      brand          string — VISA / MASTERCARD / ...
+      resultText     string — "Approved" or decline reason
+      ledgerId       string — our DDB row uuid
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_json"})
+    if not isinstance(body, dict):
+        return _json_response(400, {"error": "invalid_body"})
+
+    # ── Validate inputs ──
+    try:
+        amount = float(body.get("amount") or 0)
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_amount"})
+    if amount <= 0 or amount > 5000:
+        # Cap at $5k — Repay supports much higher but our portal
+        # has no use case beyond a single-loan paydown.
+        return _json_response(400, {"error": "amount_out_of_range"})
+
+    pan_digits = _strip_digits(body.get("cardNumber"))
+    if len(pan_digits) < 13 or len(pan_digits) > 19:
+        return _json_response(400, {"error": "invalid_card_number"})
+    if not _luhn_ok(pan_digits):
+        return _json_response(400, {"error": "card_failed_luhn"})
+
+    try:
+        exp_month = int(body.get("expMonth") or 0)
+        exp_year = int(body.get("expYear") or 0)
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_expiry"})
+    if not (1 <= exp_month <= 12):
+        return _json_response(400, {"error": "invalid_exp_month"})
+    if exp_year < 100:
+        # Caller sent 2-digit year — normalize to 4-digit.
+        exp_year += 2000
+    if exp_year < 2026 or exp_year > 2050:
+        return _json_response(400, {"error": "invalid_exp_year"})
+    exp_str = f"{exp_month:02d}{str(exp_year)[-2:]}"
+
+    cvv = (body.get("cvv") or "").strip()
+    cvv_digits = _strip_digits(cvv)
+    if cvv and (len(cvv_digits) < 3 or len(cvv_digits) > 4):
+        return _json_response(400, {"error": "invalid_cvv"})
+
+    name_on_card = (body.get("nameOnCard") or "").strip()[:64]
+    zip_code = _strip_digits(body.get("zip"))[:5]
+
+    # Resolve loan: explicit if provided, else active loan.
+    loan_id = body.get("loanId")
+    if loan_id is None:
+        active = _fetch_active_loan(cid)
+        loan_id = active.get("id") if active else None
+
+    # ── Auth to Repay ──
+    creds = _get_repay_rgapi_creds()
+    if not creds:
+        return _json_response(502, {"error": "repay_creds_missing"})
+    api_user = creds.get("gatewayApiUser") or ""
+    api_token = creds.get("gatewaySecureToken") or ""
+    if not (api_user and api_token):
+        return _json_response(502, {"error": "repay_creds_incomplete"})
+
+    last4 = pan_digits[-4:]
+    brand = _detect_card_type(pan_digits)
+
+    # ── Call Repay Card Sale ──
+    sale_url = f"https://{REPAY_API_HOSTNAME}/rgapi/v1.0/transactions/card/sale"
+    sale_body: Dict[str, Any] = {
+        "amount":          round(amount, 2),
+        "card_number":     pan_digits,
+        "exp_date":        exp_str,
+        "name_on_card":    name_on_card or "Cardholder",
+        "zip":             zip_code,
+        "customer_id":     str(cid),
+        "invoice_id":      str(loan_id) if loan_id is not None else "",
+        "card_not_present": True,
+        "force_duplicate": False,
+        "custom_fields":   [],
+    }
+    if cvv_digits:
+        sale_body["cvv"] = cvv_digits
+        sale_body["cvv_mode"] = "submitted"
+    else:
+        sale_body["cvv_mode"] = "notsubmitted"
+
+    sale_headers = {
+        "Content-Type":        "application/json",
+        "rg-api-user":         api_user,
+        "rg-api-secure-token": api_token,
+    }
+    log.info("repay charge cid=%s loan=%s amt=%s last4=%s",
+             cid, loan_id, amount, last4)
+    status, parsed, raw = _http(
+        sale_url, "POST", body=sale_body, headers=sale_headers, timeout=30,
+    )
+    # Strip PAN/CVV from anything we log or echo back, defense in depth.
+    log_safe_body = dict(sale_body)
+    log_safe_body["card_number"] = f"****{last4}"
+    log_safe_body.pop("cvv", None)
+    log.info("repay charge response cid=%s status=%s body_head=%s",
+             cid, status, (raw or "")[:300])
+
+    if not isinstance(parsed, dict):
+        ledger_id = _record_payment_ledger(
+            cid=cid, loan_id=loan_id, amount=amount, result="-1",
+            transaction_id=None, result_text=f"http_{status}",
+            last4=last4,
+            error_detail=f"non-json upstream status={status}",
+        )
+        return _json_response(502, {
+            "success":   False,
+            "error":     "repay_http_error",
+            "_status":   status,
+            "ledgerId":  ledger_id,
+        })
+
+    result = str(parsed.get("result") or "")
+    result_text = parsed.get("result_text") or parsed.get("response_message", {}).get("description") or ""
+    transaction_id = parsed.get("transaction_id")
+    auth_amount = parsed.get("auth_amount") or parsed.get("total_amount") or 0
+    approval_code = parsed.get("approval_code") or ""
+
+    ledger_id = _record_payment_ledger(
+        cid=cid, loan_id=loan_id, amount=float(auth_amount or amount),
+        result=result, transaction_id=transaction_id,
+        result_text=result_text, last4=last4,
+    )
+
+    if result == "0" and transaction_id:
+        return _json_response(200, {
+            "success":       True,
+            "transactionId": transaction_id,
+            "authAmount":    auth_amount,
+            "approvalCode":  approval_code,
+            "last4":         last4,
+            "brand":         brand,
+            "resultText":    result_text or "Approved",
+            "ledgerId":      ledger_id,
+            # Vergent reconciliation runs in the background (TODO:
+            # wire up _post_payment_to_vergent helper next commit).
+        })
+
+    # Declined / error.
+    return _json_response(200, {
+        "success":     False,
+        "result":      result,
+        "resultText":  result_text or "Declined",
+        "last4":       last4,
+        "brand":       brand,
+        "ledgerId":    ledger_id,
+    })
+
+
+# Cache for the RgAPI creds (same Secrets Manager secret CardSafe
+# uses — gatewayApiUser/gatewaySecureToken values are shared
+# across CardSafe and RgAPI per Repay's account model).
+_repay_rgapi_creds_cache: Optional[Dict[str, Any]] = None
+
+
+def _get_repay_rgapi_creds() -> Optional[Dict[str, Any]]:
+    global _repay_rgapi_creds_cache
+    if _repay_rgapi_creds_cache is not None:
+        return _repay_rgapi_creds_cache
+    arn = os.environ.get("REPAY_SECRET_ARN", "cif-portal/repay/credentials")
+    try:
+        resp = _secrets.get_secret_value(SecretId=arn)
+        _repay_rgapi_creds_cache = json.loads(resp["SecretString"])
+        return _repay_rgapi_creds_cache
+    except Exception as exc:
+        log.warning("repay rgapi creds read failed (arn=%s): %s", arn, exc)
+        return None
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -1093,6 +1413,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_my_banks(event)
         if path.endswith("/my-payment/loan-summary") and method == "GET":
             return get_loan_summary(event)
+        if path.endswith("/my-payment/charge") and method == "POST":
+            return post_charge(event)
         if path.endswith("/my-payment") and method == "POST":
             return post_payment(event)
         if path.endswith("/my-payment-config") and method == "GET":
