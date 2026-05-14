@@ -1476,17 +1476,18 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     except (TypeError, ValueError):
         return False, "bad_ids", None
 
-    # /V1/PostCustomerLoanPayment uses PascalCase field names, not
-    # snake_case like /V1/PostCustomerCardTokenized. Vergent's V1
-    # surface is inconsistent endpoint-to-endpoint, so we send both
-    # casings — whichever the endpoint recognizes wins. (Confirmed
-    # error from the snake_case-only attempt:
-    #   400: ["PaymentAmount is invalid"]
-    # which named the exact PascalCase field they expect.)
     amount_dollars = round(float(amount), 2)
     body = {
-        # PascalCase (the form this endpoint actually wants)
-        "Id":                0,
+        # PascalCase (the form this endpoint actually wants).
+        # Vergent's DTO treats "Id" as the loan id (its primary
+        # entity under modification), NOT a "new record" sentinel
+        # like /V1/PostCustomerCardTokenized's "id": 0. Confirmed
+        # 2026-05-14 by their 500:
+        #   "No Loan record found for 0"
+        #   System.IndexOutOfRangeException
+        #   Vergent.Common.Lib.Converted.Loan.LoanDataObj.get_LoanDr()
+        # So Id ← loan_id, not 0. LoanId stays too (belt + suspenders).
+        "Id":                loan_id_int,
         "CompanyId":         VERGENT_COMPANY_ID,
         "CustomerId":        cid_int,
         "LoanId":            loan_id_int,
@@ -1505,7 +1506,7 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
         "Notes":             "Customer portal payment via cif-portal",
 
         # snake_case fallback duplicates — harmless if ignored.
-        "id":                0,
+        "id":                loan_id_int,
         "company_id":        VERGENT_COMPANY_ID,
         "customer_id":       cid_int,
         "loan_id":           loan_id_int,
