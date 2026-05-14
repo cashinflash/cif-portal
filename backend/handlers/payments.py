@@ -1683,7 +1683,12 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
         "customer_id":      str(cid),
         "invoice_id":       str(loan_id) if loan_id is not None else "",
         "card_not_present": True,
-        "force_duplicate":  False,
+        # In sandbox: override Repay's velocity / duplicate-charge
+        # protection so we can iterate freely with the same card +
+        # amount during testing. In prod: keep the protection on
+        # (default false) so accidental double-clicks don't
+        # double-charge customers.
+        "force_duplicate":  "sandbox" in REPAY_API_HOSTNAME.lower(),
         "custom_fields":    [],
     }
     if using_saved:
