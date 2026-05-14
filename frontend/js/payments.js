@@ -1,16 +1,18 @@
 /* ═══════════════════════════════════════
-   CASH IN FLASH — Payments page controller (Path 1 / direct-charge).
+   CASH IN FLASH — Payments page controller (saved-card flow).
 
-   The customer enters their card + amount in OUR portal; we POST
-   to /api/my-payment/charge which calls Repay's RgAPI REST endpoint
-   directly (no Vergent handoff).
+   Customer either:
+     a) Picks a saved card from their list → enters CVV + amount →
+        Pay now. We POST {paymentMethodId, cvv, amount} to
+        /api/my-payment/charge.
+     b) "Add a new card" → enters full PAN + exp + CVV + name +
+        zip + amount → Pay now. We POST {cardNumber, expMonth,
+        expYear, cvv, nameOnCard, zip, amount}. On success the
+        backend auto-tokenizes via Repay CardSafe and stores in
+        DDB so the card appears in the saved list next time.
 
-   Why direct-charge: Vergent's customer-portal payment routes
-   reject our handoff redirects and their /V1/PostCustomerLoanPayment
-   API is broken for our tenant (full archeology in
-   handlers/payments.py docstring). Direct Repay charge sidesteps
-   both — money moves, we record the transaction in our own DDB
-   ledger, Vergent reconciliation is best-effort.
+   No Vergent handoff. PAN-on-PCI scope is SAQ A-EP for the new-card
+   path; the saved-card path is strictly tighter (card_token only).
    ═══════════════════════════════════════ */
 (function () {
   'use strict';
@@ -18,6 +20,7 @@
   const TOKEN_KEY = 'cif_id_token';
   const LOGIN_URL = '/start.html';
   const SUCCESS_KEY = 'cif_payment_success';
+  const ADD_NEW_VALUE = '__add_new__';
 
   function qs(sel, root) { return (root || document).querySelector(sel); }
 
@@ -35,6 +38,11 @@
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
   function setText(el, v) { if (el) el.textContent = v; }
+  function escapeHtml(s) {
+    return String(s || '').replace(/[<>&"]/g, function (c) {
+      return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'})[c];
+    });
+  }
 
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) {
@@ -81,6 +89,8 @@
 
   const state = {
     loan: null,
+    methods: [],
+    selectedMethodId: ADD_NEW_VALUE,
     submitting: false,
     initialBalance: null,
   };
@@ -114,34 +124,138 @@
       const pill = qs('[data-pay-loan-status]', card);
       if (pill) pill.textContent = loan.status || 'Current';
       if (body) body.hidden = false;
-      // Pre-fill the amount field with the next-due (or balance) so
-      // the customer can pay in one click without typing.
+      // Pre-fill amount with next-due or balance.
       const amountInput = qs('#payAmount');
       if (amountInput && !amountInput.value) {
         const preset = Number(loan.nextDueAmount || loan.balance || 0);
-        if (preset > 0) {
-          amountInput.value = preset.toFixed(2);
-        }
+        if (preset > 0) amountInput.value = preset.toFixed(2);
       }
       return loan;
     });
   }
 
-  // ---------- Form input helpers (card number / exp formatting) ----------
+  // ---------- Saved methods ----------
+  function loadMethods() {
+    return api('/api/my-payment-methods').then(function (data) {
+      state.methods = (data && data.methods) || [];
+      renderMethods();
+      return state.methods;
+    }).catch(function () {
+      state.methods = [];
+      renderMethods();
+      return [];
+    });
+  }
+
+  function renderMethods() {
+    const wrap = qs('#paySavedMethodsWrap');
+    const list = qs('#paySavedMethods');
+    if (!wrap || !list) return;
+    list.innerHTML = '';
+
+    if (!state.methods || state.methods.length === 0) {
+      // No saved cards yet — hide the picker, default to new-card form.
+      wrap.hidden = true;
+      state.selectedMethodId = ADD_NEW_VALUE;
+      applyMethodSelection();
+      return;
+    }
+    wrap.hidden = false;
+
+    // If the previously-selected method got deleted, fall back to
+    // the newest saved card.
+    const selectedExists = state.methods.some(function (m) {
+      return m.methodId === state.selectedMethodId;
+    });
+    if (!selectedExists || state.selectedMethodId === ADD_NEW_VALUE) {
+      state.selectedMethodId = state.methods[0].methodId;
+    }
+
+    state.methods.forEach(function (m) {
+      const label = document.createElement('label');
+      label.className = 'pay-method' + (m.methodId === state.selectedMethodId ? ' is-selected' : '');
+      label.innerHTML =
+        '<input type="radio" name="payMethod" value="' + escapeHtml(m.methodId) + '"' +
+          (m.methodId === state.selectedMethodId ? ' checked' : '') + '>' +
+        '<div class="pay-method-body">' +
+          '<div class="pay-method-brand">' + escapeHtml(m.brand) + ' •••• ' + escapeHtml(m.last4) + '</div>' +
+          '<div class="pay-method-meta">Expires ' +
+            String(m.expMonth).padStart(2, '0') + '/' + String(m.expYear).slice(-2) +
+            (m.nameOnCard ? ' · ' + escapeHtml(m.nameOnCard) : '') +
+          '</div>' +
+        '</div>' +
+        '<button type="button" class="pay-method-remove" data-method-id="' + escapeHtml(m.methodId) + '">Remove</button>';
+      list.appendChild(label);
+    });
+
+    // "Add a new card" row.
+    const addNew = document.createElement('label');
+    addNew.className = 'pay-method pay-method--addnew' +
+      (state.selectedMethodId === ADD_NEW_VALUE ? ' is-selected' : '');
+    addNew.innerHTML =
+      '<input type="radio" name="payMethod" value="' + ADD_NEW_VALUE + '"' +
+        (state.selectedMethodId === ADD_NEW_VALUE ? ' checked' : '') + '>' +
+      '<div class="pay-method-body">' +
+        '<div class="pay-method-brand">+ Add a new card</div>' +
+        '<div class="pay-method-meta">Saved automatically for next time.</div>' +
+      '</div>';
+    list.appendChild(addNew);
+
+    applyMethodSelection();
+  }
+
+  function applyMethodSelection() {
+    const newCardFields = qs('#payNewCardFields');
+    const showNew = state.selectedMethodId === ADD_NEW_VALUE;
+    if (newCardFields) newCardFields.hidden = !showNew;
+    // Re-mark which .pay-method has the selected state for the
+    // visual highlight (CSS hover/checked alone isn't enough since
+    // the radio inputs are inside the label and we want the
+    // whole row tinted).
+    document.querySelectorAll('.pay-method').forEach(function (el) {
+      const radio = el.querySelector('input[type="radio"]');
+      el.classList.toggle('is-selected', !!radio && radio.checked);
+    });
+  }
+
+  function onMethodChange(e) {
+    if (e.target && e.target.matches('input[name="payMethod"]')) {
+      state.selectedMethodId = e.target.value;
+      applyMethodSelection();
+    }
+  }
+
+  function onMethodRemoveClick(e) {
+    const btn = e.target.closest('.pay-method-remove');
+    if (!btn) return;
+    e.preventDefault();
+    const methodId = btn.getAttribute('data-method-id');
+    if (!methodId) return;
+    if (!confirm('Remove this saved card?')) return;
+    btn.disabled = true;
+    api('/api/my-payment-methods/' + encodeURIComponent(methodId), {
+      method: 'DELETE',
+    }).then(function () {
+      // Refresh the list. The render handles picking a new selection.
+      return loadMethods();
+    }).catch(function () {
+      btn.disabled = false;
+      showError("We couldn't remove that card. Please try again.");
+    });
+  }
+
+  // ---------- Input formatting ----------
   function formatCardNumber(value) {
-    // Strip non-digits, group in 4s. Max 19 digits (Visa/MC/Discover
-    // are 16; Amex 15; Diners 14; some others up to 19).
     const digits = String(value || '').replace(/\D/g, '').slice(0, 19);
     return digits.replace(/(\d{4})(?=\d)/g, '$1 ');
   }
   function formatExp(value) {
-    // MM/YY auto-insert. Strip non-digits, slash after 2 digits.
     const digits = String(value || '').replace(/\D/g, '').slice(0, 4);
     if (digits.length < 3) return digits;
     return digits.slice(0, 2) + '/' + digits.slice(2);
   }
 
-  // ---------- Charge ----------
+  // ---------- Errors ----------
   function showError(msg) {
     const el = qs('#payError');
     if (!el) return;
@@ -154,36 +268,46 @@
     if (el) { el.hidden = true; el.textContent = ''; }
   }
 
+  // ---------- Submit ----------
   function readForm() {
     const amount = parseFloat(String(qs('#payAmount').value || '').replace(/[^\d.]/g, ''));
+    const cvv = String(qs('#payCvv').value || '').trim();
+    const usingSaved = state.selectedMethodId && state.selectedMethodId !== ADD_NEW_VALUE;
+
+    if (usingSaved) {
+      return {
+        amount: amount, cvv: cvv,
+        paymentMethodId: state.selectedMethodId,
+        loanId: state.loan && state.loan.id,
+        usingSaved: true,
+      };
+    }
+
     const cardNumber = String(qs('#payCardNumber').value || '').replace(/\s+/g, '');
-    const expRaw = String(qs('#payExp').value || '');
-    const expDigits = expRaw.replace(/\D/g, '');
+    const expDigits = String(qs('#payExp').value || '').replace(/\D/g, '');
     const expMonth = parseInt(expDigits.slice(0, 2), 10);
     const expYearShort = parseInt(expDigits.slice(2, 4), 10);
     const expYear = isNaN(expYearShort) ? 0 : (2000 + expYearShort);
-    const cvv = String(qs('#payCvv').value || '').trim();
     const nameOnCard = String(qs('#payName').value || '').trim();
     const zip = String(qs('#payZip').value || '').trim();
     return {
-      amount: amount,
+      amount: amount, cvv: cvv,
       cardNumber: cardNumber,
-      expMonth: expMonth,
-      expYear: expYear,
-      cvv: cvv,
-      nameOnCard: nameOnCard,
-      zip: zip,
+      expMonth: expMonth, expYear: expYear,
+      nameOnCard: nameOnCard, zip: zip,
       loanId: state.loan && state.loan.id,
+      usingSaved: false,
     };
   }
 
   function validateForm(f) {
     if (!f.amount || isNaN(f.amount) || f.amount <= 0) return 'Please enter a valid amount.';
     if (f.amount > 5000) return 'Amount must be $5,000 or less.';
+    if (!f.cvv || !/^\d{3,4}$/.test(f.cvv)) return 'Please enter the 3- or 4-digit CVV.';
+    if (f.usingSaved) return null;
     if (!f.cardNumber || f.cardNumber.length < 13) return 'Please enter a valid card number.';
     if (!f.expMonth || f.expMonth < 1 || f.expMonth > 12) return 'Please enter a valid expiration month (01-12).';
     if (!f.expYear || f.expYear < 2026 || f.expYear > 2050) return 'Please enter a valid expiration year.';
-    if (f.cvv && !/^\d{3,4}$/.test(f.cvv)) return 'CVV must be 3 or 4 digits.';
     return null;
   }
 
@@ -197,7 +321,6 @@
     if (err) { showError(err); return; }
 
     state.initialBalance = state.loan ? Number(state.loan.balance) : null;
-
     const btn = qs('#payChargeBtn');
     state.submitting = true;
     if (btn) {
@@ -205,65 +328,73 @@
       btn.textContent = 'Processing payment…';
     }
 
-    api('/api/my-payment/charge', {
-      method: 'POST',
-      body: {
-        amount: form.amount,
-        cardNumber: form.cardNumber,
-        expMonth: form.expMonth,
-        expYear: form.expYear,
-        cvv: form.cvv,
-        nameOnCard: form.nameOnCard,
-        zip: form.zip,
-        loanId: form.loanId,
-      },
-    }).then(function (res) {
-      if (res && res.success && res.transactionId) {
-        // Approved — refresh balance + show receipt.
-        sessionStorage.setItem(SUCCESS_KEY, JSON.stringify({
-          amount: Number(res.authAmount || form.amount),
-          last4: res.last4 || '',
-          brand: res.brand || '',
-          transactionId: res.transactionId,
-          when: Date.now(),
-        }));
-        return loadLoan().then(function (loan) {
-          const newBal = loan ? Number(loan.balance) : null;
-          showReceipt(Number(res.authAmount || form.amount), newBal);
-        }).catch(function () {
-          showReceipt(Number(res.authAmount || form.amount), null);
-        });
-      }
-      // success:false → declined.
-      const reason = (res && res.resultText) || 'Card declined.';
-      showError(reason + ' Please try a different card or call (747) 270-7121.');
-    }).catch(function (e) {
-      let msg = "We couldn't process your payment.";
-      const errBody = e && e.body;
-      if (errBody && typeof errBody === 'object') {
-        const code = errBody.error || errBody.code || '';
-        msg = {
-          invalid_amount:         'Please enter a valid amount.',
-          amount_out_of_range:    'Amount must be between $0.01 and $5,000.',
-          invalid_card_number:    'Card number is invalid.',
-          card_failed_luhn:       'Card number is invalid — please double-check.',
-          invalid_expiry:         'Expiration is invalid.',
-          invalid_exp_month:      'Expiration month is invalid.',
-          invalid_exp_year:       'Expiration year is invalid.',
-          invalid_cvv:            'CVV is invalid.',
-          repay_creds_missing:    'Payments are temporarily unavailable. Please call (747) 270-7121.',
-          repay_creds_incomplete: 'Payments are temporarily unavailable. Please call (747) 270-7121.',
-          repay_http_error:       'Our payment processor returned an error. Please try again or call (747) 270-7121.',
-        }[code] || msg;
-      }
-      showError(msg);
-    }).then(function () {
-      state.submitting = false;
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Pay now';
-      }
-    });
+    const reqBody = form.usingSaved
+      ? {
+          amount: form.amount,
+          paymentMethodId: form.paymentMethodId,
+          cvv: form.cvv,
+          loanId: form.loanId,
+        }
+      : {
+          amount: form.amount,
+          cardNumber: form.cardNumber,
+          expMonth: form.expMonth,
+          expYear: form.expYear,
+          cvv: form.cvv,
+          nameOnCard: form.nameOnCard,
+          zip: form.zip,
+          loanId: form.loanId,
+        };
+
+    api('/api/my-payment/charge', { method: 'POST', body: reqBody })
+      .then(function (res) {
+        if (res && res.success && res.transactionId) {
+          sessionStorage.setItem(SUCCESS_KEY, JSON.stringify({
+            amount: Number(res.authAmount || form.amount),
+            last4: res.last4 || '',
+            brand: res.brand || '',
+            transactionId: res.transactionId,
+            when: Date.now(),
+          }));
+          return loadLoan().then(function (loan) {
+            const newBal = loan ? Number(loan.balance) : null;
+            showReceipt(Number(res.authAmount || form.amount), newBal);
+          }).catch(function () {
+            showReceipt(Number(res.authAmount || form.amount), null);
+          });
+        }
+        const reason = (res && res.resultText) || 'Card declined.';
+        showError(reason + ' Please try a different card or call (747) 270-7121.');
+      })
+      .catch(function (e) {
+        let msg = "We couldn't process your payment.";
+        const errBody = e && e.body;
+        if (errBody && typeof errBody === 'object') {
+          const code = errBody.error || errBody.code || '';
+          msg = {
+            invalid_amount:           'Please enter a valid amount.',
+            amount_out_of_range:      'Amount must be between $0.01 and $5,000.',
+            invalid_card_number:      'Card number is invalid.',
+            card_failed_luhn:         'Card number is invalid — please double-check.',
+            invalid_expiry:           'Expiration is invalid.',
+            invalid_exp_month:        'Expiration month is invalid.',
+            invalid_exp_year:         'Expiration year is invalid.',
+            invalid_cvv:              'CVV is invalid.',
+            payment_method_not_found: 'That saved card is no longer available. Please add a new card.',
+            repay_creds_missing:      'Payments are temporarily unavailable. Please call (747) 270-7121.',
+            repay_creds_incomplete:   'Payments are temporarily unavailable. Please call (747) 270-7121.',
+            repay_http_error:         'Our payment processor returned an error. Please try again or call (747) 270-7121.',
+          }[code] || msg;
+        }
+        showError(msg);
+      })
+      .then(function () {
+        state.submitting = false;
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Pay now';
+        }
+      });
   }
 
   function showReceipt(amount, newBalance) {
@@ -281,7 +412,13 @@
     const form = qs('#payChargeForm');
     if (form) form.addEventListener('submit', submitPayment);
 
-    // Live formatting for card number + expiry.
+    const methodsList = qs('#paySavedMethods');
+    if (methodsList) {
+      methodsList.addEventListener('change', onMethodChange);
+      methodsList.addEventListener('click', onMethodRemoveClick);
+    }
+
+    // Live formatting.
     const cardInput = qs('#payCardNumber');
     if (cardInput) cardInput.addEventListener('input', function () {
       this.value = formatCardNumber(this.value);
@@ -304,7 +441,12 @@
       if (!isNaN(v) && v > 0) this.value = v.toFixed(2);
     });
 
-    loadLoan().then(function (loan) {
+    // Load loan + methods in parallel.
+    const loanP = loadLoan();
+    const methodsP = loadMethods();
+
+    Promise.all([loanP, methodsP]).then(function (results) {
+      const loan = results[0];
       const formCard = qs('#payFormCard');
       if (formCard) formCard.hidden = !loan;
     }).catch(function (err) {

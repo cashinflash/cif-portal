@@ -120,17 +120,19 @@
     </section>
 
     <!-- Card-entry pay form (Path 1: Repay RgAPI direct-charge).
-         Customer picks an amount + enters card details. We POST
-         to /api/my-payment/charge which calls Repay's REST
-         transactions/card/sale endpoint directly. -->
+         Customer picks a saved card OR enters a new one, picks an
+         amount, clicks Pay. We POST to /api/my-payment/charge
+         which calls Repay's REST transactions/card/sale endpoint
+         directly. Saved cards are stored in our DDB (tokenized by
+         Repay CardSafe on first successful charge). -->
     <section class="dash-card pay-form-card" id="payFormCard" hidden>
-      <h2 style="margin:0 0 8px 0;font-size:1.25rem;">Pay with your card</h2>
+      <h2 style="margin:0 0 8px 0;font-size:1.25rem;">Make a payment</h2>
       <p style="margin:0 0 16px 0;color:#475569;line-height:1.5;font-size:0.95rem">
-        Enter the amount you'd like to pay, then your card details. Your payment is processed by our secure payment partner.
+        Pay using a saved card or add a new one. Your payment is processed by our secure payment partner.
       </p>
 
       <form id="payChargeForm" autocomplete="off" novalidate>
-        <!-- Amount -->
+        <!-- Amount (always shown) -->
         <label class="pay-field-label" for="payAmount">Amount</label>
         <div class="pay-amount-wrap">
           <span class="pay-amount-prefix">$</span>
@@ -139,42 +141,52 @@
                  placeholder="0.00" autocomplete="off" required>
         </div>
 
-        <!-- Card number -->
-        <label class="pay-field-label" for="payCardNumber">Card number</label>
-        <input type="text" inputmode="numeric" id="payCardNumber" name="cardNumber"
-               class="pay-input" placeholder="0000 0000 0000 0000"
-               autocomplete="cc-number" maxlength="23" required>
-
-        <!-- Exp + CVV -->
-        <div class="pay-field-row">
-          <div class="pay-field-col">
-            <label class="pay-field-label" for="payExp">Expiration (MM/YY)</label>
-            <input type="text" inputmode="numeric" id="payExp" name="exp"
-                   class="pay-input" placeholder="MM/YY" maxlength="5"
-                   autocomplete="cc-exp" required>
-          </div>
-          <div class="pay-field-col pay-field-col--cvv">
-            <label class="pay-field-label" for="payCvv">CVV</label>
-            <input type="text" inputmode="numeric" id="payCvv" name="cvv"
-                   class="pay-input" placeholder="123" maxlength="4"
-                   autocomplete="cc-csc">
-          </div>
+        <!-- Saved methods (radio list — populated by JS on load).
+             Hidden when the customer has no saved cards yet. -->
+        <div id="paySavedMethodsWrap" hidden style="margin-top:14px">
+          <label class="pay-field-label">Payment method</label>
+          <div id="paySavedMethods"></div>
         </div>
 
-        <!-- Name + ZIP -->
-        <label class="pay-field-label" for="payName">Name on card</label>
-        <input type="text" id="payName" name="nameOnCard"
-               class="pay-input" placeholder="Jane Smith"
-               autocomplete="cc-name" maxlength="64">
+        <!-- New-card fields (Card number / Exp / Name / ZIP).
+             Hidden when the customer picks a saved card; shown when
+             they pick "Add a new card" OR have no saved cards yet. -->
+        <div id="payNewCardFields">
+          <label class="pay-field-label" for="payCardNumber">Card number</label>
+          <input type="text" inputmode="numeric" id="payCardNumber" name="cardNumber"
+                 class="pay-input" placeholder="0000 0000 0000 0000"
+                 autocomplete="cc-number" maxlength="23">
 
-        <label class="pay-field-label" for="payZip">Billing ZIP</label>
-        <input type="text" inputmode="numeric" id="payZip" name="zip"
-               class="pay-input pay-input--narrow" placeholder="12345"
-               autocomplete="postal-code" maxlength="5">
+          <div class="pay-field-row">
+            <div class="pay-field-col">
+              <label class="pay-field-label" for="payExp">Expiration (MM/YY)</label>
+              <input type="text" inputmode="numeric" id="payExp" name="exp"
+                     class="pay-input" placeholder="MM/YY" maxlength="5"
+                     autocomplete="cc-exp">
+            </div>
+          </div>
+
+          <label class="pay-field-label" for="payName">Name on card</label>
+          <input type="text" id="payName" name="nameOnCard"
+                 class="pay-input" placeholder="Jane Smith"
+                 autocomplete="cc-name" maxlength="64">
+
+          <label class="pay-field-label" for="payZip">Billing ZIP</label>
+          <input type="text" inputmode="numeric" id="payZip" name="zip"
+                 class="pay-input pay-input--narrow" placeholder="12345"
+                 autocomplete="postal-code" maxlength="5">
+        </div>
+
+        <!-- CVV (always shown — required for both saved + new cards
+             per PCI rules; CVV is never stored). -->
+        <label class="pay-field-label" for="payCvv">CVV (security code)</label>
+        <input type="text" inputmode="numeric" id="payCvv" name="cvv"
+               class="pay-input pay-input--narrow" placeholder="123"
+               maxlength="4" autocomplete="cc-csc">
 
         <div class="pay-trust" style="margin-top:16px">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          Secured with bank-grade encryption
+          Debit cards only. Secured with bank-grade encryption.
         </div>
 
         <p class="pay-error" id="payError" hidden></p>
