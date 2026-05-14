@@ -1530,8 +1530,23 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     }
     log.info("vergent reconcile cid=%s loan=%s amt=%s repay_txn=%s",
              cid, loan_id, amount, transaction_id)
+    # Try with loan id in BOTH body AND query string — three
+    # body-field attempts ("LoanId", "Id"=loan_id, "HdrId" +
+    # variants) all hit the same "No Loan record found for 0"
+    # 500. Vergent might be reading the loan id from a query
+    # param even though most V1 endpoints use body. Belt-and-
+    # suspenders: include both.
+    from urllib.parse import urlencode
+    qs = urlencode({
+        "loanId":      loan_id_int,
+        "LoanId":      loan_id_int,
+        "customerId":  cid_int,
+        "CustomerId":  cid_int,
+        "companyId":   VERGENT_COMPANY_ID,
+        "CompanyId":   VERGENT_COMPANY_ID,
+    })
     status, resp, raw = _v1_request(
-        "POST", "/V1/PostCustomerLoanPayment", body=body,
+        "POST", f"/V1/PostCustomerLoanPayment?{qs}", body=body,
     )
     head = (raw or "")[:300]
     log.info("vergent reconcile response status=%s body_head=%s",
