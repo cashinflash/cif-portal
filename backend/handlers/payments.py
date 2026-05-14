@@ -1476,22 +1476,50 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     except (TypeError, ValueError):
         return False, "bad_ids", None
 
+    # /V1/PostCustomerLoanPayment uses PascalCase field names, not
+    # snake_case like /V1/PostCustomerCardTokenized. Vergent's V1
+    # surface is inconsistent endpoint-to-endpoint, so we send both
+    # casings — whichever the endpoint recognizes wins. (Confirmed
+    # error from the snake_case-only attempt:
+    #   400: ["PaymentAmount is invalid"]
+    # which named the exact PascalCase field they expect.)
+    amount_dollars = round(float(amount), 2)
     body = {
-        "id":                       0,
-        "company_id":               VERGENT_COMPANY_ID,
-        "customer_id":              cid_int,
-        "loan_id":                  loan_id_int,
-        "amount":                   round(float(amount), 2),
-        "transaction_id":           str(transaction_id),
-        "card_ref":                 repay_token or "",
-        "card_last_four":           last4 or "",
-        "approval_code":            approval_code or "",
-        "processor":                "Repay",
-        "payment_type_id":          1,   # 1 = credit/debit card (guess)
-        "payment_method_id":        1,
-        "is_processed":             True,
-        "is_settled":               False,  # Repay settles next batch
-        "from_customer_portal":     True,
+        # PascalCase (the form this endpoint actually wants)
+        "Id":                0,
+        "CompanyId":         VERGENT_COMPANY_ID,
+        "CustomerId":        cid_int,
+        "LoanId":            loan_id_int,
+        "PaymentAmount":     amount_dollars,
+        "PaymentDate":       None,  # let Vergent default to now
+        "PaymentTypeId":     1,
+        "PaymentMethodId":   1,
+        "TransactionId":     str(transaction_id),
+        "ApprovalCode":      approval_code or "",
+        "CardRef":           repay_token or "",
+        "CardLastFour":      last4 or "",
+        "Processor":         "Repay",
+        "IsProcessed":       True,
+        "IsSettled":         False,
+        "FromCustomerPortal": True,
+        "Notes":             "Customer portal payment via cif-portal",
+
+        # snake_case fallback duplicates — harmless if ignored.
+        "id":                0,
+        "company_id":        VERGENT_COMPANY_ID,
+        "customer_id":       cid_int,
+        "loan_id":           loan_id_int,
+        "amount":            amount_dollars,
+        "transaction_id":    str(transaction_id),
+        "card_ref":          repay_token or "",
+        "card_last_four":    last4 or "",
+        "approval_code":     approval_code or "",
+        "processor":         "Repay",
+        "payment_type_id":   1,
+        "payment_method_id": 1,
+        "is_processed":      True,
+        "is_settled":        False,
+        "from_customer_portal": True,
     }
     log.info("vergent reconcile cid=%s loan=%s amt=%s repay_txn=%s",
              cid, loan_id, amount, transaction_id)

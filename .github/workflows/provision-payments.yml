@@ -298,7 +298,7 @@ jobs:
           aws iam put-role-policy \
             --role-name "$ROLE_NAME" \
             --policy-name payments-ledger-write \
-            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:PutItem\",\"dynamodb:GetItem\",\"dynamodb:Query\"],\"Resource\":\"$LEDGER_TABLE_ARN\"}]}"
+            --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:PutItem\",\"dynamodb:GetItem\",\"dynamodb:Query\",\"dynamodb:UpdateItem\"],\"Resource\":\"$LEDGER_TABLE_ARN\"}]}"
           echo "IAM policy payments-ledger-write attached."
 
           # Saved-cards table (PutItem on charge success, GetItem +
