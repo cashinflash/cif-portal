@@ -1420,6 +1420,95 @@ def _record_payment_ledger(
         return None
 
 
+def _update_ledger_reconcile(*, ledger_id: str, state: str,
+                              vergent_payment_id: Optional[str] = None,
+                              detail: Optional[str] = None) -> None:
+    """Patch a ledger row's reconcileState after Vergent post.
+    Best-effort: a failed update is logged, not propagated."""
+    if not ledger_id:
+        return
+    expr = "SET reconcileState = :s"
+    vals: Dict[str, Any] = {":s": {"S": state}}
+    if vergent_payment_id:
+        expr += ", vergentPaymentId = :v"
+        vals[":v"] = {"S": str(vergent_payment_id)}
+    if detail:
+        expr += ", reconcileDetail = :d"
+        vals[":d"] = {"S": detail[:500]}
+    try:
+        _dynamo_client().update_item(
+            TableName=PAYMENT_LEDGER_TABLE,
+            Key={"ledgerId": {"S": ledger_id}},
+            UpdateExpression=expr,
+            ExpressionAttributeValues=vals,
+        )
+    except Exception as exc:
+        log.warning("ledger reconcile update failed lid=%s: %s",
+                    ledger_id, exc)
+
+
+def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
+                              transaction_id: Any, last4: str,
+                              brand: str, approval_code: str,
+                              repay_token: Optional[str]) -> Tuple[bool, str, Optional[str]]:
+    """Tell Vergent's V1 admin API that a payment was processed,
+    so their loan balance reflects it.
+
+    Returns (success, detail, vergent_payment_id).
+
+    Body shape is modeled on the working
+    /V1/PostCustomerCardTokenized call in handlers/if_submit.py —
+    same V1 surface, same service-token auth, same snake_case
+    convention. The previous /V1/PostCustomerLoanPayment attempt
+    documented at the top of this file 500'd with
+    NullReferenceException, likely because the body was missing
+    fields we now know are required (company_id, processor,
+    transaction_id from a real Repay charge, etc.). If this
+    still fails for our tenant, the DDB ledger flags the row
+    as needing manual reconciliation; staff can apply the
+    payment in Vergent's admin UI from a future admin-only view.
+    """
+    if not transaction_id:
+        return False, "no_transaction_id", None
+    try:
+        cid_int = int(cid)
+        loan_id_int = int(loan_id) if loan_id is not None else 0
+    except (TypeError, ValueError):
+        return False, "bad_ids", None
+
+    body = {
+        "id":                       0,
+        "company_id":               VERGENT_COMPANY_ID,
+        "customer_id":              cid_int,
+        "loan_id":                  loan_id_int,
+        "amount":                   round(float(amount), 2),
+        "transaction_id":           str(transaction_id),
+        "card_ref":                 repay_token or "",
+        "card_last_four":           last4 or "",
+        "approval_code":            approval_code or "",
+        "processor":                "Repay",
+        "payment_type_id":          1,   # 1 = credit/debit card (guess)
+        "payment_method_id":        1,
+        "is_processed":             True,
+        "is_settled":               False,  # Repay settles next batch
+        "from_customer_portal":     True,
+    }
+    log.info("vergent reconcile cid=%s loan=%s amt=%s repay_txn=%s",
+             cid, loan_id, amount, transaction_id)
+    status, resp, raw = _v1_request(
+        "POST", "/V1/PostCustomerLoanPayment", body=body,
+    )
+    head = (raw or "")[:300]
+    log.info("vergent reconcile response status=%s body_head=%s",
+             status, head)
+
+    if status in (200, 201) and isinstance(resp, dict):
+        vergent_payment_id = (resp.get("id") or resp.get("paymentId")
+                              or resp.get("PaymentId"))
+        return True, "ok", (str(vergent_payment_id) if vergent_payment_id else None)
+    return False, f"http_{status}:{head[:200]}", None
+
+
 def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/my-payment/charge
 
@@ -1656,6 +1745,45 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
                 log.warning("auto-save tokenize unexpected error cid=%s: %s",
                             cid, exc)
 
+        # ── Vergent reconciliation (best-effort) ──
+        # Tell Vergent's V1 admin API the payment landed so the
+        # customer's loan balance reflects it on their next refresh.
+        # Failure does NOT change the response — the customer's
+        # money already moved through Repay, and our DDB ledger
+        # row marks the row "vergent_failed" so staff can apply
+        # it manually from the future admin reconciliation view.
+        vergent_status = "vergent_pending"
+        try:
+            ok, detail, vergent_pid = _post_payment_to_vergent(
+                cid=cid, loan_id=loan_id, amount=float(auth_amount or amount),
+                transaction_id=transaction_id, last4=last4, brand=brand,
+                approval_code=approval_code,
+                repay_token=(
+                    (saved_method or {}).get("repayToken") if using_saved
+                    else None
+                ),
+            )
+            if ok:
+                _update_ledger_reconcile(
+                    ledger_id=ledger_id, state="vergent_recorded",
+                    vergent_payment_id=vergent_pid,
+                )
+                vergent_status = "vergent_recorded"
+            else:
+                _update_ledger_reconcile(
+                    ledger_id=ledger_id, state="vergent_failed",
+                    detail=detail,
+                )
+                vergent_status = "vergent_failed"
+        except Exception as exc:
+            log.warning("vergent reconcile unexpected error cid=%s: %s",
+                        cid, exc)
+            _update_ledger_reconcile(
+                ledger_id=ledger_id, state="vergent_failed",
+                detail=f"exception:{type(exc).__name__}",
+            )
+            vergent_status = "vergent_failed"
+
         return _json_response(200, {
             "success":       True,
             "transactionId": transaction_id,
@@ -1667,6 +1795,7 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
             "ledgerId":      ledger_id,
             "savedMethodId": saved_method_id,
             "usedSavedCard": using_saved,
+            "vergentReconcile": vergent_status,
         })
 
     # Declined / error.
