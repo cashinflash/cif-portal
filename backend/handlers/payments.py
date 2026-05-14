@@ -1450,23 +1450,31 @@ def _update_ledger_reconcile(*, ledger_id: str, state: str,
 def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
                               transaction_id: Any, last4: str,
                               brand: str, approval_code: str,
-                              repay_token: Optional[str]) -> Tuple[bool, str, Optional[str]]:
-    """Tell Vergent's V1 admin API that a payment was processed,
+                              repay_token: Optional[str],
+                              repay_response: Optional[Dict[str, Any]] = None,
+                              ) -> Tuple[bool, str, Optional[str]]:
+    """Tell Vergent's V1 admin API that a payment was processed
     so their loan balance reflects it.
 
     Returns (success, detail, vergent_payment_id).
 
-    Body shape is modeled on the working
-    /V1/PostCustomerCardTokenized call in handlers/if_submit.py —
-    same V1 surface, same service-token auth, same snake_case
-    convention. The previous /V1/PostCustomerLoanPayment attempt
-    documented at the top of this file 500'd with
-    NullReferenceException, likely because the body was missing
-    fields we now know are required (company_id, processor,
-    transaction_id from a real Repay charge, etc.). If this
-    still fails for our tenant, the DDB ledger flags the row
-    as needing manual reconciliation; staff can apply the
-    payment in Vergent's admin UI from a future admin-only view.
+    Strategy: try Vergent's Repay-gateway webhook RECEIVERS first
+    (the endpoints designed to accept a Repay charge notification
+    after the fact — exactly our use case), then fall back to
+    /V1/PostCustomerLoanPayment which has been broken for our
+    tenant across multiple attempts ("No Loan record found for 0").
+
+      1. POST /V1/repay/transaction/card/sync  — forward Repay's
+         JSON Card Sale response verbatim. Vergent's gateway
+         layer should parse it the same way it would a real
+         Repay webhook callback.
+      2. POST /V1/repay/transaction/card       — non-sync variant.
+      3. POST /V1/PostCustomerLoanPayment      — legacy attempt,
+         documented broken; kept as last fallback in case Vergent
+         ever fixes it.
+
+    On any 200/201 the ledger flips reconcileState to
+    vergent_recorded. On all-failures, vergent_failed.
     """
     if not transaction_id:
         return False, "no_transaction_id", None
@@ -1477,16 +1485,61 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
         return False, "bad_ids", None
 
     amount_dollars = round(float(amount), 2)
-    body = {
-        # PascalCase (the form this endpoint actually wants).
-        # Vergent V1 calls a loan record a "header" internally. Other
-        # V1 endpoints (loans_v1.py) read the loan id from one of:
-        #   HdrId, LoanHeaderId, TransHdrId, LoanId, Id
-        # Send all variants so whichever this endpoint reads gets
-        # the right value. Confirmed previous 500:
-        #   "No Loan record found for 0"
-        # means Vergent read the loan id from a different field
-        # than LoanId — likely HdrId or LoanHeaderId.
+    log.info("vergent reconcile cid=%s loan=%s amt=%s repay_txn=%s",
+             cid, loan_id, amount, transaction_id)
+
+    # ── Attempt 1 + 2: Repay webhook receivers ──
+    # Forward the actual Repay response JSON. Vergent's
+    # /V1/repay/transaction/card[/sync] endpoints are documented
+    # in prior session notes as "Repay webhook receivers" —
+    # built to accept a Repay charge payload and record it in
+    # Vergent's books. Our use case (post-charge reconciliation)
+    # is exactly what they're for.
+    #
+    # Augment the body with the customer/loan identifiers Vergent
+    # needs to actually apply the payment. Repay's response
+    # doesn't include CustomerId/LoanId by themselves (only as
+    # the customer_id/invoice_id strings we set), so we surface
+    # them at the top level for Vergent's parser.
+    if repay_response and isinstance(repay_response, dict):
+        webhook_body = dict(repay_response)
+    else:
+        webhook_body = {}
+    webhook_body.update({
+        "CustomerId":     cid_int,
+        "customerId":     cid_int,
+        "customer_id":    str(cid_int),
+        "LoanId":         loan_id_int,
+        "loanId":         loan_id_int,
+        "loan_id":        loan_id_int,
+        "invoice_id":     str(loan_id_int),
+        "CompanyId":      VERGENT_COMPANY_ID,
+        "companyId":      VERGENT_COMPANY_ID,
+    })
+
+    for path in ("/V1/repay/transaction/card/sync",
+                 "/V1/repay/transaction/card"):
+        log.info("vergent reconcile attempt path=%s", path)
+        status, resp, raw = _v1_request("POST", path, body=webhook_body)
+        head = (raw or "")[:300]
+        log.info("vergent reconcile response path=%s status=%s body_head=%s",
+                 path, status, head)
+        if status in (200, 201):
+            vergent_payment_id = None
+            if isinstance(resp, dict):
+                vergent_payment_id = (resp.get("id") or resp.get("paymentId")
+                                      or resp.get("PaymentId")
+                                      or resp.get("transactionId"))
+            return True, f"ok:{path}", (
+                str(vergent_payment_id) if vergent_payment_id else None
+            )
+
+    # ── Attempt 3: PostCustomerLoanPayment (broken-but-try-anyway) ──
+    # Send PascalCase + snake_case alias bundle + every known loan-id
+    # field name. Documented as 500-NullReferenceException across
+    # multiple prior session attempts. Kept here in case Vergent
+    # eventually fixes it.
+    legacy_body = {
         "Id":                loan_id_int,
         "HdrId":             loan_id_int,
         "LoanHeaderId":      loan_id_int,
@@ -1495,7 +1548,7 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
         "CompanyId":         VERGENT_COMPANY_ID,
         "CustomerId":        cid_int,
         "PaymentAmount":     amount_dollars,
-        "PaymentDate":       None,  # let Vergent default to now
+        "PaymentDate":       None,
         "PaymentTypeId":     1,
         "PaymentMethodId":   1,
         "TransactionId":     str(transaction_id),
@@ -1507,8 +1560,6 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
         "IsSettled":         False,
         "FromCustomerPortal": True,
         "Notes":             "Customer portal payment via cif-portal",
-
-        # snake_case fallback duplicates — harmless if ignored.
         "id":                loan_id_int,
         "hdr_id":            loan_id_int,
         "loan_header_id":    loan_id_int,
@@ -1528,35 +1579,29 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
         "is_settled":        False,
         "from_customer_portal": True,
     }
-    log.info("vergent reconcile cid=%s loan=%s amt=%s repay_txn=%s",
-             cid, loan_id, amount, transaction_id)
-    # Try with loan id in BOTH body AND query string — three
-    # body-field attempts ("LoanId", "Id"=loan_id, "HdrId" +
-    # variants) all hit the same "No Loan record found for 0"
-    # 500. Vergent might be reading the loan id from a query
-    # param even though most V1 endpoints use body. Belt-and-
-    # suspenders: include both.
     from urllib.parse import urlencode
     qs = urlencode({
         "loanId":      loan_id_int,
         "LoanId":      loan_id_int,
         "customerId":  cid_int,
         "CustomerId":  cid_int,
-        "companyId":   VERGENT_COMPANY_ID,
-        "CompanyId":   VERGENT_COMPANY_ID,
     })
+    log.info("vergent reconcile attempt path=/V1/PostCustomerLoanPayment (legacy)")
     status, resp, raw = _v1_request(
-        "POST", f"/V1/PostCustomerLoanPayment?{qs}", body=body,
+        "POST", f"/V1/PostCustomerLoanPayment?{qs}", body=legacy_body,
     )
     head = (raw or "")[:300]
-    log.info("vergent reconcile response status=%s body_head=%s",
-             status, head)
-
-    if status in (200, 201) and isinstance(resp, dict):
-        vergent_payment_id = (resp.get("id") or resp.get("paymentId")
-                              or resp.get("PaymentId"))
-        return True, "ok", (str(vergent_payment_id) if vergent_payment_id else None)
-    return False, f"http_{status}:{head[:200]}", None
+    log.info("vergent reconcile response path=PostCustomerLoanPayment "
+             "status=%s body_head=%s", status, head)
+    if status in (200, 201):
+        vergent_payment_id = None
+        if isinstance(resp, dict):
+            vergent_payment_id = (resp.get("id") or resp.get("paymentId")
+                                  or resp.get("PaymentId"))
+        return True, "ok:PostCustomerLoanPayment", (
+            str(vergent_payment_id) if vergent_payment_id else None
+        )
+    return False, f"all_attempts_failed:last_status={status}:{head[:200]}", None
 
 
 def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1817,6 +1862,7 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
                     (saved_method or {}).get("repayToken") if using_saved
                     else None
                 ),
+                repay_response=parsed,
             )
             if ok:
                 _update_ledger_reconcile(
