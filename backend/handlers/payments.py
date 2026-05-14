@@ -1488,57 +1488,108 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     log.info("vergent reconcile cid=%s loan=%s amt=%s repay_txn=%s",
              cid, loan_id, amount, transaction_id)
 
-    # ── Attempt 1 + 2: Repay webhook receivers ──
-    # The endpoints /V1/repay/transaction/card[/sync] exist and
-    # respond 400 "Invalid request" — they're picky about body
-    # shape. PostCustomerCardTokenized (the working V1 admin
-    # endpoint in if_submit.py) uses a minimal snake_case body;
-    # try the same convention. Build TWO body candidates and
-    # probe both endpoints with each.
-    #
-    # Candidate A — minimal snake_case (mirrors
-    # PostCustomerCardTokenized's working schema):
-    body_minimal = {
-        "id":             0,
-        "company_id":     VERGENT_COMPANY_ID,
-        "customer_id":    cid_int,
-        "loan_id":        loan_id_int,
-        "amount":         amount_dollars,
-        "transaction_id": str(transaction_id),
-        "auth_code":      approval_code or "",
-        "approval_code":  approval_code or "",
-        "card_ref":       repay_token or "",
-        "card_last_four": last4 or "",
-        "last4":          last4 or "",
-        "result":         "0",
-        "result_text":    "Approved",
-        "processor":      "Repay",
+    # ── Build Vergent's expected webhook-envelope body ──
+    # Schema (from Vergent V1 Swagger, 2026-05-14):
+    #   {
+    #     "event_meta_data": {"event_type": str, "version": str},
+    #     "event_data": {
+    #       "request": {
+    #         "gateway_mid": int, "payment_channel": str,
+    #         "amount": dec, "amount_cents": int,
+    #         "card_brand": str, "card_type": str,
+    #         "card_expiration": "MMYY", "card_last_four": str,
+    #         "card_name": str, "address": str,
+    #         "invoice_number": str, "customer_id": str,
+    #         "custom_fields": {...},
+    #       },
+    #       "timestamp": str,
+    #       "result": {
+    #         "result_code": str, "pn_ref": str, "auth_code": str,
+    #         "host_code": str, "host_url": str,
+    #         "message": str, "message1": str, "message2": str,
+    #         "resp_msg": str,
+    #         "avs_result": {...}, "commercial_card": bool,
+    #         "cv_result": [...]
+    #       }
+    #     }
+    #   }
+    # Map our Repay Card Sale response into this envelope.
+    rr = repay_response if isinstance(repay_response, dict) else {}
+    amount_cents = int(round(amount_dollars * 100))
+    from datetime import datetime, timezone
+    iso_now = datetime.now(timezone.utc).isoformat()
+    # Pull AVS and CVV results out of the Repay response if present.
+    avs_block = rr.get("avs_response") or ""
+    cv_block = rr.get("cv_response")
+    # exp_date came in as MMYY in our Repay sale body; reconstruct
+    # if missing from the response (not all Repay responses echo it).
+    card_exp = rr.get("exp_date") or ""
+
+    envelope = {
+        "event_meta_data": {
+            "event_type": "TransactionApproved",
+            "version":    "1.0",
+        },
+        "event_data": {
+            "request": {
+                "gateway_mid":      int(rr.get("merchant_id") or 0),
+                "payment_channel":  "customer_portal",
+                "amount":           amount_dollars,
+                "amount_cents":     amount_cents,
+                "card_brand":       str(rr.get("payment_type_id") or brand or "").upper(),
+                "card_type":        "debit",
+                "card_expiration":  str(card_exp),
+                "card_last_four":   str(last4 or rr.get("last4") or ""),
+                "card_name":        str(rr.get("name_on_card") or ""),
+                "address":          "",
+                # invoice_number = loan id. We set this in the Repay
+                # charge so it echoes back in rr.invoice_id.
+                "invoice_number":   str(rr.get("invoice_id") or loan_id_int),
+                "customer_id":      str(rr.get("customer_id") or cid_int),
+                "custom_fields": {
+                    "ChannelUser":               "cif-portal",
+                    "SelectedAmountFieldIndex":  0,
+                    "Multipay":                  "",
+                    "ConvenienceFee":            0,
+                    "FirstName":                 "",
+                    "LastName":                  "",
+                    "CustomerAccountNumber":     str(cid_int),
+                    "CustomerReference":         str(loan_id_int),
+                    "Source":                    "cif-portal",
+                },
+            },
+            "timestamp": str(rr.get("date") or iso_now),
+            "result": {
+                "result_code":     str(rr.get("result") or "0"),
+                "pn_ref":          str(rr.get("transaction_id") or transaction_id),
+                "auth_code":       str(rr.get("approval_code") or approval_code or ""),
+                "host_code":       str(rr.get("host_ref_num") or ""),
+                "host_url":        "",
+                "message":         str(rr.get("result_text") or "Approved"),
+                "message1":        "",
+                "message2":        "",
+                "resp_msg":        str(rr.get("result_text") or "Approved"),
+                "avs_result": {
+                    "AVSResponse": str(avs_block) if avs_block else "",
+                    "ZipMatch":    "",
+                    "StreetMatch": "",
+                },
+                "commercial_card": False,
+                "cv_result":       [str(cv_block)] if cv_block else [],
+            },
+        },
     }
-    # Candidate B — forward the raw Repay response with only the
-    # Vergent identifiers added. If their receiver actually parses
-    # Repay's webhook format, this is what it wants.
-    if repay_response and isinstance(repay_response, dict):
-        body_passthrough = dict(repay_response)
-    else:
-        body_passthrough = {}
-    body_passthrough.update({
-        "customer_id": cid_int,
-        "loan_id":     loan_id_int,
-        "company_id":  VERGENT_COMPANY_ID,
-    })
 
     attempts = [
-        ("/V1/repay/transaction/card/sync", body_minimal,      "minimal"),
-        ("/V1/repay/transaction/card/sync", body_passthrough,  "passthrough"),
-        ("/V1/repay/transaction/card",      body_minimal,      "minimal"),
-        ("/V1/repay/transaction/card",      body_passthrough,  "passthrough"),
+        ("/V1/repay/transaction/card/sync", envelope, "envelope"),
+        ("/V1/repay/transaction/card",      envelope, "envelope"),
     ]
     last_status = None
     last_head = ""
     for path, attempt_body, shape in attempts:
         log.info("vergent reconcile attempt path=%s shape=%s", path, shape)
         status, resp, raw = _v1_request("POST", path, body=attempt_body)
-        head = (raw or "")[:300]
+        head = (raw or "")[:500]
         log.info("vergent reconcile response path=%s shape=%s status=%s body_head=%s",
                  path, shape, status, head)
         last_status, last_head = status, head
