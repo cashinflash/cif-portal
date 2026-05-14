@@ -28,13 +28,13 @@ env:
   # hostname. Flip REPAY_API_HOSTNAME to api.repayonline.com when going live.
   PAYMENT_LEDGER_TABLE: cif-portal-payments-ledger-dev
   PAYMENT_METHODS_TABLE: cif-portal-customer-payment-methods-dev
-  # PRODUCTION (live cards, real money). Sandbox was
-  # api.sandbox.repayonline.com — used for testing through
-  # 2026-05-11. Confirmed working end-to-end with sandbox debit
-  # test card 4000056655665556. Flipping to prod after sandbox
-  # validation. To roll back to sandbox testing: change this back
-  # and re-run provision-payments.
-  REPAY_API_HOSTNAME: api.repayonline.com
+  # Currently SANDBOX for Vergent reconcile body-shape iteration —
+  # flip back to api.repayonline.com once Vergent's
+  # PostCustomerLoanPayment accepts our body, then do a final
+  # real-card prod test. Repay's duplicate-charge protection
+  # blocks same-card-same-amount-same-day; sandbox lets us
+  # iterate freely without burning real cards.
+  REPAY_API_HOSTNAME: api.sandbox.repayonline.com
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
