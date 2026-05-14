@@ -1489,48 +1489,66 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
              cid, loan_id, amount, transaction_id)
 
     # ── Attempt 1 + 2: Repay webhook receivers ──
-    # Forward the actual Repay response JSON. Vergent's
-    # /V1/repay/transaction/card[/sync] endpoints are documented
-    # in prior session notes as "Repay webhook receivers" —
-    # built to accept a Repay charge payload and record it in
-    # Vergent's books. Our use case (post-charge reconciliation)
-    # is exactly what they're for.
+    # The endpoints /V1/repay/transaction/card[/sync] exist and
+    # respond 400 "Invalid request" — they're picky about body
+    # shape. PostCustomerCardTokenized (the working V1 admin
+    # endpoint in if_submit.py) uses a minimal snake_case body;
+    # try the same convention. Build TWO body candidates and
+    # probe both endpoints with each.
     #
-    # Augment the body with the customer/loan identifiers Vergent
-    # needs to actually apply the payment. Repay's response
-    # doesn't include CustomerId/LoanId by themselves (only as
-    # the customer_id/invoice_id strings we set), so we surface
-    # them at the top level for Vergent's parser.
-    if repay_response and isinstance(repay_response, dict):
-        webhook_body = dict(repay_response)
-    else:
-        webhook_body = {}
-    webhook_body.update({
-        "CustomerId":     cid_int,
-        "customerId":     cid_int,
-        "customer_id":    str(cid_int),
-        "LoanId":         loan_id_int,
-        "loanId":         loan_id_int,
+    # Candidate A — minimal snake_case (mirrors
+    # PostCustomerCardTokenized's working schema):
+    body_minimal = {
+        "id":             0,
+        "company_id":     VERGENT_COMPANY_ID,
+        "customer_id":    cid_int,
         "loan_id":        loan_id_int,
-        "invoice_id":     str(loan_id_int),
-        "CompanyId":      VERGENT_COMPANY_ID,
-        "companyId":      VERGENT_COMPANY_ID,
+        "amount":         amount_dollars,
+        "transaction_id": str(transaction_id),
+        "auth_code":      approval_code or "",
+        "approval_code":  approval_code or "",
+        "card_ref":       repay_token or "",
+        "card_last_four": last4 or "",
+        "last4":          last4 or "",
+        "result":         "0",
+        "result_text":    "Approved",
+        "processor":      "Repay",
+    }
+    # Candidate B — forward the raw Repay response with only the
+    # Vergent identifiers added. If their receiver actually parses
+    # Repay's webhook format, this is what it wants.
+    if repay_response and isinstance(repay_response, dict):
+        body_passthrough = dict(repay_response)
+    else:
+        body_passthrough = {}
+    body_passthrough.update({
+        "customer_id": cid_int,
+        "loan_id":     loan_id_int,
+        "company_id":  VERGENT_COMPANY_ID,
     })
 
-    for path in ("/V1/repay/transaction/card/sync",
-                 "/V1/repay/transaction/card"):
-        log.info("vergent reconcile attempt path=%s", path)
-        status, resp, raw = _v1_request("POST", path, body=webhook_body)
+    attempts = [
+        ("/V1/repay/transaction/card/sync", body_minimal,      "minimal"),
+        ("/V1/repay/transaction/card/sync", body_passthrough,  "passthrough"),
+        ("/V1/repay/transaction/card",      body_minimal,      "minimal"),
+        ("/V1/repay/transaction/card",      body_passthrough,  "passthrough"),
+    ]
+    last_status = None
+    last_head = ""
+    for path, attempt_body, shape in attempts:
+        log.info("vergent reconcile attempt path=%s shape=%s", path, shape)
+        status, resp, raw = _v1_request("POST", path, body=attempt_body)
         head = (raw or "")[:300]
-        log.info("vergent reconcile response path=%s status=%s body_head=%s",
-                 path, status, head)
+        log.info("vergent reconcile response path=%s shape=%s status=%s body_head=%s",
+                 path, shape, status, head)
+        last_status, last_head = status, head
         if status in (200, 201):
             vergent_payment_id = None
             if isinstance(resp, dict):
                 vergent_payment_id = (resp.get("id") or resp.get("paymentId")
                                       or resp.get("PaymentId")
                                       or resp.get("transactionId"))
-            return True, f"ok:{path}", (
+            return True, f"ok:{path}:{shape}", (
                 str(vergent_payment_id) if vergent_payment_id else None
             )
 
