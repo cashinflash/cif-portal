@@ -54,7 +54,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Reuse everything from the loans handler rather than re-implementing.
 # Both files ship in the same zip so the import resolves at cold start.
@@ -1128,6 +1128,255 @@ def _strip_digits(s: Any) -> str:
     return "".join(ch for ch in str(s) if ch.isdigit())
 
 
+# ─────────────────────────────────────────
+# Saved payment methods (DDB-backed)
+# ─────────────────────────────────────────
+# Path 1 expansion: customers save tokenized cards in OUR DDB on
+# first successful charge. Future visits show a card list and
+# require only CVV + amount. Vergent's GetCustomerCards is
+# bypassed entirely (its cardRef/cardGuid fields come back empty
+# for our tenant — see docstring earlier in this file).
+#
+# DDB shape: PK customerId (HASH), SK methodId (RANGE).
+# Methods are scoped to a single customer; we never query
+# across customers.
+
+PAYMENT_METHODS_TABLE = os.environ.get(
+    "PAYMENT_METHODS_TABLE", "cif-portal-customer-payment-methods-dev",
+)
+
+# Brand id from Vergent's enum (Visa=1, MC=2, etc.) doesn't apply
+# here — the saved-cards UI shows the BIN-detected brand string
+# directly.
+
+
+def _cardsafe_url() -> str:
+    """Return the CardSafe StoreCard endpoint, mirroring whichever
+    Repay environment the rest of the Lambda is talking to (so
+    sandbox creds tokenize against the sandbox host)."""
+    hostname = os.environ.get("REPAY_API_HOSTNAME",
+                              "api.sandbox.repayonline.com")
+    return f"https://{hostname}/ws/CardSafe.asmx/StoreCard"
+
+
+def _cardsafe_tokenize(*, pan_digits: str, exp_month: int, exp_year: int,
+                       cvv_digits: str, name_on_card: str, zip_code: str,
+                       customer_key: str) -> Tuple[Optional[str], str]:
+    """Tokenize a card via Repay CardSafe StoreCard. Returns
+    (token, debug). On failure token is None and debug carries a
+    short diagnostic safe to log (never includes PAN or CVV).
+
+    This is the same SOAP/ASMX endpoint handlers/if_submit.py uses
+    for the Instant Funding flow, but pointed at the sandbox host
+    when REPAY_API_HOSTNAME indicates sandbox. The auth is the
+    same gatewayApiUser + gatewaySecureToken pair we use for
+    RgAPI charges — Repay scopes both APIs to the same merchant.
+    """
+    creds = _get_repay_rgapi_creds()
+    if not creds:
+        return None, "no_creds"
+    user = (creds.get("gatewayApiUser")
+            or creds.get("gatewayAPIUser")
+            or creds.get("gateway_api_user")
+            or creds.get("apiUser") or "")
+    pwd = (creds.get("gatewaySecureToken")
+           or creds.get("gateway_secure_token")
+           or creds.get("secureToken") or "")
+    if not (user and pwd):
+        return None, "creds_incomplete"
+
+    # CardSafe expects ExpDate as MMYY (no slash, no separators).
+    exp_str = f"{exp_month:02d}{str(exp_year)[-2:]}"
+
+    from urllib.parse import urlencode
+    form = urlencode({
+        "UserName":    user,
+        "Password":    pwd,
+        "TokenMode":   "Default",
+        "CardNum":     pan_digits,
+        "ExpDate":     exp_str,
+        "CustomerKey": str(customer_key or ""),
+        "NameOnCard":  name_on_card or "",
+        "Street":      "",
+        "Zip":         zip_code or "",
+        "ExtData":     "",
+    }).encode("utf-8")
+
+    url = _cardsafe_url()
+    import urllib.request
+    import urllib.error
+    req = urllib.request.Request(
+        url, data=form, method="POST",
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "text/xml,application/xml",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            raw = r.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace") if hasattr(e, "read") else ""
+        log.warning("cardsafe StoreCard HTTP %s: %s", e.code, body[:300])
+        return None, f"http_{e.code}"
+    except Exception as exc:
+        log.warning("cardsafe StoreCard error: %s", exc)
+        return None, f"{type(exc).__name__}"
+
+    # Response is a SOAP envelope OR a `<string>...</string>` wrapper
+    # containing pipe-delimited fields. The first field is the token
+    # when successful. Parse defensively — different Repay versions
+    # have slightly different formats.
+    import re
+    inner = raw
+    m = re.search(r"<(?:string)[^>]*>([^<]+)</string>", raw)
+    if m:
+        inner = m.group(1).strip()
+    # Pipe-delimited: TOKEN|status|message|...
+    parts = inner.split("|")
+    token = parts[0].strip() if parts else ""
+    # CardSafe returns "0" or empty when there's no real token — treat
+    # short / numeric-only responses as a failure.
+    if not token or len(token) < 8 or token.isdigit():
+        log.warning("cardsafe StoreCard unexpected response: %s",
+                    inner[:200])
+        return None, f"bad_response:{inner[:80]}"
+    log.info("cardsafe StoreCard ok customer_key=%s token_head=%s",
+             customer_key, token[:8])
+    return token, "ok"
+
+
+def _save_payment_method(*, cid: str, repay_token: str, brand: str,
+                         last4: str, exp_month: int, exp_year: int,
+                         name_on_card: str) -> Optional[str]:
+    """Insert a saved card row. Returns methodId on success, None
+    on DDB failure (we log + return None; the charge itself
+    already succeeded, so a missed save is recoverable next time
+    the customer pays with the same card).
+    """
+    method_id = str(_uuid.uuid4())
+    now = int(_time.time())
+    item: Dict[str, Any] = {
+        "customerId":   {"S": str(cid)},
+        "methodId":     {"S": method_id},
+        "repayToken":   {"S": repay_token},
+        "brand":        {"S": brand or "Card"},
+        "last4":        {"S": last4 or ""},
+        "expMonth":     {"N": str(int(exp_month))},
+        "expYear":      {"N": str(int(exp_year))},
+        "nameOnCard":   {"S": (name_on_card or "")[:64]},
+        "createdAt":    {"N": str(now)},
+        "isDefault":    {"BOOL": True},  # first card is default
+    }
+    try:
+        _dynamo_client().put_item(
+            TableName=PAYMENT_METHODS_TABLE, Item=item,
+        )
+        return method_id
+    except Exception as exc:
+        log.warning("payment method put failed cid=%s: %s", cid, exc)
+        return None
+
+
+def _list_payment_methods(cid: str) -> List[Dict[str, Any]]:
+    """Return all saved cards for the customer, newest first."""
+    try:
+        resp = _dynamo_client().query(
+            TableName=PAYMENT_METHODS_TABLE,
+            KeyConditionExpression="customerId = :c",
+            ExpressionAttributeValues={":c": {"S": str(cid)}},
+        )
+    except Exception as exc:
+        log.warning("payment methods list failed cid=%s: %s", cid, exc)
+        return []
+    rows = []
+    for item in resp.get("Items") or []:
+        rows.append({
+            "methodId":   item.get("methodId", {}).get("S"),
+            "brand":      item.get("brand", {}).get("S") or "Card",
+            "last4":      item.get("last4", {}).get("S") or "",
+            "expMonth":   int(item.get("expMonth", {}).get("N", "0") or 0),
+            "expYear":    int(item.get("expYear", {}).get("N", "0") or 0),
+            "nameOnCard": item.get("nameOnCard", {}).get("S") or "",
+            "createdAt":  int(item.get("createdAt", {}).get("N", "0") or 0),
+            "isDefault":  bool(item.get("isDefault", {}).get("BOOL")),
+        })
+    rows.sort(key=lambda r: r.get("createdAt", 0), reverse=True)
+    return rows
+
+
+def _get_payment_method(cid: str,
+                         method_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch one saved card (including the repayToken — only
+    used server-side for charging, never returned to the
+    frontend)."""
+    if not method_id:
+        return None
+    try:
+        resp = _dynamo_client().get_item(
+            TableName=PAYMENT_METHODS_TABLE,
+            Key={"customerId": {"S": str(cid)},
+                 "methodId":   {"S": str(method_id)}},
+        )
+    except Exception as exc:
+        log.warning("payment method get failed cid=%s mid=%s: %s",
+                    cid, method_id, exc)
+        return None
+    item = resp.get("Item") or {}
+    if not item:
+        return None
+    return {
+        "methodId":   item.get("methodId", {}).get("S"),
+        "repayToken": item.get("repayToken", {}).get("S"),
+        "brand":      item.get("brand", {}).get("S") or "Card",
+        "last4":      item.get("last4", {}).get("S") or "",
+        "expMonth":   int(item.get("expMonth", {}).get("N", "0") or 0),
+        "expYear":    int(item.get("expYear", {}).get("N", "0") or 0),
+        "nameOnCard": item.get("nameOnCard", {}).get("S") or "",
+    }
+
+
+def _delete_payment_method(cid: str, method_id: str) -> bool:
+    try:
+        _dynamo_client().delete_item(
+            TableName=PAYMENT_METHODS_TABLE,
+            Key={"customerId": {"S": str(cid)},
+                 "methodId":   {"S": str(method_id)}},
+        )
+        return True
+    except Exception as exc:
+        log.warning("payment method delete failed cid=%s mid=%s: %s",
+                    cid, method_id, exc)
+        return False
+
+
+def get_my_payment_methods(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/my-payment-methods — list saved cards for the
+    signed-in customer (token + sensitive fields stripped)."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+    methods = _list_payment_methods(cid)
+    # repayToken is server-only; the list helper already omits it.
+    return _json_response(200, {"methods": methods})
+
+
+def delete_my_payment_method(event: Dict[str, Any],
+                              method_id: str) -> Dict[str, Any]:
+    """DELETE /api/my-payment-methods/{methodId}"""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+    if not method_id:
+        return _json_response(400, {"error": "missing_method_id"})
+    ok = _delete_payment_method(cid, method_id)
+    if not ok:
+        return _json_response(502, {"error": "delete_failed"})
+    return _json_response(200, {"ok": True})
+
+
 def _record_payment_ledger(
     *, cid: str, loan_id: Any, amount: float, result: str,
     transaction_id: Optional[Any], result_text: str, last4: str,
@@ -1174,25 +1423,35 @@ def _record_payment_ledger(
 def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/my-payment/charge
 
-    Body:
-      amount       (number, required) — dollars, e.g. 100.00
-      cardNumber   (string, required) — PAN
-      expMonth     (number, required) — 1-12
-      expYear      (number, required) — 4-digit (2026) or 2-digit (26)
-      cvv          (string, optional but recommended)
-      nameOnCard   (string, optional)
-      zip          (string, optional)
-      loanId       (number, optional) — defaults to customer's active loan
+    Two body shapes accepted:
 
-    Response:
-      success     bool
-      transactionId  int (Repay PNRef) — on success only
-      authAmount     number — what Repay actually authorized (may be partial)
-      approvalCode   string — issuer auth code (on success)
-      last4          string
-      brand          string — VISA / MASTERCARD / ...
-      resultText     string — "Approved" or decline reason
-      ledgerId       string — our DDB row uuid
+    A) New card (auto-saves on first successful charge):
+        amount       (number, required)
+        cardNumber   (string, required) — full PAN
+        expMonth     (number, required)
+        expYear      (number, required) — 4- or 2-digit
+        cvv          (string, optional but recommended)
+        nameOnCard   (string, optional)
+        zip          (string, optional)
+        loanId       (number, optional)
+
+    B) Saved card (re-use a previously-tokenized card):
+        amount           (number, required)
+        paymentMethodId  (string, required) — DDB key
+        cvv              (string, optional but recommended)
+        loanId           (number, optional)
+
+    On success the response includes:
+        success         bool
+        transactionId   int   — Repay PNRef
+        authAmount      number
+        approvalCode    string
+        last4, brand    strings
+        resultText      string
+        ledgerId        string  — our DDB row id
+        savedMethodId   string  — populated when a new card was
+                                  auto-saved; null when paying
+                                  with an existing saved card.
     """
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -1206,7 +1465,7 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(body, dict):
         return _json_response(400, {"error": "invalid_body"})
 
-    # ── Validate inputs ──
+    # ── Amount validation (shared by both flows) ──
     try:
         amount = float(body.get("amount") or 0)
     except (TypeError, ValueError):
@@ -1216,33 +1475,10 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
         # has no use case beyond a single-loan paydown.
         return _json_response(400, {"error": "amount_out_of_range"})
 
-    pan_digits = _strip_digits(body.get("cardNumber"))
-    if len(pan_digits) < 13 or len(pan_digits) > 19:
-        return _json_response(400, {"error": "invalid_card_number"})
-    if not _luhn_ok(pan_digits):
-        return _json_response(400, {"error": "card_failed_luhn"})
-
-    try:
-        exp_month = int(body.get("expMonth") or 0)
-        exp_year = int(body.get("expYear") or 0)
-    except (TypeError, ValueError):
-        return _json_response(400, {"error": "invalid_expiry"})
-    if not (1 <= exp_month <= 12):
-        return _json_response(400, {"error": "invalid_exp_month"})
-    if exp_year < 100:
-        # Caller sent 2-digit year — normalize to 4-digit.
-        exp_year += 2000
-    if exp_year < 2026 or exp_year > 2050:
-        return _json_response(400, {"error": "invalid_exp_year"})
-    exp_str = f"{exp_month:02d}{str(exp_year)[-2:]}"
-
     cvv = (body.get("cvv") or "").strip()
     cvv_digits = _strip_digits(cvv)
     if cvv and (len(cvv_digits) < 3 or len(cvv_digits) > 4):
         return _json_response(400, {"error": "invalid_cvv"})
-
-    name_on_card = (body.get("nameOnCard") or "").strip()[:64]
-    zip_code = _strip_digits(body.get("zip"))[:5]
 
     # Resolve loan: explicit if provided, else active loan.
     loan_id = body.get("loanId")
@@ -1250,13 +1486,10 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
         active = _fetch_active_loan(cid)
         loan_id = active.get("id") if active else None
 
-    # ── Auth to Repay ──
+    # ── Auth to Repay (shared) ──
     creds = _get_repay_rgapi_creds()
     if not creds:
         return _json_response(502, {"error": "repay_creds_missing"})
-    # Accept multiple key-name variants — different humans typing
-    # the same secret have produced gatewayApiUser (lowercase pi),
-    # gatewayAPIUser (uppercase API), and snake_case. Be liberal.
     api_user = (
         creds.get("gatewayApiUser")
         or creds.get("gatewayAPIUser")
@@ -1273,23 +1506,73 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     if not (api_user and api_token):
         return _json_response(502, {"error": "repay_creds_incomplete"})
 
-    last4 = pan_digits[-4:]
-    brand = _detect_card_type(pan_digits)
+    # ── Branch on payment-method type ──
+    payment_method_id = (body.get("paymentMethodId") or "").strip()
+    saved_method: Optional[Dict[str, Any]] = None
+    pan_digits = ""
+    exp_month = 0
+    exp_year = 0
+    name_on_card = ""
+    zip_code = ""
+    using_saved = False
 
-    # ── Call Repay Card Sale ──
+    if payment_method_id:
+        # Saved-card flow — look up the token in DDB, charge with
+        # card_token. PAN never enters the Lambda.
+        saved_method = _get_payment_method(cid, payment_method_id)
+        if not saved_method:
+            return _json_response(404, {"error": "payment_method_not_found"})
+        using_saved = True
+        last4 = saved_method.get("last4") or ""
+        brand = saved_method.get("brand") or "Card"
+        name_on_card = saved_method.get("nameOnCard") or "Cardholder"
+        exp_month = int(saved_method.get("expMonth") or 0)
+        exp_year = int(saved_method.get("expYear") or 0)
+    else:
+        # New-card flow — validate full PAN + expiry, auto-tokenize
+        # on successful charge.
+        pan_digits = _strip_digits(body.get("cardNumber"))
+        if len(pan_digits) < 13 or len(pan_digits) > 19:
+            return _json_response(400, {"error": "invalid_card_number"})
+        if not _luhn_ok(pan_digits):
+            return _json_response(400, {"error": "card_failed_luhn"})
+
+        try:
+            exp_month = int(body.get("expMonth") or 0)
+            exp_year = int(body.get("expYear") or 0)
+        except (TypeError, ValueError):
+            return _json_response(400, {"error": "invalid_expiry"})
+        if not (1 <= exp_month <= 12):
+            return _json_response(400, {"error": "invalid_exp_month"})
+        if exp_year < 100:
+            exp_year += 2000
+        if exp_year < 2026 or exp_year > 2050:
+            return _json_response(400, {"error": "invalid_exp_year"})
+
+        name_on_card = (body.get("nameOnCard") or "").strip()[:64]
+        zip_code = _strip_digits(body.get("zip"))[:5]
+        last4 = pan_digits[-4:]
+        brand = _detect_card_type(pan_digits)
+
+    exp_str = f"{exp_month:02d}{str(exp_year)[-2:]}"
+
+    # ── Build the Repay Card Sale body ──
     sale_url = f"https://{REPAY_API_HOSTNAME}/rgapi/v1.0/transactions/card/sale"
     sale_body: Dict[str, Any] = {
-        "amount":          round(amount, 2),
-        "card_number":     pan_digits,
-        "exp_date":        exp_str,
-        "name_on_card":    name_on_card or "Cardholder",
-        "zip":             zip_code,
-        "customer_id":     str(cid),
-        "invoice_id":      str(loan_id) if loan_id is not None else "",
+        "amount":           round(amount, 2),
+        "exp_date":         exp_str,
+        "name_on_card":     name_on_card or "Cardholder",
+        "zip":              zip_code,
+        "customer_id":      str(cid),
+        "invoice_id":       str(loan_id) if loan_id is not None else "",
         "card_not_present": True,
-        "force_duplicate": False,
-        "custom_fields":   [],
+        "force_duplicate":  False,
+        "custom_fields":    [],
     }
+    if using_saved:
+        sale_body["card_token"] = saved_method.get("repayToken") or ""
+    else:
+        sale_body["card_number"] = pan_digits
     if cvv_digits:
         sale_body["cvv"] = cvv_digits
         sale_body["cvv_mode"] = "submitted"
@@ -1340,6 +1623,39 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     if result == "0" and transaction_id:
+        # Auto-save tokenized card on first successful charge.
+        # Only for new-card flow — saved-card flow already has the
+        # token. Tokenization failure does NOT fail the response
+        # (the customer's money already moved); we just log and
+        # continue. They'll re-enter their card next time.
+        saved_method_id = None
+        if not using_saved and pan_digits:
+            try:
+                token, debug = _cardsafe_tokenize(
+                    pan_digits=pan_digits,
+                    exp_month=exp_month,
+                    exp_year=exp_year,
+                    cvv_digits=cvv_digits,
+                    name_on_card=name_on_card,
+                    zip_code=zip_code,
+                    customer_key=str(cid),
+                )
+                if token:
+                    saved_method_id = _save_payment_method(
+                        cid=cid, repay_token=token, brand=brand,
+                        last4=last4, exp_month=exp_month, exp_year=exp_year,
+                        name_on_card=name_on_card,
+                    )
+                else:
+                    log.info("cardsafe tokenize skipped/failed cid=%s: %s",
+                             cid, debug)
+            except Exception as exc:
+                # Belt-and-suspenders — should never throw given the
+                # helper catches its own errors, but the customer's
+                # charge already succeeded so we MUST return success.
+                log.warning("auto-save tokenize unexpected error cid=%s: %s",
+                            cid, exc)
+
         return _json_response(200, {
             "success":       True,
             "transactionId": transaction_id,
@@ -1349,8 +1665,8 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
             "brand":         brand,
             "resultText":    result_text or "Approved",
             "ledgerId":      ledger_id,
-            # Vergent reconciliation runs in the background (TODO:
-            # wire up _post_payment_to_vergent helper next commit).
+            "savedMethodId": saved_method_id,
+            "usedSavedCard": using_saved,
         })
 
     # Declined / error.
@@ -1457,6 +1773,13 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_loan_summary(event)
         if path.endswith("/my-payment/charge") and method == "POST":
             return post_charge(event)
+        if path.endswith("/my-payment-methods") and method == "GET":
+            return get_my_payment_methods(event)
+        # /api/my-payment-methods/{methodId}
+        if "/my-payment-methods/" in path and method == "DELETE":
+            parts = [p for p in path.split("/") if p]
+            method_id = parts[-1] if parts else ""
+            return delete_my_payment_method(event, method_id)
         if path.endswith("/my-payment") and method == "POST":
             return post_payment(event)
         if path.endswith("/my-payment-config") and method == "GET":
