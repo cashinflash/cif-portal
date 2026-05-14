@@ -1254,8 +1254,22 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     creds = _get_repay_rgapi_creds()
     if not creds:
         return _json_response(502, {"error": "repay_creds_missing"})
-    api_user = creds.get("gatewayApiUser") or ""
-    api_token = creds.get("gatewaySecureToken") or ""
+    # Accept multiple key-name variants — different humans typing
+    # the same secret have produced gatewayApiUser (lowercase pi),
+    # gatewayAPIUser (uppercase API), and snake_case. Be liberal.
+    api_user = (
+        creds.get("gatewayApiUser")
+        or creds.get("gatewayAPIUser")
+        or creds.get("gateway_api_user")
+        or creds.get("apiUser")
+        or ""
+    )
+    api_token = (
+        creds.get("gatewaySecureToken")
+        or creds.get("gateway_secure_token")
+        or creds.get("secureToken")
+        or ""
+    )
     if not (api_user and api_token):
         return _json_response(502, {"error": "repay_creds_incomplete"})
 
