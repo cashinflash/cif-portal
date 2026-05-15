@@ -1489,6 +1489,37 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     # admin UI typically shows (Visa/Mastercard/Amex/Discover).
     brand_label = (brand or "").strip().title() or "Card"
 
+    # ── TEMP PROBE: discover PaymentMethod enum IDs ──
+    # Vergent's PaymentMethod field is an enum we have no docs for;
+    # our first attempt with value=1 landed as "Cash". Probe the
+    # option-lookup endpoints to find the correct "Card" ID, then
+    # strip this block once we hardcode the right value.
+    for probe_path in (
+        "/V1/GetOptionClassesAsync",
+        "/V1/GetOptionClasses",
+        "/V1/OptionClasses",
+    ):
+        s, _r, raw_p = _v1_request("GET", probe_path)
+        log.info("vergent option-classes probe path=%s status=%s body=%s",
+                 probe_path, s, (raw_p or "")[:2000])
+        if s == 200:
+            break
+    # Try a few candidate class IDs and class names for payment-methods
+    for cand in ("PaymentMethod", "PaymentMethods", "PaymentType",
+                 "PaymentTypes", "1", "2", "3", "4", "5"):
+        for opts_path in (
+            f"/V1/GetOptionsByClassAsync?classId={cand}",
+            f"/V1/GetOptionsByClassAsync?className={cand}",
+            f"/V1/GetOptionsByClass?classId={cand}",
+            f"/V1/GetOptionsByClass?className={cand}",
+            f"/V1/GetOptionsByClassAsync/{cand}",
+        ):
+            s2, _r2, raw_p2 = _v1_request("GET", opts_path)
+            if s2 == 200 and raw_p2 and len(raw_p2) > 10:
+                log.info("vergent options probe path=%s status=%s body=%s",
+                         opts_path, s2, (raw_p2 or "")[:2000])
+    # ── END TEMP PROBE ──
+
     notes = (
         f"Customer portal payment via Repay (PNRef {transaction_id}, "
         f"auth {approval_code or 'n/a'})."
