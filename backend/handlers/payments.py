@@ -1501,9 +1501,11 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
         "HeaderId":              loan_id_int,
         "PaymentDate":           iso_now,
         "PaymentAmount":         amount_dollars,
-        # PaymentMethod is an enum we don't have docs for. 1 is the
-        # most common "card" value across Vergent's V1 surfaces.
-        "PaymentMethod":         1,
+        # Vergent's PaymentMethod enum (sourced from admin UI DOM,
+        # 2026-05-15): 1=Cash, 2=Cashier's Check, 3=Money Order,
+        # 4=Personal Check, 10=Card (Auto). We want 10 since Repay
+        # processed the card automatically.
+        "PaymentMethod":         10,
         # Manual-card-entry fields per the PutCustomerLoanPayment
         # Swagger schema. These tell Vergent the payment was made
         # via card but processed externally (no Repay token needed
