@@ -1537,28 +1537,6 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
             vergent_payment_id = (resp.get("id") or resp.get("paymentId")
                                   or resp.get("PaymentId")
                                   or resp.get("transactionId"))
-
-        # ── TEMP PROBE: brute-force the "Card" PaymentMethod enum ──
-        # 1=Cash works, 10=Card-Auto silently fails. The right value
-        # for "manual card record" is likely in the 4-10 gap, or
-        # just above. Fire 7 tiny PUTs with distinct cent amounts;
-        # whichever shows as "Card"/"Debit Card" in Vergent admin's
-        # activity log identifies the right enum. Strip this block
-        # once we lock the value.
-        for probe_pm in (5, 6, 7, 8, 9, 11, 12):
-            probe_amount = round(probe_pm * 0.01, 2)
-            probe_body = dict(body)
-            probe_body["PaymentMethod"] = probe_pm
-            probe_body["PaymentAmount"] = probe_amount
-            probe_body["Notes"] = (
-                f"[PROBE-PM={probe_pm}] amt=${probe_amount} "
-                f"— testing PaymentMethod enum value"
-            )
-            s_pr, _r_pr, raw_pr = _v1_request("PUT", path, body=probe_body)
-            log.info("paymentmethod probe pm=%s amt=%s status=%s body=%s",
-                     probe_pm, probe_amount, s_pr, (raw_pr or "")[:200])
-        # ── END TEMP PROBE ──
-
         return True, f"ok:{status}", (
             str(vergent_payment_id) if vergent_payment_id else None
         )
