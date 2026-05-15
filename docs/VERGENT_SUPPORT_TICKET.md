@@ -361,7 +361,35 @@ the docs.
   context, still fails at DI activation),
   `d4d10e15-e9e1-4e8b-afee-6e88981b4daf` (also from
   `CreditCardPayment`, retested 2026-05-10 — same activation
-  chain, different correlation, confirms reproducibility)
+  chain, different correlation, confirms reproducibility),
+  **`8b60c9f1-1627-439c-9471-c9d138f0b9bb`** — `POST
+  /api/CustomerPortal/AuthenticateCognito` on host
+  `https://api-external.vergentlms.com`, retested **2026-05-15**.
+  **This was reproduced directly in YOUR OWN Swagger UI**, using
+  the customer-portal `x-api-key` your Swagger page pre-fills for
+  CompanyId 386 — i.e. zero custom client code involved. Verbatim
+  response body:
+  ```json
+  {
+    "ErrorMessage": "An exception was thrown while activating Vergent.Lms.Api.Customers.Domain.Implementation.CustomerDomain -> Vergent.Lms.Api.ExternalProvider.LegacyApi.VergentCustomerProvider.",
+    "ErrorType": "DependencyResolutionException",
+    "CorrelationId": "8b60c9f1-1627-439c-9471-c9d138f0b9bb"
+  }
+  ```
+  The crash is in your Autofac/DI container constructing
+  `CustomerDomain → VergentCustomerProvider` and happens *before*
+  the submitted JWT is even validated. Because it reproduces in
+  your own Swagger UI, this is conclusively a server-side defect on
+  your `api-external.vergentlms.com` deployment for CompanyId 386,
+  not a client integration problem. **Please have your engineering
+  team trace this correlation ID and fix the DI registration so
+  `AuthenticateCognito` (and the dependent
+  `CustomerPortal/.../CreditCardPayment` flow) works for our
+  tenant.** Until then we cannot record customer card payments as
+  "Card" — we are recording them via `PUT
+  /V1/PutCustomerLoanPayment` as `PaymentMethod=1 (Cash)` with a
+  `[CIF Portal] Card payment via Repay …` note as a stopgap, which
+  is not acceptable long-term.
 - Test customer: `601488`
 - Test loan: `4830592`
 - Our service APIM `x-api-key` and JWT auth flow are working — we
