@@ -1489,6 +1489,30 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     # admin UI typically shows (Visa/Mastercard/Amex/Discover).
     brand_label = (brand or "").strip().title() or "Card"
 
+    # ── TEMP PROBE: dump loan history to discover PaymentMethod ID ──
+    # PaymentMethod=10 ("Card Auto" per admin DOM) returned 204 but
+    # didn't apply. The right value for "record external charge"
+    # isn't in the cashier-entry dropdown. Read existing payment
+    # records on this loan to find what ID real card payments use.
+    try:
+        from handlers import loans as _loans_mod
+        _loans_mod._get_v1_token()  # ensure _v1_user_id populated
+        uid = getattr(_loans_mod, "_v1_user_id", 0) or 0
+        from urllib.parse import urlencode as _ue
+        qs = _ue({
+            "custId":    int(cid),
+            "HdrId":     loan_id_int,
+            "companyId": VERGENT_COMPANY_ID,
+            "storeId":   0,
+            "userId":    uid,
+        })
+        s_h, _r_h, raw_h = _v1_request("GET", f"/V1/GetCustomerLoanHistory?{qs}")
+        log.info("vergent loan-history probe status=%s body=%s",
+                 s_h, (raw_h or "")[:4000])
+    except Exception as _exc:
+        log.warning("loan-history probe error: %s", _exc)
+    # ── END TEMP PROBE ──
+
     notes = (
         f"Customer portal payment via Repay (PNRef {transaction_id}, "
         f"auth {approval_code or 'n/a'})."
