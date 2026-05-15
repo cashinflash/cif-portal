@@ -390,6 +390,24 @@ the docs.
   /V1/PutCustomerLoanPayment` as `PaymentMethod=1 (Cash)` with a
   `[CIF Portal] Card payment via Repay …` note as a stopgap, which
   is not acceptable long-term.
+- **`9a885666-0ed1-4247-99a0-08dbeb922ab6`** — `POST
+  /api/CustomerPortal/Loans/Payments/CreditCardPayment` on host
+  `https://api-external.vergentlms.com`, retested **2026-05-15** in
+  YOUR OWN Swagger UI with the pre-filled CompanyId-386
+  `x-api-key`. Verbatim response body:
+  ```json
+  {
+    "ErrorMessage": "An exception was thrown while activating Vergent.Lms.Api.Authorization.LoanApplicationRequirements.CustomerPortalApplicationAccessHandler -> Vergent.Lms.Api.CustomerPortal.Domain.Implementation.CustomerDomain -> Vergent.Lms.Api.ExternalProvider.LegacyApi.VergentDataHelperProvider.",
+    "ErrorType": "DependencyResolutionException",
+    "CorrelationId": "9a885666-0ed1-4247-99a0-08dbeb922ab6"
+  }
+  ```
+  Same DI-container failure class as `AuthenticateCognito`, same
+  `CustomerPortal...CustomerDomain -> LegacyApi provider` chain.
+  This proves the defect is **not endpoint-specific — the entire
+  CustomerPortal API surface is broken for CompanyId 386 at the DI
+  registration level**. Fixing the DI registration for the
+  CustomerPortal domain unblocks both auth and charge at once.
 - Test customer: `601488`
 - Test loan: `4830592`
 - Our service APIM `x-api-key` and JWT auth flow are working — we
