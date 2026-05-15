@@ -1489,33 +1489,10 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     # admin UI typically shows (Visa/Mastercard/Amex/Discover).
     brand_label = (brand or "").strip().title() or "Card"
 
-    # ── TEMP PROBE: dump loan history to discover PaymentMethod ID ──
-    # PaymentMethod=10 ("Card Auto" per admin DOM) returned 204 but
-    # didn't apply. The right value for "record external charge"
-    # isn't in the cashier-entry dropdown. Read existing payment
-    # records on this loan to find what ID real card payments use.
-    try:
-        from handlers import loans as _loans_mod
-        _loans_mod._get_v1_token()  # ensure _v1_user_id populated
-        uid = getattr(_loans_mod, "_v1_user_id", 0) or 0
-        from urllib.parse import urlencode as _ue
-        qs = _ue({
-            "custId":    int(cid),
-            "HdrId":     loan_id_int,
-            "companyId": VERGENT_COMPANY_ID,
-            "storeId":   0,
-            "userId":    uid,
-        })
-        s_h, _r_h, raw_h = _v1_request("GET", f"/V1/GetCustomerLoanHistory?{qs}")
-        log.info("vergent loan-history probe status=%s body=%s",
-                 s_h, (raw_h or "")[:4000])
-    except Exception as _exc:
-        log.warning("loan-history probe error: %s", _exc)
-    # ── END TEMP PROBE ──
-
     notes = (
-        f"Customer portal payment via Repay (PNRef {transaction_id}, "
-        f"auth {approval_code or 'n/a'})."
+        f"[CIF Portal] Card payment via Repay. "
+        f"PNRef {transaction_id}, auth {approval_code or 'n/a'}, "
+        f"{brand_label} ending {last4 or '????'}."
     )
 
     body = {
@@ -1525,11 +1502,15 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
         "HeaderId":              loan_id_int,
         "PaymentDate":           iso_now,
         "PaymentAmount":         amount_dollars,
-        # Vergent's PaymentMethod enum (sourced from admin UI DOM,
-        # 2026-05-15): 1=Cash, 2=Cashier's Check, 3=Money Order,
-        # 4=Personal Check, 10=Card (Auto). We want 10 since Repay
-        # processed the card automatically.
-        "PaymentMethod":         10,
+        # Vergent's PaymentMethod enum (admin UI DOM, 2026-05-15):
+        # 1=Cash, 2=Cashier's Check, 3=Money Order, 4=Personal Check,
+        # 10=Card (Auto). Card-Auto silently rejects (returns 204 but
+        # creates no record) because it triggers Vergent's own Repay
+        # integration which requires their internal setup we don't
+        # have. Using 1=Cash so the balance reconciles; the Notes
+        # field below clearly marks the payment as a card charge so
+        # admins can distinguish them in the activity log.
+        "PaymentMethod":         1,
         # Manual-card-entry fields per the PutCustomerLoanPayment
         # Swagger schema. These tell Vergent the payment was made
         # via card but processed externally (no Repay token needed
