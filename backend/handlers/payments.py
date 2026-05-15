@@ -1450,227 +1450,91 @@ def _update_ledger_reconcile(*, ledger_id: str, state: str,
 def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
                               transaction_id: Any, last4: str,
                               brand: str, approval_code: str,
-                              repay_token: Optional[str],
+                              name_on_card: str = "",
+                              exp_month: int = 0, exp_year: int = 0,
+                              repay_token: Optional[str] = None,
                               repay_response: Optional[Dict[str, Any]] = None,
                               ) -> Tuple[bool, str, Optional[str]]:
     """Tell Vergent's V1 admin API that a payment was processed
     so their loan balance reflects it.
 
-    Returns (success, detail, vergent_payment_id).
+    Uses `PUT /V1/PutCustomerLoanPayment/{loan_id}` with the
+    ManualCard* fields. This endpoint exists specifically to
+    record externally-processed card payments (our case — Repay
+    charged direct, now we tell Vergent so the loan balance
+    updates).
 
-    Strategy: try Vergent's Repay-gateway webhook RECEIVERS first
-    (the endpoints designed to accept a Repay charge notification
-    after the fact — exactly our use case), then fall back to
-    /V1/PostCustomerLoanPayment which has been broken for our
-    tenant across multiple attempts ("No Loan record found for 0").
-
-      1. POST /V1/repay/transaction/card/sync  — forward Repay's
-         JSON Card Sale response verbatim. Vergent's gateway
-         layer should parse it the same way it would a real
-         Repay webhook callback.
-      2. POST /V1/repay/transaction/card       — non-sync variant.
-      3. POST /V1/PostCustomerLoanPayment      — legacy attempt,
-         documented broken; kept as last fallback in case Vergent
-         ever fixes it.
-
-    On any 200/201 the ledger flips reconcileState to
-    vergent_recorded. On all-failures, vergent_failed.
+    Returns (success, detail, vergent_payment_id). Vergent returns
+    204 No Content on success; we still mark the reconcile recorded.
     """
     if not transaction_id:
         return False, "no_transaction_id", None
     try:
-        cid_int = int(cid)
         loan_id_int = int(loan_id) if loan_id is not None else 0
     except (TypeError, ValueError):
-        return False, "bad_ids", None
+        return False, "bad_loan_id", None
+    if loan_id_int <= 0:
+        return False, "no_loan_id", None
 
     amount_dollars = round(float(amount), 2)
-    log.info("vergent reconcile cid=%s loan=%s amt=%s repay_txn=%s",
-             cid, loan_id, amount, transaction_id)
-
-    # ── Build Vergent's expected webhook-envelope body ──
-    # Schema (from Vergent V1 Swagger, 2026-05-14):
-    #   {
-    #     "event_meta_data": {"event_type": str, "version": str},
-    #     "event_data": {
-    #       "request": {
-    #         "gateway_mid": int, "payment_channel": str,
-    #         "amount": dec, "amount_cents": int,
-    #         "card_brand": str, "card_type": str,
-    #         "card_expiration": "MMYY", "card_last_four": str,
-    #         "card_name": str, "address": str,
-    #         "invoice_number": str, "customer_id": str,
-    #         "custom_fields": {...},
-    #       },
-    #       "timestamp": str,
-    #       "result": {
-    #         "result_code": str, "pn_ref": str, "auth_code": str,
-    #         "host_code": str, "host_url": str,
-    #         "message": str, "message1": str, "message2": str,
-    #         "resp_msg": str,
-    #         "avs_result": {...}, "commercial_card": bool,
-    #         "cv_result": [...]
-    #       }
-    #     }
-    #   }
-    # Map our Repay Card Sale response into this envelope.
-    rr = repay_response if isinstance(repay_response, dict) else {}
-    amount_cents = int(round(amount_dollars * 100))
     from datetime import datetime, timezone
     iso_now = datetime.now(timezone.utc).isoformat()
-    # Pull AVS and CVV results out of the Repay response if present.
-    avs_block = rr.get("avs_response") or ""
-    cv_block = rr.get("cv_response")
-    # exp_date came in as MMYY in our Repay sale body; reconstruct
-    # if missing from the response (not all Repay responses echo it).
-    card_exp = rr.get("exp_date") or ""
+    # Vergent's ManualCardExpireDate format isn't documented; send
+    # MM/YY which is the most common admin-portal convention.
+    exp_str = ""
+    if exp_month and exp_year:
+        exp_str = f"{int(exp_month):02d}/{str(int(exp_year))[-2:]}"
 
-    envelope = {
-        "event_meta_data": {
-            "event_type": "TransactionApproved",
-            "version":    "1.0",
-        },
-        "event_data": {
-            "request": {
-                "gateway_mid":      int(rr.get("merchant_id") or 0),
-                "payment_channel":  "customer_portal",
-                "amount":           amount_dollars,
-                "amount_cents":     amount_cents,
-                "card_brand":       str(rr.get("payment_type_id") or brand or "").upper(),
-                "card_type":        "debit",
-                "card_expiration":  str(card_exp),
-                "card_last_four":   str(last4 or rr.get("last4") or ""),
-                "card_name":        str(rr.get("name_on_card") or ""),
-                "address":          "",
-                # invoice_number = loan id. We set this in the Repay
-                # charge so it echoes back in rr.invoice_id.
-                "invoice_number":   str(rr.get("invoice_id") or loan_id_int),
-                "customer_id":      str(rr.get("customer_id") or cid_int),
-                "custom_fields": {
-                    "ChannelUser":               "cif-portal",
-                    "SelectedAmountFieldIndex":  0,
-                    "Multipay":                  "",
-                    "ConvenienceFee":            0,
-                    "FirstName":                 "",
-                    "LastName":                  "",
-                    "CustomerAccountNumber":     str(cid_int),
-                    "CustomerReference":         str(loan_id_int),
-                    "Source":                    "cif-portal",
-                },
-            },
-            "timestamp": str(rr.get("date") or iso_now),
-            "result": {
-                "result_code":     str(rr.get("result") or "0"),
-                "pn_ref":          str(rr.get("transaction_id") or transaction_id),
-                "auth_code":       str(rr.get("approval_code") or approval_code or ""),
-                "host_code":       str(rr.get("host_ref_num") or ""),
-                "host_url":        "",
-                "message":         str(rr.get("result_text") or "Approved"),
-                "message1":        "",
-                "message2":        "",
-                "resp_msg":        str(rr.get("result_text") or "Approved"),
-                "avs_result": {
-                    "AVSResponse": str(avs_block) if avs_block else "",
-                    "ZipMatch":    "",
-                    "StreetMatch": "",
-                },
-                "commercial_card": False,
-                "cv_result":       [str(cv_block)] if cv_block else [],
-            },
-        },
-    }
+    # Card-type string. Map our internal brand to what Vergent's
+    # admin UI typically shows (Visa/Mastercard/Amex/Discover).
+    brand_label = (brand or "").strip().title() or "Card"
 
-    attempts = [
-        ("/V1/repay/transaction/card/sync", envelope, "envelope"),
-        ("/V1/repay/transaction/card",      envelope, "envelope"),
-    ]
-    last_status = None
-    last_head = ""
-    for path, attempt_body, shape in attempts:
-        log.info("vergent reconcile attempt path=%s shape=%s", path, shape)
-        status, resp, raw = _v1_request("POST", path, body=attempt_body)
-        head = (raw or "")[:500]
-        log.info("vergent reconcile response path=%s shape=%s status=%s body_head=%s",
-                 path, shape, status, head)
-        last_status, last_head = status, head
-        if status in (200, 201):
-            vergent_payment_id = None
-            if isinstance(resp, dict):
-                vergent_payment_id = (resp.get("id") or resp.get("paymentId")
-                                      or resp.get("PaymentId")
-                                      or resp.get("transactionId"))
-            return True, f"ok:{path}:{shape}", (
-                str(vergent_payment_id) if vergent_payment_id else None
-            )
-
-    # ── Attempt 3: PostCustomerLoanPayment (broken-but-try-anyway) ──
-    # Send PascalCase + snake_case alias bundle + every known loan-id
-    # field name. Documented as 500-NullReferenceException across
-    # multiple prior session attempts. Kept here in case Vergent
-    # eventually fixes it.
-    legacy_body = {
-        "Id":                loan_id_int,
-        "HdrId":             loan_id_int,
-        "LoanHeaderId":      loan_id_int,
-        "TransHdrId":        loan_id_int,
-        "LoanId":            loan_id_int,
-        "CompanyId":         VERGENT_COMPANY_ID,
-        "CustomerId":        cid_int,
-        "PaymentAmount":     amount_dollars,
-        "PaymentDate":       None,
-        "PaymentTypeId":     1,
-        "PaymentMethodId":   1,
-        "TransactionId":     str(transaction_id),
-        "ApprovalCode":      approval_code or "",
-        "CardRef":           repay_token or "",
-        "CardLastFour":      last4 or "",
-        "Processor":         "Repay",
-        "IsProcessed":       True,
-        "IsSettled":         False,
-        "FromCustomerPortal": True,
-        "Notes":             "Customer portal payment via cif-portal",
-        "id":                loan_id_int,
-        "hdr_id":            loan_id_int,
-        "loan_header_id":    loan_id_int,
-        "trans_hdr_id":      loan_id_int,
-        "loan_id":           loan_id_int,
-        "company_id":        VERGENT_COMPANY_ID,
-        "customer_id":       cid_int,
-        "amount":            amount_dollars,
-        "transaction_id":    str(transaction_id),
-        "card_ref":          repay_token or "",
-        "card_last_four":    last4 or "",
-        "approval_code":     approval_code or "",
-        "processor":         "Repay",
-        "payment_type_id":   1,
-        "payment_method_id": 1,
-        "is_processed":      True,
-        "is_settled":        False,
-        "from_customer_portal": True,
-    }
-    from urllib.parse import urlencode
-    qs = urlencode({
-        "loanId":      loan_id_int,
-        "LoanId":      loan_id_int,
-        "customerId":  cid_int,
-        "CustomerId":  cid_int,
-    })
-    log.info("vergent reconcile attempt path=/V1/PostCustomerLoanPayment (legacy)")
-    status, resp, raw = _v1_request(
-        "POST", f"/V1/PostCustomerLoanPayment?{qs}", body=legacy_body,
+    notes = (
+        f"Customer portal payment via Repay (PNRef {transaction_id}, "
+        f"auth {approval_code or 'n/a'})."
     )
-    head = (raw or "")[:300]
-    log.info("vergent reconcile response path=PostCustomerLoanPayment "
-             "status=%s body_head=%s", status, head)
-    if status in (200, 201):
+
+    body = {
+        "CompanyId":             VERGENT_COMPANY_ID,
+        "StoreId":               0,
+        "UserId":                0,
+        "HeaderId":              loan_id_int,
+        "PaymentDate":           iso_now,
+        "PaymentAmount":         amount_dollars,
+        # PaymentMethod is an enum we don't have docs for. 1 is the
+        # most common "card" value across Vergent's V1 surfaces.
+        "PaymentMethod":         1,
+        # Manual-card-entry fields per the PutCustomerLoanPayment
+        # Swagger schema. These tell Vergent the payment was made
+        # via card but processed externally (no Repay token needed
+        # on Vergent's side).
+        "ManualCardLast4Digits": str(last4 or ""),
+        "ManualCardCardType":    brand_label,
+        "ManualCardNameOnCard":  (name_on_card or "Cardholder")[:64],
+        "ManualCardExpireDate":  exp_str,
+        "ManualCardAuthCode":    str(approval_code or ""),
+        "Notes":                 notes,
+    }
+
+    path = f"/V1/PutCustomerLoanPayment/{loan_id_int}"
+    log.info("vergent reconcile PUT path=%s loan=%s amt=%s last4=%s",
+             path, loan_id_int, amount_dollars, last4)
+    status, resp, raw = _v1_request("PUT", path, body=body)
+    head = (raw or "")[:500]
+    log.info("vergent reconcile response status=%s body_head=%s",
+             status, head)
+
+    if status in (200, 201, 204):
         vergent_payment_id = None
         if isinstance(resp, dict):
             vergent_payment_id = (resp.get("id") or resp.get("paymentId")
-                                  or resp.get("PaymentId"))
-        return True, "ok:PostCustomerLoanPayment", (
+                                  or resp.get("PaymentId")
+                                  or resp.get("transactionId"))
+        return True, f"ok:{status}", (
             str(vergent_payment_id) if vergent_payment_id else None
         )
-    return False, f"all_attempts_failed:last_status={status}:{head[:200]}", None
+
+    return False, f"put_failed:status={status}:{head[:200]}", None
 
 
 def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1927,6 +1791,8 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
                 cid=cid, loan_id=loan_id, amount=float(auth_amount or amount),
                 transaction_id=transaction_id, last4=last4, brand=brand,
                 approval_code=approval_code,
+                name_on_card=name_on_card,
+                exp_month=exp_month, exp_year=exp_year,
                 repay_token=(
                     (saved_method or {}).get("repayToken") if using_saved
                     else None
