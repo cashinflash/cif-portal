@@ -390,6 +390,13 @@ the docs.
   /V1/PutCustomerLoanPayment` as `PaymentMethod=1 (Cash)` with a
   `[CIF Portal] Card payment via Repay …` note as a stopgap, which
   is not acceptable long-term.
+- **`b3543fc9-17d7-4a90-b193-29df0cea5f3e`** — `POST
+  /api/CustomerPortal/AuthenticateCognito`, re-run again
+  **2026-05-15** with the same valid Cognito ID token. Identical
+  `DependencyResolutionException` activating
+  `CustomerDomain -> VergentCustomerProvider`. Confirms the
+  failure is deterministic and reproducible on demand — not a
+  transient/cold-start blip.
 - **`9a885666-0ed1-4247-99a0-08dbeb922ab6`** — `POST
   /api/CustomerPortal/Loans/Payments/CreditCardPayment` on host
   `https://api-external.vergentlms.com`, retested **2026-05-15** in
