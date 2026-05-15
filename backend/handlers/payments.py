@@ -1785,53 +1785,6 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
                 log.warning("auto-save tokenize unexpected error cid=%s: %s",
                             cid, exc)
 
-        # ── TEMP PROBE: AuthenticateCognito → mint Vergent JWT ──
-        # If this works, we can call the customer-portal payment
-        # endpoint family (prod.api.vergentlms.com) which records
-        # payments as actual "Card" in Vergent admin. The captured
-        # browser JWT proved prod.api.vergentlms.com is the live
-        # host (aud claim). Past failures used wrong hosts.
-        try:
-            _hdrs = event.get("headers") or {}
-            _auth = (_hdrs.get("authorization")
-                     or _hdrs.get("Authorization") or "")
-            _cognito_jwt = _auth.replace("Bearer ", "").replace(
-                "bearer ", "").strip()
-            if _cognito_jwt:
-                try:
-                    _xapikey = _get_creds().get("xApiKey", "")
-                except Exception:
-                    _xapikey = ""
-                _ac_hosts = [
-                    "https://prod.api.vergentlms.com",
-                    "https://api-external.vergentlms.com",
-                    "https://prod.apim.vergentlms.com/external/shared",
-                ]
-                for _h in _ac_hosts:
-                    _url = f"{_h}/api/CustomerPortal/AuthenticateCognito"
-                    _st, _pr, _rw = _http(
-                        _url, "POST",
-                        body={"jwt": _cognito_jwt},
-                        headers={
-                            "x-api-key": _xapikey,
-                            "Content-Type": "application/json",
-                        }, timeout=20,
-                    )
-                    _tokprefix = ""
-                    if isinstance(_pr, dict):
-                        _t = (_pr.get("token") or _pr.get("Token")
-                              or _pr.get("jwt") or "")
-                        _tokprefix = str(_t)[:18]
-                    log.info(
-                        "authcognito probe host=%s status=%s "
-                        "tokprefix=%s body_head=%s",
-                        _h, _st, _tokprefix, (_rw or "")[:300])
-                    if _st == 200 and _tokprefix:
-                        break
-        except Exception as _exc:
-            log.warning("authcognito probe error: %s", _exc)
-        # ── END TEMP PROBE ──
-
         # ── Vergent reconciliation (best-effort) ──
         # Tell Vergent's V1 admin API the payment landed so the
         # customer's loan balance reflects it on their next refresh.
