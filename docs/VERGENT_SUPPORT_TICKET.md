@@ -408,6 +408,20 @@ the docs.
   CustomerPortal API surface is broken for CompanyId 386 at the DI
   registration level**. Fixing the DI registration for the
   CustomerPortal domain unblocks both auth and charge at once.
+- **Scoping contrast (2026-05-15):** `POST /api/authenticate`
+  (the plain non-CustomerPortal endpoint) does NOT hit the DI
+  bug — with placeholder credentials it returned
+  `ArgumentNullException` / `IDX10000: The parameter 'token'
+  cannot be a 'null' or an empty object`, CorrelationId
+  `8ff35f4d-fb4b-4ddf-b89e-ad5d82a91218`. That's a JWT-handling
+  failure that occurs *after* DI activation — i.e. this endpoint's
+  object graph builds fine. This confirms the
+  DependencyResolutionException is **scoped specifically to the
+  `/api/CustomerPortal/*` domain registration**, not the whole
+  external API. (`/api/authenticate` is not a usable path for us
+  anyway — it needs a Vergent-LMS username/password; our customers
+  authenticate via AWS Cognito, which is exactly why we need the
+  Cognito-JWT-exchange endpoint `AuthenticateCognito` to work.)
 - Test customer: `601488`
 - Test loan: `4830592`
 - Our service APIM `x-api-key` and JWT auth flow are working — we
