@@ -397,6 +397,16 @@ the docs.
   `CustomerDomain -> VergentCustomerProvider`. Confirms the
   failure is deterministic and reproducible on demand — not a
   transient/cold-start blip.
+- **`7d60d7d5-dad3-4999-8ed8-0b5d03268188`** — `POST
+  /api/CustomerPortal/AuthenticateCognito`, **2026-05-17**, sent
+  with the placeholder body `{"jwt": "string"}` (deliberately
+  NOT a real token). Still the identical
+  `DependencyResolutionException` activating
+  `CustomerDomain -> VergentCustomerProvider`. **This is the
+  definitive proof: the endpoint crashes before it ever reads the
+  token — a garbage value produces the exact same failure as a
+  valid Cognito JWT, on a different day. No client input can
+  affect the outcome; this is purely a server-side DI defect.**
 - **`9a885666-0ed1-4247-99a0-08dbeb922ab6`** — `POST
   /api/CustomerPortal/Loans/Payments/CreditCardPayment` on host
   `https://api-external.vergentlms.com`, retested **2026-05-15** in
