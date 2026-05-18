@@ -439,6 +439,24 @@ the docs.
   anyway — it needs a Vergent-LMS username/password; our customers
   authenticate via AWS Cognito, which is exactly why we need the
   Cognito-JWT-exchange endpoint `AuthenticateCognito` to work.)
+- **Key contradiction for your engineers:** your *own hosted
+  customer portal* successfully authenticates CompanyId 386
+  customers — we logged in as customer `601488` through it, the
+  browser received a working `VergentWebApi`-issued JWT
+  (`x-uk: cp`), and that token successfully called
+  `GET /api/CustomerPortal/Loans/4830592/Payments/Checking/Methods`.
+  So the CustomerPortal domain CAN serve CompanyId 386 through
+  your portal's login path, but the **external** API auth
+  endpoints (`AuthenticateCognito`, `CustomerPortal/Authenticate`)
+  DI-crash for the same company. Whatever DI registration your
+  hosted portal's auth path uses works; the external API's does
+  not. Aligning the external CustomerPortal DI registration with
+  the one your hosted portal already uses for CompanyId 386 should
+  resolve this. (Note: registering customers via your user-
+  registration API would NOT work around this — every external
+  `/api/CustomerPortal/*` auth path hits the same broken DI graph,
+  proven with a placeholder body that crashes before any
+  credential is read.)
 - Test customer: `601488`
 - Test loan: `4830592`
 - Our service APIM `x-api-key` and JWT auth flow are working — we
