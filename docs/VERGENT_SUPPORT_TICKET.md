@@ -425,6 +425,27 @@ the docs.
   CustomerPortal API surface is broken for CompanyId 386 at the DI
   registration level**. Fixing the DI registration for the
   CustomerPortal domain unblocks both auth and charge at once.
+- **`88b71b8f-ff12-47d2-8872-27efc8c8122a`** — `POST
+  /api/CustomerPortal/Customer/Search` via YOUR OWN Swagger UI
+  with the pre-filled CompanyId-386 `x-api-key`, **2026-05-26**.
+  Tested specifically after Vergent's 2026-05-26 "Loan Application
+  API" documentation drop, to confirm whether the docs were sent
+  alongside a silent DI fix. They were not. Verbatim response:
+  ```json
+  {
+    "ErrorMessage": "An exception was thrown while activating Vergent.Lms.Api.CustomerPortal.Domain.Implementation.CustomerDomain -> Vergent.Lms.Api.ExternalProvider.LegacyApi.VergentDataHelperProvider.",
+    "ErrorType": "DependencyResolutionException",
+    "CorrelationId": "88b71b8f-ff12-47d2-8872-27efc8c8122a"
+  }
+  ```
+  **This is now 5 correlation IDs across 3 distinct CustomerPortal
+  endpoints** (`AuthenticateCognito`, `Authenticate`,
+  `CreditCardPayment`, `Customer/Search`) — every one with the
+  same `CustomerPortal...CustomerDomain -> LegacyApi provider`
+  failure chain over a 3+ week window. The bug is reproducible on
+  demand for the entire `/api/CustomerPortal/*` namespace on
+  CompanyId 386. The newly-sent API documentation is unusable
+  until the DI registration is fixed.
 - **Scoping contrast (2026-05-15):** `POST /api/authenticate`
   (the plain non-CustomerPortal endpoint) does NOT hit the DI
   bug — with placeholder credentials it returned
