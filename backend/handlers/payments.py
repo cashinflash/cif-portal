@@ -597,36 +597,58 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     if not cid:
         return _json_response(200, {"loan": None})
 
-    # ── TEMP PROBE: test APIM CustomerPortal/AuthenticateCognito ──
-    # All Customer/Search userTypes returned clean 400 validation
-    # errors on APIM — proving the namespace is healthy here.
-    # Now test the actual blocker: AuthenticateCognito. If it
-    # mints a Vergent customer JWT, the full payment flow opens up.
+    # ── TEMP PROBE: test if our SERVICE auth works on CustomerPortal ──
+    # AuthenticateCognito returns NullRef — but we may not even need it.
+    # Test if our existing service Bearer + x-api-key (the same combo
+    # that works for /api/authenticate/handoff/create) is sufficient
+    # for PaymentSchedule and CreditCardPayment directly. If yes,
+    # we bypass AuthenticateCognito entirely and ship today.
     try:
         creds = _get_creds() or {}
         xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
-        hdrs = event.get("headers") or {}
-        cognito_jwt = (hdrs.get("authorization") or hdrs.get("Authorization")
-                       or "").replace("Bearer ", "").replace("bearer ", "").strip()
-        if not cognito_jwt:
-            log.warning("apim-probe no Cognito JWT in request headers")
-        else:
-            probe_url = f"{APIM_BASE}/api/CustomerPortal/AuthenticateCognito"
-            s, _p, raw = _http(probe_url, "POST",
-                               body={"jwt": cognito_jwt},
-                               headers={"x-api-key": xapikey,
-                                        "Content-Type": "application/json"},
-                               timeout=20)
-            # Mask token-shaped fields in logs — never echo a Vergent JWT.
-            head = (raw or "")[:1500]
-            log.info("apim-probe AuthenticateCognito status=%s body_head_chars=%d "
-                     "body_starts=%r",
-                     s, len(head), head[:200])
-            # If we got a 200 + a token field, log a SAFE summary only.
-            if s == 200 and raw and '"token"' in raw:
-                tok_idx = raw.find('"token"')
-                log.info("apim-probe success: token field present at offset %d, "
-                         "response length=%d", tok_idx, len(raw))
+        apim_tok = _get_apim_token() or ""
+        loan_id = 4830592  # Harut's test loan — hardcoded for probe only
+
+        # Probe A: GET PaymentSchedule with service Bearer + x-api-key.
+        # If 200, we can read the schedule (the prerequisite for picking
+        # a paymentId for CreditCardPayment).
+        sched_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/{loan_id}"
+                     f"/Source/Active/PaymentSchedule")
+        s_a, _p_a, raw_a = _http(sched_url, "GET",
+                                 body=None,
+                                 headers={"x-api-key": xapikey,
+                                          "Authorization": f"Bearer {apim_tok}",
+                                          "Content-Type": "application/json"},
+                                 timeout=20)
+        log.info("apim-probe A=PaymentSchedule service-bearer status=%s body=%s",
+                 s_a, (raw_a or "")[:1200])
+
+        # Probe B: same, but x-api-key only (no Bearer) — in case APIM
+        # rejects Bearer for this endpoint family the way it did for
+        # AuthenticateCognito.
+        s_b, _p_b, raw_b = _http(sched_url, "GET",
+                                 body=None,
+                                 headers={"x-api-key": xapikey,
+                                          "Content-Type": "application/json"},
+                                 timeout=20)
+        log.info("apim-probe B=PaymentSchedule x-api-key-only status=%s body=%s",
+                 s_b, (raw_b or "")[:1200])
+
+        # Probe C: POST CreditCardPayment with INVALID body (paymentId=0,
+        # amount=0) — designed to fail at validation, not to charge.
+        # Auth response tells us if service auth is accepted here at all.
+        pay_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments"
+                   f"/CreditCardPayment")
+        pay_body = {"loanId": loan_id, "paymentId": 0, "amountDue": 0.0,
+                    "isInRescindPeriod": False, "authCode": None}
+        s_c, _p_c, raw_c = _http(pay_url, "POST",
+                                 body=pay_body,
+                                 headers={"x-api-key": xapikey,
+                                          "Authorization": f"Bearer {apim_tok}",
+                                          "Content-Type": "application/json"},
+                                 timeout=20)
+        log.info("apim-probe C=CreditCardPayment service-bearer status=%s body=%s",
+                 s_c, (raw_c or "")[:1200])
     except Exception as _exc:
         log.warning("apim-probe error: %s", _exc)
     # ── END TEMP PROBE ──
