@@ -275,6 +275,56 @@ def _v1_request(method: str, path: str, *,
     return status, parsed, raw
 
 
+def _apim_credit_card_payment(*, loan_id: int, card_id: int,
+                              amount: float, auth_code: Optional[str] = None,
+                              is_in_rescind: bool = False
+                              ) -> Tuple[int, Optional[Dict[str, Any]], str]:
+    """Charge a saved card via Vergent's CustomerPortal API on APIM.
+
+    This is the canonical path: Vergent charges the card through their
+    Repay integration, posts to the loan, and records the payment as
+    actual Card in admin (not Cash). No AuthenticateCognito or
+    customer-scoped JWT required — service Bearer + x-api-key (the
+    same auth combo as /api/authenticate/handoff/create) is sufficient.
+
+    Body shape (empirically confirmed 2026-05-27 via APIM probes):
+        loanId            int     — the loan to apply the payment to
+        paymentId         int     — Vergent's saved-card id (NOT a
+                                    scheduled-payment-row id; their
+                                    CustomerPortal namespace overloads
+                                    the field name)
+        amountDue         number  — dollars (positive)
+        isInRescindPeriod bool    — false for normal payments
+        authCode          str?    — null; reserved for future use
+
+    Returns (status, parsed_body, raw_body).
+    """
+    creds = _get_creds() or {}
+    xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
+    apim_tok = _get_apim_token() or ""
+    if not xapikey or not apim_tok:
+        return 0, None, "missing_creds"
+    url = f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
+    body = {
+        "loanId":            int(loan_id),
+        "paymentId":         int(card_id),
+        "amountDue":         round(float(amount), 2),
+        "isInRescindPeriod": bool(is_in_rescind),
+        "authCode":          auth_code,
+    }
+    headers = {
+        "x-api-key":     xapikey,
+        "Authorization": f"Bearer {apim_tok}",
+        "Content-Type":  "application/json",
+    }
+    log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s",
+             loan_id, card_id, amount)
+    status, parsed, raw = _http(url, "POST", body=body, headers=headers, timeout=30)
+    log.info("apim-pay response status=%s body_head=%s",
+             status, (raw or "")[:500])
+    return status, parsed, raw
+
+
 # ─────────────────────────────────────────
 # Repay-via-Vergent payment endpoints (Phase Z)
 # ─────────────────────────────────────────
@@ -596,84 +646,6 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None})
-
-    # ── TEMP PROBE: test if our SERVICE auth works on CustomerPortal ──
-    # AuthenticateCognito returns NullRef — but we may not even need it.
-    # Test if our existing service Bearer + x-api-key (the same combo
-    # that works for /api/authenticate/handoff/create) is sufficient
-    # for PaymentSchedule and CreditCardPayment directly. If yes,
-    # we bypass AuthenticateCognito entirely and ship today.
-    try:
-        creds = _get_creds() or {}
-        xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
-        apim_tok = _get_apim_token() or ""
-        loan_id = 4830592  # Harut's test loan — hardcoded for probe only
-
-        # Probe A: GET PaymentSchedule with service Bearer + x-api-key.
-        # If 200, we can read the schedule (the prerequisite for picking
-        # a paymentId for CreditCardPayment).
-        sched_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/{loan_id}"
-                     f"/Source/Active/PaymentSchedule")
-        s_a, _p_a, raw_a = _http(sched_url, "GET",
-                                 body=None,
-                                 headers={"x-api-key": xapikey,
-                                          "Authorization": f"Bearer {apim_tok}",
-                                          "Content-Type": "application/json"},
-                                 timeout=20)
-        log.info("apim-probe A=PaymentSchedule service-bearer status=%s body=%s",
-                 s_a, (raw_a or "")[:1200])
-
-        # Probe B: same, but x-api-key only (no Bearer) — in case APIM
-        # rejects Bearer for this endpoint family the way it did for
-        # AuthenticateCognito.
-        s_b, _p_b, raw_b = _http(sched_url, "GET",
-                                 body=None,
-                                 headers={"x-api-key": xapikey,
-                                          "Content-Type": "application/json"},
-                                 timeout=20)
-        log.info("apim-probe B=PaymentSchedule x-api-key-only status=%s body=%s",
-                 s_b, (raw_b or "")[:1200])
-
-        # Probe C: GET Methods endpoint with service auth to confirm
-        # we can read the customer's saved cards via APIM. Earlier in
-        # this session we saw this endpoint return cardId 237669 for
-        # Harut's Visa ending 2217.
-        methods_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/{loan_id}"
-                       f"/Payments/Checking/Methods")
-        s_c, _p_c, raw_c = _http(methods_url, "GET",
-                                 body=None,
-                                 headers={"x-api-key": xapikey,
-                                          "Authorization": f"Bearer {apim_tok}",
-                                          "Content-Type": "application/json"},
-                                 timeout=20)
-        log.info("apim-probe C=Methods service-bearer status=%s body=%s",
-                 s_c, (raw_c or "")[:1500])
-
-        # Probe D: send paymentId=237669 (Harut's card id from v1
-        # GetCustomerCards). Earlier Methods captures confirmed Vergent's
-        # CustomerPortal namespace uses paymentId as the saved-card
-        # identifier — same numeric value our v1 GetCustomerCards returns
-        # as card.id. The cardId field in the body is undocumented and
-        # ignored by the deserializer; the handler derives cardId from
-        # paymentId internally. amountDue=0 so the handler rejects on
-        # amount validation BEFORE actually charging.
-        pay_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments"
-                   f"/CreditCardPayment")
-        pay_body = {"loanId": loan_id, "paymentId": 237669,
-                    "amountDue": 0.0, "isInRescindPeriod": False,
-                    "authCode": None}
-        s_d, _p_d, raw_d = _http(pay_url, "POST",
-                                 body=pay_body,
-                                 headers={"x-api-key": xapikey,
-                                          "Authorization": f"Bearer {apim_tok}",
-                                          "Content-Type": "application/json"},
-                                 timeout=20)
-        log.info("apim-probe D=CreditCardPayment paymentId-as-cardId status=%s body=%s",
-                 s_d, (raw_d or "")[:1500])
-    except Exception as _exc:
-        log.warning("apim-probe error: %s", _exc)
-    # ── END TEMP PROBE ──
-
     loan = _fetch_active_loan(cid)
     return _json_response(200, {"loan": loan})
 
@@ -1687,6 +1659,45 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     if loan_id is None:
         active = _fetch_active_loan(cid)
         loan_id = active.get("id") if active else None
+
+    # ── OPT-IN: Vergent CustomerPortal CreditCardPayment via APIM ──
+    # When body contains `useApim: true` + `cardId: <int>`, bypass the
+    # Repay-direct path entirely and let Vergent charge the saved card
+    # through their integration. Payment records as native Card in
+    # Vergent admin (not Cash) — the DFPI-compliant path. Confirmed
+    # working 2026-05-27 via service Bearer + x-api-key (no
+    # AuthenticateCognito required). Body shape locked via probes.
+    if body.get("useApim") and body.get("cardId"):
+        try:
+            card_id = int(body.get("cardId"))
+            loan_id_int = int(loan_id) if loan_id is not None else 0
+        except (TypeError, ValueError):
+            return _json_response(400, {"error": "invalid_apim_params"})
+        if not loan_id_int or not card_id:
+            return _json_response(400, {"error": "missing_loan_or_card"})
+        st, parsed, raw = _apim_credit_card_payment(
+            loan_id=loan_id_int, card_id=card_id, amount=amount,
+        )
+        log_safe_raw = (raw or "")[:600]
+        if st in (200, 201):
+            # Vergent recorded the payment natively as Card. We
+            # don't need to PUT-reconcile, don't need a DDB ledger
+            # row (Vergent IS the ledger), don't need CardSafe.
+            return _json_response(200, {
+                "success":      True,
+                "via":          "apim",
+                "loanId":       loan_id_int,
+                "cardId":       card_id,
+                "amountPaid":   round(amount, 2),
+                "vergentReply": parsed if isinstance(parsed, dict) else None,
+            })
+        # Failure — surface verbatim upstream body for diagnosis.
+        return _json_response(502, {
+            "success":       False,
+            "via":           "apim",
+            "upstreamStatus": st,
+            "upstreamBody":   log_safe_raw,
+        })
 
     # ── Auth to Repay (shared) ──
     creds = _get_repay_rgapi_creds()
