@@ -657,6 +657,70 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None})
+
+    # ── TEMP PROBE: customer/register flow ──
+    # Docs say register mints a customer bearer token without a
+    # password. Three-step probe:
+    #   1) POST /api/application with x-api-key + service Bearer
+    #   2) POST /api/application/{id}/customer/register
+    #   3) inspect for a returned bearer token
+    # If step 3 surfaces a token, we use it to call CreditCardPayment
+    # in a follow-up commit. If register requires customer data not
+    # supplied via the bare app create, the error tells us what fields
+    # to add. Strip this block once we know the answer.
+    try:
+        creds = _get_creds() or {}
+        xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
+        apim_tok = _get_apim_token() or ""
+        common_headers = {
+            "x-api-key": xapikey,
+            "Authorization": f"Bearer {apim_tok}",
+            "Content-Type": "application/json",
+        }
+
+        # Step 1: create a bare application.
+        s1, parsed1, raw1 = _http(f"{APIM_BASE}/api/application", "POST",
+                                  body={}, headers=common_headers, timeout=20)
+        log.info("register-probe step1=create-app status=%s body=%s",
+                 s1, (raw1 or "")[:800])
+
+        # Extract the new applicationId — try a few common shapes.
+        app_id = None
+        if isinstance(parsed1, dict):
+            for k in ("applicationId", "id", "Id", "ApplicationId"):
+                if parsed1.get(k):
+                    app_id = parsed1[k]; break
+        elif isinstance(parsed1, (int, str)):
+            app_id = parsed1
+
+        if not app_id:
+            log.info("register-probe step1 did not return an applicationId, "
+                     "cannot continue to step 2")
+        else:
+            log.info("register-probe step1 applicationId=%s", app_id)
+
+            # Step 2: try /customer/register on that app. Send Harut's
+            # data — Vergent's docs say email/phone is used to find
+            # an existing customer. Empty body first; if it fails,
+            # try with phone/email.
+            reg_url = (f"{APIM_BASE}/api/application/{app_id}"
+                       f"/customer/register")
+            s2a, _p2a, raw2a = _http(reg_url, "POST", body={},
+                                     headers=common_headers, timeout=20)
+            log.info("register-probe step2a=register-empty status=%s body=%s",
+                     s2a, (raw2a or "")[:1500])
+
+            # Step 2b: with email + phone hint for matching Harut.
+            s2b, _p2b, raw2b = _http(reg_url, "POST",
+                                     body={"emailAddress": "darallc@yahoo.com",
+                                           "phoneNumber": "2601300079"},
+                                     headers=common_headers, timeout=20)
+            log.info("register-probe step2b=register-with-hint status=%s body=%s",
+                     s2b, (raw2b or "")[:1500])
+    except Exception as _exc:
+        log.warning("register-probe error: %s", _exc)
+    # ── END TEMP PROBE ──
+
     loan = _fetch_active_loan(cid)
     return _json_response(200, {"loan": loan})
 
