@@ -606,30 +606,26 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     try:
         creds = _get_creds() or {}
         xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
-        apim_tok = _get_apim_token() or ""
         probe_url = f"{APIM_BASE}/api/CustomerPortal/Customer/Search"
-        probe_body = {
-            "firstName": "Harut", "lastName": "Darakchyan",
-            "businessName": "", "phoneNumber": "",
-            "idNumber": "", "einNumber": "", "userType": 0,
-        }
-        # Try x-api-key alone first (matches what their docs say).
-        s1, _p1, raw1 = _http(probe_url, "POST",
-                              body=probe_body,
-                              headers={"x-api-key": xapikey,
-                                       "Content-Type": "application/json"},
-                              timeout=20)
-        log.info("apim-probe shape=x-api-key-only url=%s status=%s body=%s",
-                 probe_url, s1, (raw1 or "")[:1200])
-        # Then x-api-key + Bearer (matches our existing APIM auth pattern).
-        s2, _p2, raw2 = _http(probe_url, "POST",
-                              body=probe_body,
-                              headers={"x-api-key": xapikey,
-                                       "Authorization": f"Bearer {apim_tok}",
-                                       "Content-Type": "application/json"},
-                              timeout=20)
-        log.info("apim-probe shape=x-api-key+bearer url=%s status=%s body=%s",
-                 probe_url, s2, (raw2 or "")[:1200])
+        # First probe (userType=0) returned 400 "Business name required"
+        # — confirms the endpoint is reachable + DI is fine. userType=0
+        # is business search. Try 1, 2, 3 to find the individual-search
+        # value. x-api-key-only auth (shape 2 with Bearer returned 403).
+        for ut in (1, 2, 3, 4):
+            probe_body = {
+                "firstName": "Harut", "lastName": "Darakchyan",
+                "businessName": "", "phoneNumber": "",
+                "idNumber": "", "einNumber": "", "userType": ut,
+            }
+            s, _p, raw = _http(probe_url, "POST",
+                               body=probe_body,
+                               headers={"x-api-key": xapikey,
+                                        "Content-Type": "application/json"},
+                               timeout=20)
+            log.info("apim-probe userType=%s status=%s body=%s",
+                     ut, s, (raw or "")[:1500])
+            if s == 200:
+                break
     except Exception as _exc:
         log.warning("apim-probe error: %s", _exc)
     # ── END TEMP PROBE ──
