@@ -446,6 +446,40 @@ the docs.
   demand for the entire `/api/CustomerPortal/*` namespace on
   CompanyId 386. The newly-sent API documentation is unusable
   until the DI registration is fixed.
+- **MAJOR UPDATE (2026-05-27):** Vergent's senior dev pointed out
+  that we were hitting the wrong host —
+  `api-external.vergentlms.com` (the Swagger UI Vergent's own help
+  link pre-loads is connected to a broken non-prod deployment).
+  The actual production path is
+  `prod.apim.vergentlms.com/external/shared`. Re-tested the
+  CustomerPortal namespace on the APIM host with the same
+  `x-api-key`:
+  - `POST /api/CustomerPortal/Customer/Search` — returned clean
+    400 validation errors across userType 0–4 (each one telling
+    us which field was required). **No DependencyResolutionException
+    on the APIM host.** DI activation works perfectly. The
+    `CustomerPortal...CustomerDomain` DI graph builds correctly
+    here.
+  - `POST /api/CustomerPortal/AuthenticateCognito` — sent a real
+    Cognito ID token from CompanyId-386 customer 601488,
+    `x-api-key` header only (Bearer was rejected with 403). Got:
+    ```json
+    {
+      "ErrorMessage": "Object reference not set to an instance of an object.",
+      "ErrorType": "NullReferenceException",
+      "CorrelationId": "db6bdf7d-b997-4faa-8c41-710072f5e166"
+    }
+    ```
+    **This is a different bug class than what we'd been
+    reporting** — it's a code-level NullRef inside the
+    AuthenticateCognito handler, NOT the DI container failure on
+    the other host. DI activates cleanly, the handler enters,
+    and crashes on a null reference during processing. Please
+    have engineering trace correlation
+    `db6bdf7d-b997-4faa-8c41-710072f5e166` and fix the NullRef.
+    This is the one remaining blocker — once `AuthenticateCognito`
+    returns a valid customer JWT, the full CreditCardPayment flow
+    opens for us.
 - **Scoping contrast (2026-05-15):** `POST /api/authenticate`
   (the plain non-CustomerPortal endpoint) does NOT hit the DI
   bug — with placeholder credentials it returned
