@@ -597,35 +597,36 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     if not cid:
         return _json_response(200, {"loan": None})
 
-    # ── TEMP PROBE: test APIM CustomerPortal/Customer/Search ──
-    # Vergent senior dev says we may be hitting the wrong host (the
-    # direct api-external.vergentlms.com Swagger) and that production
-    # lives at prod.apim.vergentlms.com/external/shared. Test that
-    # claim by calling Customer/Search via APIM with our existing
-    # x-api-key + APIM Bearer JWT. Log status, headers, body.
+    # ── TEMP PROBE: test APIM CustomerPortal/AuthenticateCognito ──
+    # All Customer/Search userTypes returned clean 400 validation
+    # errors on APIM — proving the namespace is healthy here.
+    # Now test the actual blocker: AuthenticateCognito. If it
+    # mints a Vergent customer JWT, the full payment flow opens up.
     try:
         creds = _get_creds() or {}
         xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
-        probe_url = f"{APIM_BASE}/api/CustomerPortal/Customer/Search"
-        # First probe (userType=0) returned 400 "Business name required"
-        # — confirms the endpoint is reachable + DI is fine. userType=0
-        # is business search. Try 1, 2, 3 to find the individual-search
-        # value. x-api-key-only auth (shape 2 with Bearer returned 403).
-        for ut in (1, 2, 3, 4):
-            probe_body = {
-                "firstName": "Harut", "lastName": "Darakchyan",
-                "businessName": "", "phoneNumber": "",
-                "idNumber": "", "einNumber": "", "userType": ut,
-            }
+        hdrs = event.get("headers") or {}
+        cognito_jwt = (hdrs.get("authorization") or hdrs.get("Authorization")
+                       or "").replace("Bearer ", "").replace("bearer ", "").strip()
+        if not cognito_jwt:
+            log.warning("apim-probe no Cognito JWT in request headers")
+        else:
+            probe_url = f"{APIM_BASE}/api/CustomerPortal/AuthenticateCognito"
             s, _p, raw = _http(probe_url, "POST",
-                               body=probe_body,
+                               body={"jwt": cognito_jwt},
                                headers={"x-api-key": xapikey,
                                         "Content-Type": "application/json"},
                                timeout=20)
-            log.info("apim-probe userType=%s status=%s body=%s",
-                     ut, s, (raw or "")[:1500])
-            if s == 200:
-                break
+            # Mask token-shaped fields in logs — never echo a Vergent JWT.
+            head = (raw or "")[:1500]
+            log.info("apim-probe AuthenticateCognito status=%s body_head_chars=%d "
+                     "body_starts=%r",
+                     s, len(head), head[:200])
+            # If we got a 200 + a token field, log a SAFE summary only.
+            if s == 200 and raw and '"token"' in raw:
+                tok_idx = raw.find('"token"')
+                log.info("apim-probe success: token field present at offset %d, "
+                         "response length=%d", tok_idx, len(raw))
     except Exception as _exc:
         log.warning("apim-probe error: %s", _exc)
     # ── END TEMP PROBE ──
