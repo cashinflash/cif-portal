@@ -649,13 +649,17 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
         log.info("apim-probe C=Methods service-bearer status=%s body=%s",
                  s_c, (raw_c or "")[:1500])
 
-        # Probe D: POST CreditCardPayment with cardId=237669 (Harut's
-        # saved Visa) but amountDue=0.0 so the handler rejects on amount
-        # validation BEFORE charging. This tells us if cardId alone
-        # unlocks the handler past the "cardId required" check.
+        # Probe D: send paymentId=237669 (Harut's card id from v1
+        # GetCustomerCards). Earlier Methods captures confirmed Vergent's
+        # CustomerPortal namespace uses paymentId as the saved-card
+        # identifier — same numeric value our v1 GetCustomerCards returns
+        # as card.id. The cardId field in the body is undocumented and
+        # ignored by the deserializer; the handler derives cardId from
+        # paymentId internally. amountDue=0 so the handler rejects on
+        # amount validation BEFORE actually charging.
         pay_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments"
                    f"/CreditCardPayment")
-        pay_body = {"loanId": loan_id, "paymentId": 0, "cardId": 237669,
+        pay_body = {"loanId": loan_id, "paymentId": 237669,
                     "amountDue": 0.0, "isInRescindPeriod": False,
                     "authCode": None}
         s_d, _p_d, raw_d = _http(pay_url, "POST",
@@ -664,7 +668,7 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
                                           "Authorization": f"Bearer {apim_tok}",
                                           "Content-Type": "application/json"},
                                  timeout=20)
-        log.info("apim-probe D=CreditCardPayment with-cardId status=%s body=%s",
+        log.info("apim-probe D=CreditCardPayment paymentId-as-cardId status=%s body=%s",
                  s_d, (raw_d or "")[:1500])
     except Exception as _exc:
         log.warning("apim-probe error: %s", _exc)
