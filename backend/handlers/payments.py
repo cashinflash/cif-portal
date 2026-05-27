@@ -596,6 +596,44 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None})
+
+    # ── TEMP PROBE: test APIM CustomerPortal/Customer/Search ──
+    # Vergent senior dev says we may be hitting the wrong host (the
+    # direct api-external.vergentlms.com Swagger) and that production
+    # lives at prod.apim.vergentlms.com/external/shared. Test that
+    # claim by calling Customer/Search via APIM with our existing
+    # x-api-key + APIM Bearer JWT. Log status, headers, body.
+    try:
+        creds = _get_creds() or {}
+        xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
+        apim_tok = _get_apim_token() or ""
+        probe_url = f"{APIM_BASE}/api/CustomerPortal/Customer/Search"
+        probe_body = {
+            "firstName": "Harut", "lastName": "Darakchyan",
+            "businessName": "", "phoneNumber": "",
+            "idNumber": "", "einNumber": "", "userType": 0,
+        }
+        # Try x-api-key alone first (matches what their docs say).
+        s1, _p1, raw1 = _http(probe_url, "POST",
+                              body=probe_body,
+                              headers={"x-api-key": xapikey,
+                                       "Content-Type": "application/json"},
+                              timeout=20)
+        log.info("apim-probe shape=x-api-key-only url=%s status=%s body=%s",
+                 probe_url, s1, (raw1 or "")[:1200])
+        # Then x-api-key + Bearer (matches our existing APIM auth pattern).
+        s2, _p2, raw2 = _http(probe_url, "POST",
+                              body=probe_body,
+                              headers={"x-api-key": xapikey,
+                                       "Authorization": f"Bearer {apim_tok}",
+                                       "Content-Type": "application/json"},
+                              timeout=20)
+        log.info("apim-probe shape=x-api-key+bearer url=%s status=%s body=%s",
+                 probe_url, s2, (raw2 or "")[:1200])
+    except Exception as _exc:
+        log.warning("apim-probe error: %s", _exc)
+    # ── END TEMP PROBE ──
+
     loan = _fetch_active_loan(cid)
     return _json_response(200, {"loan": loan})
 
