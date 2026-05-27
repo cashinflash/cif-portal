@@ -276,7 +276,8 @@ def _v1_request(method: str, path: str, *,
 
 
 def _apim_credit_card_payment(*, loan_id: int, card_id: int,
-                              amount: float, auth_code: Optional[str] = None,
+                              amount: float, customer_id: int = 0,
+                              auth_code: Optional[str] = None,
                               is_in_rescind: bool = False
                               ) -> Tuple[int, Optional[Dict[str, Any]], str]:
     """Charge a saved card via Vergent's CustomerPortal API on APIM.
@@ -311,6 +312,19 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "amountDue":         round(float(amount), 2),
         "isInRescindPeriod": bool(is_in_rescind),
         "authCode":          auth_code,
+        # Service-token override hints: handler resolves the customer
+        # from JWT mobileProfileId, but our service JWT carries the
+        # service user id (8434), not a customer's. Send the customer
+        # id + mobile profile id under every plausible field name in
+        # case Vergent's deserializer falls back to body values when
+        # the JWT lookup fails. Vergent ignores unknown fields, so
+        # this is safe even if none of them are recognized.
+        "customerId":        int(customer_id or 0),
+        "custId":            int(customer_id or 0),
+        "CustomerId":        int(customer_id or 0),
+        "customer_id":       int(customer_id or 0),
+        "mobileProfileId":   int(customer_id or 0),
+        "MobileProfileId":   int(customer_id or 0),
     }
     headers = {
         "x-api-key":     xapikey,
@@ -1675,8 +1689,13 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
             return _json_response(400, {"error": "invalid_apim_params"})
         if not loan_id_int or not card_id:
             return _json_response(400, {"error": "missing_loan_or_card"})
+        try:
+            customer_id_int = int(cid) if cid else 0
+        except (TypeError, ValueError):
+            customer_id_int = 0
         st, parsed, raw = _apim_credit_card_payment(
             loan_id=loan_id_int, card_id=card_id, amount=amount,
+            customer_id=customer_id_int,
         )
         log_safe_raw = (raw or "")[:600]
         if st in (200, 201):
