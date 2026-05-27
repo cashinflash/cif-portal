@@ -683,24 +683,36 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
             ac_url = f"{APIM_BASE}/api/CustomerPortal/AuthenticateCognito"
             base_h = {"x-api-key": xapikey, "Content-Type": "application/json"}
             variants = [
-                ("1-baseline-jwt-lowercase",
-                 {"jwt": cognito_jwt}, base_h),
-                ("2-Jwt-PascalCase",
-                 {"Jwt": cognito_jwt}, base_h),
-                ("3-token-field",
-                 {"token": cognito_jwt}, base_h),
-                ("4-Token-PascalCase",
-                 {"Token": cognito_jwt}, base_h),
-                ("5-idToken-field",
-                 {"idToken": cognito_jwt}, base_h),
-                ("6-json-patch-ct",
+                # Try adding fields that might steer Vergent to the right
+                # tenant/pool config for our company. /api/authenticate
+                # accepts applicationUrl, ipAddress, storeId — maybe
+                # AuthenticateCognito accepts the same.
+                ("9-with-applicationUrl",
+                 {"jwt": cognito_jwt,
+                  "applicationUrl": "https://d1zucrj1ouu3c.cloudfront.net"},
+                 base_h),
+                ("10-with-storeId",
+                 {"jwt": cognito_jwt, "storeId": 618}, base_h),
+                ("11-with-poolId",
+                 {"jwt": cognito_jwt,
+                  "poolId": "us-east-1_U508xOs95"}, base_h),
+                ("12-with-issuer",
+                 {"jwt": cognito_jwt,
+                  "issuer": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_U508xOs95"},
+                 base_h),
+                ("13-full-shape",
+                 {"jwt": cognito_jwt,
+                  "applicationUrl": "https://d1zucrj1ouu3c.cloudfront.net",
+                  "storeId": 618, "ipAddress": "0.0.0.0",
+                  "poolId": "us-east-1_U508xOs95"},
+                 base_h),
+                ("14-Ocp-Apim-Subscription-Key",
                  {"jwt": cognito_jwt},
-                 {**base_h, "Content-Type": "application/json-patch+json"}),
-                ("7-with-origin",
+                 {**base_h, "Ocp-Apim-Subscription-Key": xapikey}),
+                ("15-companyId-header",
                  {"jwt": cognito_jwt},
-                 {**base_h, "Origin": "https://cashinflash.my.vergentlms.com"}),
-                ("8-placeholder",
-                 {"jwt": "string"}, base_h),
+                 {**base_h, "x-company-id": "386",
+                  "companyId": "386"}),
             ]
             for name, body, headers in variants:
                 s, _p, raw = _http(ac_url, "POST", body=body,
