@@ -657,6 +657,68 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None})
+
+    # ── TEMP PROBE: AuthenticateCognito variants ──
+    # All prior probes used body {"jwt": <ID token>} + Content-Type
+    # application/json + x-api-key only. Got NullRef every time on
+    # APIM. Test 6 variants to see if ANY of them changes the result:
+    #   1) baseline: {"jwt": ..} + application/json
+    #   2) PascalCase body: {"Jwt": ..}
+    #   3) different field name: {"token": ..}
+    #   4) Swagger-default Content-Type: application/json-patch+json
+    #   5) Origin header set to Vergent's customer portal
+    #   6) PLACEHOLDER body: {"jwt": "string"} (tells us if handler
+    #      even parses the JWT; if same NullRef as real token, the
+    #      crash precedes JWT parsing)
+    # Any variant returning a non-NullRef error reveals what changed.
+    try:
+        creds = _get_creds() or {}
+        xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
+        hdrs = event.get("headers") or {}
+        cognito_jwt = (hdrs.get("authorization") or hdrs.get("Authorization")
+                       or "").replace("Bearer ", "").replace("bearer ", "").strip()
+        if not cognito_jwt:
+            log.warning("authcog-probe no Cognito JWT to test with")
+        else:
+            ac_url = f"{APIM_BASE}/api/CustomerPortal/AuthenticateCognito"
+            base_h = {"x-api-key": xapikey, "Content-Type": "application/json"}
+            variants = [
+                ("1-baseline-jwt-lowercase",
+                 {"jwt": cognito_jwt}, base_h),
+                ("2-Jwt-PascalCase",
+                 {"Jwt": cognito_jwt}, base_h),
+                ("3-token-field",
+                 {"token": cognito_jwt}, base_h),
+                ("4-Token-PascalCase",
+                 {"Token": cognito_jwt}, base_h),
+                ("5-idToken-field",
+                 {"idToken": cognito_jwt}, base_h),
+                ("6-json-patch-ct",
+                 {"jwt": cognito_jwt},
+                 {**base_h, "Content-Type": "application/json-patch+json"}),
+                ("7-with-origin",
+                 {"jwt": cognito_jwt},
+                 {**base_h, "Origin": "https://cashinflash.my.vergentlms.com"}),
+                ("8-placeholder",
+                 {"jwt": "string"}, base_h),
+            ]
+            for name, body, headers in variants:
+                s, _p, raw = _http(ac_url, "POST", body=body,
+                                   headers=headers, timeout=20)
+                head = (raw or "")[:600]
+                # Surface ErrorType when present so we can compare error
+                # classes (NullRef vs Argument vs validation) without
+                # logging tokens.
+                err_type = ""
+                if '"ErrorType"' in head:
+                    a = head.find('"ErrorType"')
+                    err_type = head[a:a+60]
+                log.info("authcog-probe %s status=%s err=%s head=%s",
+                         name, s, err_type, head[:300])
+    except Exception as _exc:
+        log.warning("authcog-probe error: %s", _exc)
+    # ── END TEMP PROBE ──
+
     loan = _fetch_active_loan(cid)
     return _json_response(200, {"loan": loan})
 
