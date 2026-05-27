@@ -198,18 +198,35 @@
       </form>
     </section>
 
-    <!-- Receipt view (shown after balance refresh detects payment) -->
+    <!-- Receipt view (shown after a successful charge) -->
     <section class="dash-card pay-receipt" id="payReceipt" hidden>
       <div class="pay-receipt-icon" aria-hidden="true">
         <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
       </div>
       <h2>Payment received</h2>
-      <p class="pay-receipt-amount"><span data-receipt-amount>$0.00</span> applied to your loan</p>
-      <div class="pay-receipt-detail">
-        <div><small>New balance</small><strong data-receipt-balance>—</strong></div>
-      </div>
+      <p class="pay-receipt-amount">
+        <span class="pay-receipt-amount-currency">$</span><span data-receipt-amount>0.00</span>
+      </p>
+      <p class="pay-receipt-subline">applied to your loan</p>
+
+      <dl class="pay-receipt-grid">
+        <div>
+          <dt>Card</dt>
+          <dd data-receipt-card>—</dd>
+        </div>
+        <div>
+          <dt>Date</dt>
+          <dd data-receipt-date>—</dd>
+        </div>
+        <div class="pay-receipt-grid-full">
+          <dt>Confirmation number</dt>
+          <dd data-receipt-confirmation>—</dd>
+        </div>
+      </dl>
+
       <div class="pay-actions pay-actions--center">
-        <a href="/dashboard.html" class="btn-apply">Back to dashboard</a>
+        <a href="/dashboard.html" class="btn-login">Back to dashboard</a>
+        <button type="button" class="btn-apply" id="payAgainBtn">Make another payment</button>
       </div>
     </section>
 

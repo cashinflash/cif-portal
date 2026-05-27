@@ -349,19 +349,21 @@
     api('/api/my-payment/charge', { method: 'POST', body: reqBody })
       .then(function (res) {
         if (res && res.success && res.transactionId) {
-          sessionStorage.setItem(SUCCESS_KEY, JSON.stringify({
-            amount: Number(res.authAmount || form.amount),
-            last4: res.last4 || '',
-            brand: res.brand || '',
+          const paid = Number(res.authAmount || form.amount);
+          const receipt = {
+            amount:        paid,
+            last4:         res.last4 || form.last4 || '',
+            brand:         res.brand || form.brand || '',
             transactionId: res.transactionId,
-            when: Date.now(),
-          }));
-          return loadLoan().then(function (loan) {
-            const newBal = loan ? Number(loan.balance) : null;
-            showReceipt(Number(res.authAmount || form.amount), newBal);
-          }).catch(function () {
-            showReceipt(Number(res.authAmount || form.amount), null);
-          });
+            when:          Date.now(),
+          };
+          sessionStorage.setItem(SUCCESS_KEY, JSON.stringify(receipt));
+          // Best-effort balance refresh — we don't display the new
+          // balance on the receipt anymore (it can be misleading right
+          // after a payment posts), so failures don't matter.
+          return loadLoan()
+            .catch(function () {})
+            .then(function () { showReceipt(receipt); });
         }
         const reason = (res && res.resultText) || 'Card declined.';
         showError(reason + ' Please try a different card or call (747) 270-7121.');
@@ -397,13 +399,63 @@
       });
   }
 
-  function showReceipt(amount, newBalance) {
+  function showReceipt(receipt) {
+    const amount = Number(receipt && receipt.amount) || 0;
+    const last4  = (receipt && receipt.last4) || '';
+    const brand  = (receipt && receipt.brand) || '';
+    const txId   = (receipt && receipt.transactionId) || '';
+    const when   = (receipt && receipt.when) || Date.now();
+
     qs('#payFormCard').hidden = true;
-    setText(qs('[data-receipt-amount]'), money(amount));
-    setText(qs('[data-receipt-balance]'),
-      newBalance !== null && newBalance !== undefined ? money(newBalance) : '—'
-    );
+    // Amount split across two spans so the "$" sits smaller than the
+    // number — matches the dashboard's hero-balance typography.
+    setText(qs('[data-receipt-amount]'),
+      amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+
+    // "Visa ending 5556" — graceful when fields are missing.
+    let cardLine = '—';
+    if (brand && last4) {
+      cardLine = brand + ' ending ' + last4;
+    } else if (last4) {
+      cardLine = 'Card ending ' + last4;
+    } else if (brand) {
+      cardLine = brand;
+    }
+    setText(qs('[data-receipt-card]'), cardLine);
+
+    // Human-readable timestamp in the customer's locale.
+    let dateLine = '—';
+    try {
+      const d = new Date(when);
+      dateLine = d.toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      }) + ' at ' + d.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit',
+      });
+    } catch (e) { /* keep fallback */ }
+    setText(qs('[data-receipt-date]'), dateLine);
+
+    setText(qs('[data-receipt-confirmation]'), String(txId || '—'));
+
     qs('#payReceipt').hidden = false;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // "Make another payment" — reset the form state and return to the
+  // pay card. Saved-card list reloads in case any state has changed.
+  function resetForPayAgain() {
+    qs('#payReceipt').hidden = true;
+    const amt = qs('#payAmount'); if (amt) amt.value = '';
+    const cvv = qs('#payCvv');    if (cvv) cvv.value = '';
+    const num = qs('#payCardNumber'); if (num) num.value = '';
+    const exp = qs('#payExp'); if (exp) exp.value = '';
+    const nm  = qs('#payName'); if (nm)  nm.value  = '';
+    const zip = qs('#payZip'); if (zip) zip.value = '';
+    const err = qs('#payError'); if (err) { err.hidden = true; err.textContent = ''; }
+    qs('#payFormCard').hidden = false;
+    if (typeof loadSavedMethods === 'function') {
+      try { loadSavedMethods(); } catch (e) { /* non-fatal */ }
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -417,6 +469,9 @@
       methodsList.addEventListener('change', onMethodChange);
       methodsList.addEventListener('click', onMethodRemoveClick);
     }
+
+    const payAgain = qs('#payAgainBtn');
+    if (payAgain) payAgain.addEventListener('click', resetForPayAgain);
 
     // Live formatting.
     const cardInput = qs('#payCardNumber');

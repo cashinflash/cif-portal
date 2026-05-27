@@ -2483,45 +2483,71 @@ button.dash-doc-download:disabled {
 }
 
 /* Receipt */
-.pay-receipt { text-align: center; padding: 36px 28px; }
+.pay-receipt { text-align: center; padding: 40px 28px 32px; }
 .pay-receipt-icon {
   width: 72px; height: 72px;
-  margin: 0 auto 18px;
+  margin: 0 auto 20px;
   border-radius: 50%;
   background: rgba(14,135,65,.1);
   color: var(--cif-green);
   display: flex; align-items: center; justify-content: center;
 }
-.pay-receipt h2 { margin: 0 0 10px; color: var(--cif-navy); font-size: 1.4rem; }
+.pay-receipt h2 {
+  margin: 0 0 6px;
+  color: var(--cif-navy);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+/* Hero amount — mirrors the dashboard's loan-balance treatment so
+   the receipt feels like a continuation of the portal language. */
 .pay-receipt-amount {
-  color: var(--cif-muted);
-  margin: 0 0 20px;
+  margin: 0;
+  color: var(--cif-navy);
+  font-weight: 800;
+  font-size: 3rem;
+  line-height: 1.05;
+  letter-spacing: -.02em;
   font-variant-numeric: tabular-nums;
 }
-.pay-receipt-amount span:first-child {
-  color: var(--cif-navy);
+.pay-receipt-amount-currency {
+  font-size: 1.4rem;
   font-weight: 700;
+  vertical-align: top;
+  margin-right: 2px;
+  color: var(--cif-muted);
 }
-.pay-receipt-detail {
+.pay-receipt-subline {
+  margin: 6px 0 28px;
+  color: var(--cif-muted);
+  font-size: .92rem;
+}
+.pay-receipt-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-  padding: 16px;
+  gap: 14px 24px;
+  text-align: left;
+  margin: 0 auto 28px;
+  max-width: 420px;
+  padding: 18px 20px;
   background: #f7fafa;
-  border-radius: 10px;
-  margin-bottom: 24px;
+  border: 1px solid #e6edec;
+  border-radius: 12px;
 }
-.pay-receipt-detail > div { display: flex; flex-direction: column; gap: 4px; }
-.pay-receipt-detail small {
+.pay-receipt-grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pay-receipt-grid-full { grid-column: 1 / -1; }
+.pay-receipt-grid dt {
   color: var(--cif-subtle);
-  font-size: .72rem;
+  font-size: .68rem;
   text-transform: uppercase;
-  letter-spacing: .08em;
+  letter-spacing: .1em;
   font-weight: 600;
 }
-.pay-receipt-detail strong {
+.pay-receipt-grid dd {
+  margin: 0;
   color: var(--cif-navy);
-  font-weight: 700;
+  font-weight: 600;
+  font-size: .95rem;
   font-variant-numeric: tabular-nums;
   word-break: break-word;
 }
@@ -2529,7 +2555,9 @@ button.dash-doc-download:disabled {
 @media (max-width: 480px) {
   .pay-form-card { padding: 22px 18px; }
   .pay-amount-input { font-size: 1.2rem; }
-  .pay-receipt-detail { grid-template-columns: 1fr; gap: 10px; }
+  .pay-receipt { padding: 32px 20px 28px; }
+  .pay-receipt-amount { font-size: 2.4rem; }
+  .pay-receipt-grid { grid-template-columns: 1fr; gap: 12px; padding: 16px; }
 }
 
 /* ---------- Dashboard one-shot payment banner ---------- */

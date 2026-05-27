@@ -312,20 +312,17 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "amountDue":         round(float(amount), 2),
         "isInRescindPeriod": bool(is_in_rescind),
         "authCode":          auth_code,
-        # Service-token override hints: handler resolves the customer
-        # from JWT mobileProfileId, but our service JWT carries the
-        # service user id (8434), not a customer's. Send the customer
-        # id + mobile profile id under every plausible field name in
-        # case Vergent's deserializer falls back to body values when
-        # the JWT lookup fails. Vergent ignores unknown fields, so
-        # this is safe even if none of them are recognized.
-        "customerId":        int(customer_id or 0),
-        "custId":            int(customer_id or 0),
-        "CustomerId":        int(customer_id or 0),
-        "customer_id":       int(customer_id or 0),
-        "mobileProfileId":   int(customer_id or 0),
-        "MobileProfileId":   int(customer_id or 0),
     }
+    # NOTE: body-override probes (customerId / mobileProfileId under 6
+    # field-name variants) confirmed 2026-05-27 that Vergent's handler
+    # IGNORES body fields for customer identification. The endpoint
+    # strictly reads the calling customer from the JWT's mobileProfileId
+    # claim. Service JWT (user 8434) errors with "No customer identifier
+    # could be found". Waiting on Vergent's senior dev for the supported
+    # partner pattern — either a header override, fix AuthenticateCognito,
+    # or a different endpoint with explicit customerId. The customer_id
+    # param above is retained on the helper signature for when that
+    # pattern arrives.
     headers = {
         "x-api-key":     xapikey,
         "Authorization": f"Bearer {apim_tok}",
