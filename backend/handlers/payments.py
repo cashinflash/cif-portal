@@ -634,21 +634,38 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
         log.info("apim-probe B=PaymentSchedule x-api-key-only status=%s body=%s",
                  s_b, (raw_b or "")[:1200])
 
-        # Probe C: POST CreditCardPayment with INVALID body (paymentId=0,
-        # amount=0) — designed to fail at validation, not to charge.
-        # Auth response tells us if service auth is accepted here at all.
+        # Probe C: GET Methods endpoint with service auth to confirm
+        # we can read the customer's saved cards via APIM. Earlier in
+        # this session we saw this endpoint return cardId 237669 for
+        # Harut's Visa ending 2217.
+        methods_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/{loan_id}"
+                       f"/Payments/Checking/Methods")
+        s_c, _p_c, raw_c = _http(methods_url, "GET",
+                                 body=None,
+                                 headers={"x-api-key": xapikey,
+                                          "Authorization": f"Bearer {apim_tok}",
+                                          "Content-Type": "application/json"},
+                                 timeout=20)
+        log.info("apim-probe C=Methods service-bearer status=%s body=%s",
+                 s_c, (raw_c or "")[:1500])
+
+        # Probe D: POST CreditCardPayment with cardId=237669 (Harut's
+        # saved Visa) but amountDue=0.0 so the handler rejects on amount
+        # validation BEFORE charging. This tells us if cardId alone
+        # unlocks the handler past the "cardId required" check.
         pay_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments"
                    f"/CreditCardPayment")
-        pay_body = {"loanId": loan_id, "paymentId": 0, "amountDue": 0.0,
-                    "isInRescindPeriod": False, "authCode": None}
-        s_c, _p_c, raw_c = _http(pay_url, "POST",
+        pay_body = {"loanId": loan_id, "paymentId": 0, "cardId": 237669,
+                    "amountDue": 0.0, "isInRescindPeriod": False,
+                    "authCode": None}
+        s_d, _p_d, raw_d = _http(pay_url, "POST",
                                  body=pay_body,
                                  headers={"x-api-key": xapikey,
                                           "Authorization": f"Bearer {apim_tok}",
                                           "Content-Type": "application/json"},
                                  timeout=20)
-        log.info("apim-probe C=CreditCardPayment service-bearer status=%s body=%s",
-                 s_c, (raw_c or "")[:1200])
+        log.info("apim-probe D=CreditCardPayment with-cardId status=%s body=%s",
+                 s_d, (raw_d or "")[:1500])
     except Exception as _exc:
         log.warning("apim-probe error: %s", _exc)
     # ── END TEMP PROBE ──
