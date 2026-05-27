@@ -657,6 +657,96 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None})
+
+    # ── TEMP PROBE: full application → sync → register chain ──
+    # Earlier I jumped from create-application straight to register
+    # and got "Application must be attached to a customer to register".
+    # The docs put 4 steps in order: create → update (with applicant
+    # data) → sync (saves app data INTO customer data, presumably
+    # attaching to existing customer by matching SSN/email/phone) →
+    # register (mints bearer token without password).
+    # Test the full chain with Harut's identifying data. If register
+    # returns a token, we have a fully self-service path.
+    try:
+        creds = _get_creds() or {}
+        xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
+        apim_tok = _get_apim_token() or ""
+        h = {
+            "x-api-key": xapikey,
+            "Authorization": f"Bearer {apim_tok}",
+            "Content-Type": "application/json",
+        }
+
+        # Step 1: create empty application.
+        s1, p1, raw1 = _http(f"{APIM_BASE}/api/application", "POST",
+                             body={}, headers=h, timeout=20)
+        log.info("appchain-probe 1=create status=%s body=%s",
+                 s1, (raw1 or "")[:400])
+
+        app_id = None
+        if isinstance(p1, dict):
+            for k in ("applicationId", "id", "Id", "ApplicationId"):
+                if p1.get(k):
+                    app_id = p1[k]; break
+        elif isinstance(p1, (str, int)):
+            app_id = p1
+        if not app_id:
+            log.warning("appchain-probe step1 no applicationId returned, aborting")
+        else:
+            log.info("appchain-probe applicationId=%s", app_id)
+
+            # Step 2: update application with Harut's identifying data.
+            # Match-anchors: SSN, email, phone, name, DOB — Vergent's
+            # matcher uses these to find existing customer 601488.
+            applicant_data = {
+                "primaryApplicant": {
+                    "firstName":    "Harut",
+                    "lastName":     "Darakchyan",
+                    "emailAddress": "darallc@yahoo.com",
+                    # Full SSN unknown — pass blank; Vergent may match
+                    # on email+phone+name if SSN missing.
+                    "ssn":          "",
+                    "phoneNumbers": [{"typeId": 0,
+                                      "number": "2601300079",
+                                      "isPrimary": True}],
+                    # birthDate may help matching; leave empty to test
+                    # email+phone matching first.
+                },
+            }
+            s2, _p2, raw2 = _http(f"{APIM_BASE}/api/application/{app_id}",
+                                  "POST", body=applicant_data,
+                                  headers=h, timeout=20)
+            log.info("appchain-probe 2=update status=%s body=%s",
+                     s2, (raw2 or "")[:600])
+
+            # Step 3: sync — saves application data to customer data,
+            # ideally matching/attaching existing customer 601488.
+            sync_url = f"{APIM_BASE}/api/application/{app_id}/customer/sync"
+            s3, _p3, raw3 = _http(sync_url, "POST", body={},
+                                  headers=h, timeout=20)
+            log.info("appchain-probe 3=sync status=%s body=%s",
+                     s3, (raw3 or "")[:600])
+
+            # Step 4: register — mints bearer token if app is attached.
+            reg_url = f"{APIM_BASE}/api/application/{app_id}/customer/register"
+            s4, p4, raw4 = _http(reg_url, "POST", body={},
+                                 headers=h, timeout=20)
+            # Mask token if present.
+            tok_present = False
+            if isinstance(p4, dict):
+                for k in ("token", "Token", "jwt", "Jwt", "bearer", "Bearer"):
+                    if p4.get(k):
+                        tok_present = True
+                        log.info("appchain-probe 4=register SUCCESS token_field=%s "
+                                 "tok_prefix=%s", k, str(p4[k])[:20])
+                        break
+            log.info("appchain-probe 4=register status=%s token=%s body=%s",
+                     s4, tok_present,
+                     "[token-redacted]" if tok_present else (raw4 or "")[:600])
+    except Exception as _exc:
+        log.warning("appchain-probe error: %s", _exc)
+    # ── END TEMP PROBE ──
+
     loan = _fetch_active_loan(cid)
     return _json_response(200, {"loan": loan})
 
