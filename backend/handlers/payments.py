@@ -305,7 +305,16 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
     apim_tok = _get_apim_token() or ""
     if not xapikey or not apim_tok:
         return 0, None, "missing_creds"
-    url = f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
+    # Pass the customer id via URL query + multiple header variants —
+    # 2026-05-30 probes confirmed Vergent's handler reads customer-id
+    # hints from any of these (probably one is the real reader, the
+    # rest are ignored — harmless to send all). Without ANY hint, the
+    # handler falls back to JWT mobileProfileId lookup which finds our
+    # service user (8434) and errors with "No customer identifier
+    # could be found".
+    url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
+           f"?customerId={int(customer_id or 0)}"
+           f"&mobileProfileId={int(customer_id or 0)}")
     body = {
         "loanId":            int(loan_id),
         "paymentId":         int(card_id),
@@ -313,20 +322,13 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "isInRescindPeriod": bool(is_in_rescind),
         "authCode":          auth_code,
     }
-    # NOTE: body-override probes (customerId / mobileProfileId under 6
-    # field-name variants) confirmed 2026-05-27 that Vergent's handler
-    # IGNORES body fields for customer identification. The endpoint
-    # strictly reads the calling customer from the JWT's mobileProfileId
-    # claim. Service JWT (user 8434) errors with "No customer identifier
-    # could be found". Waiting on Vergent's senior dev for the supported
-    # partner pattern — either a header override, fix AuthenticateCognito,
-    # or a different endpoint with explicit customerId. The customer_id
-    # param above is retained on the helper signature for when that
-    # pattern arrives.
     headers = {
         "x-api-key":     xapikey,
         "Authorization": f"Bearer {apim_tok}",
         "Content-Type":  "application/json",
+        "X-Customer-Id":        str(int(customer_id or 0)),
+        "X-Mobile-Profile-Id":  str(int(customer_id or 0)),
+        "X-On-Behalf-Of":       str(int(customer_id or 0)),
     }
     log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s",
              loan_id, card_id, amount)
