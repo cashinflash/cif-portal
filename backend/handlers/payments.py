@@ -330,8 +330,9 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "X-Mobile-Profile-Id":  str(int(customer_id or 0)),
         "X-On-Behalf-Of":       str(int(customer_id or 0)),
     }
-    log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s",
-             loan_id, card_id, amount)
+    log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s "
+             "customer_id=%s url=%s",
+             loan_id, card_id, amount, customer_id, url)
     status, parsed, raw = _http(url, "POST", body=body, headers=headers, timeout=30)
     log.info("apim-pay response status=%s body_head=%s",
              status, (raw or "")[:500])
