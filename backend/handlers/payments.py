@@ -277,6 +277,7 @@ def _v1_request(method: str, path: str, *,
 
 def _apim_credit_card_payment(*, loan_id: int, card_id: int,
                               amount: float, customer_id: int = 0,
+                              mobile_profile_id: int = 0,
                               auth_code: Optional[str] = None,
                               is_in_rescind: bool = False
                               ) -> Tuple[int, Optional[Dict[str, Any]], str]:
@@ -305,23 +306,16 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
     apim_tok = _get_apim_token() or ""
     if not xapikey or not apim_tok:
         return 0, None, "missing_creds"
-    # NOTE: 2026-05-30. We've thoroughly tested this endpoint and
-    # confirmed Vergent's handler reads the calling customer strictly
-    # from the JWT's mobileProfileId claim. Our service JWT carries
-    # user 8434 (service account), not any customer's mobileProfileId,
-    # so the handler errors with "No customer identifier could be
-    # found from mobile profile id:8434". Headers (X-Customer-Id etc.)
-    # and URL query params (?customerId=N) are silently ignored by the
-    # handler — they do NOT override the JWT lookup.
-    #
-    # The customer_id parameter is passed but currently has no effect.
-    # We're keeping it on the signature and sending it in the URL
-    # query as a hint, so the moment Vergent's senior dev points us
-    # at the correct partner-bearer pattern (either AuthenticateCognito
-    # fix or a documented header override), we have one-line of code
-    # to remove and it works.
+    # 2026-05-30 final test: include mobileProfileId in URL with the
+    # customer's REAL mobile profile id (looked up via Customer/Search
+    # in production; passed from caller for now). The handler errors
+    # with "No customer identifier could be found from mobile profile
+    # id:8434" because it reads mobileProfileId from JWT (our service
+    # user 8434). Hope: ?mobileProfileId=<real_value> overrides the
+    # JWT lookup.
     url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
-           f"?customerId={int(customer_id or 0)}")
+           f"?customerId={int(customer_id or 0)}"
+           f"&mobileProfileId={int(mobile_profile_id or 0)}")
     body = {
         "loanId":            int(loan_id),
         "paymentId":         int(card_id),
@@ -335,8 +329,8 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "Content-Type":  "application/json",
     }
     log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s "
-             "customer_id=%s",
-             loan_id, card_id, amount, customer_id)
+             "customer_id=%s mobile_profile_id=%s url=%s",
+             loan_id, card_id, amount, customer_id, mobile_profile_id, url)
     status, parsed, raw = _http(url, "POST", body=body, headers=headers, timeout=30)
     log.info("apim-pay response status=%s body_head=%s",
              status, (raw or "")[:500])
@@ -1697,9 +1691,14 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
             customer_id_int = int(cid) if cid else 0
         except (TypeError, ValueError):
             customer_id_int = 0
+        try:
+            mobile_profile_id_int = int(body.get("mobileProfileId") or 0)
+        except (TypeError, ValueError):
+            mobile_profile_id_int = 0
         st, parsed, raw = _apim_credit_card_payment(
             loan_id=loan_id_int, card_id=card_id, amount=amount,
             customer_id=customer_id_int,
+            mobile_profile_id=mobile_profile_id_int,
         )
         log_safe_raw = (raw or "")[:600]
         if st in (200, 201):
