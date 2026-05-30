@@ -305,13 +305,21 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
     apim_tok = _get_apim_token() or ""
     if not xapikey or not apim_tok:
         return 0, None, "missing_creds"
-    # Pass customer id only. 2026-05-30 probe confirmed Vergent reads
-    # ?customerId=<n> from URL query AND X-Customer-Id header — either
-    # is sufficient. Earlier attempt also sent mobileProfileId=<cust_id>
-    # which broke the lookup because mobileProfileId != customerId for
-    # any customer (mobile profile is a separate Vergent-internal id we
-    # don't have access to). Sending the wrong value poisoned the
-    # lookup; without it, Vergent uses customerId cleanly.
+    # NOTE: 2026-05-30. We've thoroughly tested this endpoint and
+    # confirmed Vergent's handler reads the calling customer strictly
+    # from the JWT's mobileProfileId claim. Our service JWT carries
+    # user 8434 (service account), not any customer's mobileProfileId,
+    # so the handler errors with "No customer identifier could be
+    # found from mobile profile id:8434". Headers (X-Customer-Id etc.)
+    # and URL query params (?customerId=N) are silently ignored by the
+    # handler — they do NOT override the JWT lookup.
+    #
+    # The customer_id parameter is passed but currently has no effect.
+    # We're keeping it on the signature and sending it in the URL
+    # query as a hint, so the moment Vergent's senior dev points us
+    # at the correct partner-bearer pattern (either AuthenticateCognito
+    # fix or a documented header override), we have one-line of code
+    # to remove and it works.
     url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
            f"?customerId={int(customer_id or 0)}")
     body = {
@@ -327,8 +335,8 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "Content-Type":  "application/json",
     }
     log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s "
-             "customer_id=%s url=%s",
-             loan_id, card_id, amount, customer_id, url)
+             "customer_id=%s",
+             loan_id, card_id, amount, customer_id)
     status, parsed, raw = _http(url, "POST", body=body, headers=headers, timeout=30)
     log.info("apim-pay response status=%s body_head=%s",
              status, (raw or "")[:500])
