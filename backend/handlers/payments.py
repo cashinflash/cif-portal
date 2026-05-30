@@ -305,16 +305,15 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
     apim_tok = _get_apim_token() or ""
     if not xapikey or not apim_tok:
         return 0, None, "missing_creds"
-    # Pass the customer id via URL query + multiple header variants —
-    # 2026-05-30 probes confirmed Vergent's handler reads customer-id
-    # hints from any of these (probably one is the real reader, the
-    # rest are ignored — harmless to send all). Without ANY hint, the
-    # handler falls back to JWT mobileProfileId lookup which finds our
-    # service user (8434) and errors with "No customer identifier
-    # could be found".
+    # Pass customer id only. 2026-05-30 probe confirmed Vergent reads
+    # ?customerId=<n> from URL query AND X-Customer-Id header — either
+    # is sufficient. Earlier attempt also sent mobileProfileId=<cust_id>
+    # which broke the lookup because mobileProfileId != customerId for
+    # any customer (mobile profile is a separate Vergent-internal id we
+    # don't have access to). Sending the wrong value poisoned the
+    # lookup; without it, Vergent uses customerId cleanly.
     url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
-           f"?customerId={int(customer_id or 0)}"
-           f"&mobileProfileId={int(customer_id or 0)}")
+           f"?customerId={int(customer_id or 0)}")
     body = {
         "loanId":            int(loan_id),
         "paymentId":         int(card_id),
@@ -326,9 +325,7 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "x-api-key":     xapikey,
         "Authorization": f"Bearer {apim_tok}",
         "Content-Type":  "application/json",
-        "X-Customer-Id":        str(int(customer_id or 0)),
-        "X-Mobile-Profile-Id":  str(int(customer_id or 0)),
-        "X-On-Behalf-Of":       str(int(customer_id or 0)),
+        "X-Customer-Id": str(int(customer_id or 0)),
     }
     log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s "
              "customer_id=%s url=%s",
