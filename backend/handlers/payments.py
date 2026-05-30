@@ -325,7 +325,6 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
         "x-api-key":     xapikey,
         "Authorization": f"Bearer {apim_tok}",
         "Content-Type":  "application/json",
-        "X-Customer-Id": str(int(customer_id or 0)),
     }
     log.info("apim-pay POST CreditCardPayment loan=%s cardId=%s amount=%s "
              "customer_id=%s url=%s",
