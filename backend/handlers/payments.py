@@ -306,16 +306,21 @@ def _apim_credit_card_payment(*, loan_id: int, card_id: int,
     apim_tok = _get_apim_token() or ""
     if not xapikey or not apim_tok:
         return 0, None, "missing_creds"
-    # 2026-05-30 final test: include mobileProfileId in URL with the
-    # customer's REAL mobile profile id (looked up via Customer/Search
-    # in production; passed from caller for now). The handler errors
-    # with "No customer identifier could be found from mobile profile
-    # id:8434" because it reads mobileProfileId from JWT (our service
-    # user 8434). Hope: ?mobileProfileId=<real_value> overrides the
-    # JWT lookup.
-    url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
-           f"?customerId={int(customer_id or 0)}"
-           f"&mobileProfileId={int(mobile_profile_id or 0)}")
+    # 2026-05-30: CONFIRMED Vergent's handler reads the calling
+    # customer strictly from the JWT's mobileProfileId claim. URL
+    # params (?customerId=N, ?mobileProfileId=N) and headers
+    # (X-Customer-Id, X-Mobile-Profile-Id, X-On-Behalf-Of) are ALL
+    # silently ignored — tested with Harut's real mobileProfileId
+    # (5926) in URL and the handler still errored about service user
+    # 8434 from the JWT.
+    #
+    # The customer_id and mobile_profile_id params are kept on the
+    # signature for the moment Vergent fixes AuthenticateCognito or
+    # provides a documented partner-mode bearer pattern — at that
+    # point this is a one-line URL change. Today this call is
+    # guaranteed to fail with "No customer identifier" and we fall
+    # back to the v1 Cash-reconcile path in post_charge.
+    url = f"{APIM_BASE}/api/CustomerPortal/Loans/Payments/CreditCardPayment"
     body = {
         "loanId":            int(loan_id),
         "paymentId":         int(card_id),
