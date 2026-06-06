@@ -699,15 +699,36 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
         else:
             log.info("regchain-probe applicationId=%s", app_id)
 
-            # Step 2: update with Harut's identifying data (no Bearer).
+            # Step 2: update with Harut's identifying data, FULL shape
+            # per docs PDF (Vergent's sync code crashes on null
+            # sub-objects when we send a sparse payload). Empties for
+            # data we don't have; placeholder DOB for matching test.
             applicant_data = {
+                "disbursementType": None,
                 "primaryApplicant": {
-                    "firstName":    "Harut",
-                    "lastName":     "Darakchyan",
+                    "localId":      "",
                     "emailAddress": "darallc@yahoo.com",
                     "ssn":          "",
-                    "phoneNumbers": [{"typeId": 0, "number": "2601300079",
-                                      "isPrimary": True}],
+                    "firstName":    "Harut",
+                    "lastName":     "Darakchyan",
+                    "middleName":   "",
+                    "suffix":       "",
+                    "birthDate":    "1985-01-01",  # placeholder
+                    "addresses":    [],
+                    "phoneNumbers": [{
+                        "localId":    "",
+                        "typeId":     0,
+                        "number":     "2601300079",
+                        "isPrimary":  True,
+                        "isVerified": False,
+                    }],
+                    "isMilitary":   0,
+                    "heardAboutId": 0,
+                    "bank":         None,
+                    "identification": None,
+                    "income":       None,
+                    "employment":   None,
+                    "loanRequestInformation": None,
                 },
             }
             s2, _p2, raw2 = _http(f"{APIM_BASE}/api/application/{app_id}",
@@ -716,13 +737,23 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
             log.info("regchain-probe 2=update status=%s body=%s",
                      s2, (raw2 or "")[:500])
 
-            # Step 3: sync — saves app data into customer data,
-            # ideally matching existing customer by email/phone.
+            # Step 3: sync — try with body hints first (customerId,
+            # email), fall back to empty body if that errors.
             sync_url = f"{APIM_BASE}/api/application/{app_id}/customer/sync"
-            s3, _p3, raw3 = _http(sync_url, "POST", body={},
+            sync_body = {
+                "customerId":   601488,
+                "emailAddress": "darallc@yahoo.com",
+                "phoneNumber":  "2601300079",
+            }
+            s3, _p3, raw3 = _http(sync_url, "POST", body=sync_body,
                                   headers=h_anon, timeout=20)
-            log.info("regchain-probe 3=sync status=%s body=%s",
+            log.info("regchain-probe 3a=sync-with-hints status=%s body=%s",
                      s3, (raw3 or "")[:500])
+            # Also try with empty body for comparison.
+            s3b, _p3b, raw3b = _http(sync_url, "POST", body={},
+                                     headers=h_anon, timeout=20)
+            log.info("regchain-probe 3b=sync-empty status=%s body=%s",
+                     s3b, (raw3b or "")[:500])
 
             # Step 4: register — mints customer-scoped bearer.
             reg_url = f"{APIM_BASE}/api/application/{app_id}/customer/register"
