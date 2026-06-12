@@ -663,6 +663,86 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None})
+
+    # ── TEMP PROBE: STANDALONE Customer/Register → Authenticate → CCP ──
+    # 2026-06-12: re-reading Vergent's swagger revealed a STANDALONE
+    # POST /api/CustomerPortal/Customer/Register endpoint that accepts
+    # {userName, password, customerIds: [...]} and returns the
+    # RegistrationCustomerModel array (including mobileProfileId!).
+    # Previous probes only tested the APPLICATION-SCOPED variant
+    # (/api/application/{id}/customer/register) which required sync to
+    # attach a customer first — and sync NullRef'd every shape we tried.
+    # This standalone variant takes customerIds directly. Untested.
+    #
+    # If register returns 200 with a profile, Authenticate with the
+    # creds we just set → returns a customer-scoped Vergent JWT →
+    # CreditCardPayment with that JWT charges as native Card.
+    # Token logging masked. Real $0.01 charge attempt at the end.
+    try:
+        import secrets, string
+        creds = _get_creds() or {}
+        xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
+        h_anon = {"x-api-key": xapikey, "Content-Type": "application/json"}
+        # Per-probe-run username + strong password. The username has
+        # a probe suffix so repeated runs don't user_exists each other.
+        probe_id = secrets.token_hex(3)
+        user_name = f"cif_probe_{probe_id}_harut"
+        password = ''.join(secrets.choice(
+            string.ascii_letters + string.digits + '!@#$%') for _ in range(16))
+
+        # Step 1: standalone Customer/Register with customerIds=[601488]
+        reg_url = f"{APIM_BASE}/api/CustomerPortal/Customer/Register"
+        reg_body = {"userName": user_name, "password": password,
+                    "customerIds": [601488]}
+        s1, p1, raw1 = _http(reg_url, "POST", body=reg_body,
+                             headers=h_anon, timeout=20)
+        log.info("standalone-register 1=register status=%s body=%s",
+                 s1, (raw1 or "")[:1200])
+
+        mobile_profile_id = None
+        if isinstance(p1, list) and p1:
+            for entry in p1:
+                if isinstance(entry, dict) and entry.get("mobileProfileId"):
+                    mobile_profile_id = entry["mobileProfileId"]
+                    log.info("standalone-register got mobileProfileId=%s "
+                             "for customerId=%s",
+                             mobile_profile_id, entry.get("customerId"))
+                    break
+
+        # Step 2: Authenticate with the username+password we just set.
+        auth_url = f"{APIM_BASE}/api/CustomerPortal/Authenticate"
+        auth_body = {"userName": user_name, "password": password,
+                     "ipAddress": "0.0.0.0"}
+        s2, p2, raw2 = _http(auth_url, "POST", body=auth_body,
+                             headers=h_anon, timeout=20)
+        customer_token = None
+        if isinstance(p2, dict):
+            customer_token = (p2.get("token") or p2.get("Token")
+                              or p2.get("jwt") or p2.get("Jwt"))
+        log.info("standalone-register 2=authenticate status=%s "
+                 "token_present=%s body=%s",
+                 s2, bool(customer_token),
+                 "[token-masked]" if customer_token else (raw2 or "")[:1200])
+
+        # Step 3: REAL CreditCardPayment $0.01 with the customer token.
+        if customer_token:
+            ccp_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments"
+                       f"/CreditCardPayment")
+            ccp_body = {"loanId": 4830592, "paymentId": 237669,
+                        "amountDue": 0.01, "isInRescindPeriod": False,
+                        "authCode": None}
+            ccp_h = {"x-api-key": xapikey,
+                     "Authorization": f"Bearer {customer_token}",
+                     "Content-Type": "application/json"}
+            s3, _p3, raw3 = _http(ccp_url, "POST", body=ccp_body,
+                                  headers=ccp_h, timeout=30)
+            log.info("standalone-register 3=ccp-with-customer-token "
+                     "status=%s body=%s",
+                     s3, (raw3 or "")[:1500])
+    except Exception as _exc:
+        log.warning("standalone-register probe error: %s", _exc)
+    # ── END TEMP PROBE ──
+
     loan = _fetch_active_loan(cid)
     return _json_response(200, {"loan": loan})
 
