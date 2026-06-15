@@ -664,83 +664,85 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     if not cid:
         return _json_response(200, {"loan": None})
 
-    # ── TEMP PROBE: STANDALONE Customer/Register → Authenticate → CCP ──
-    # 2026-06-12: re-reading Vergent's swagger revealed a STANDALONE
-    # POST /api/CustomerPortal/Customer/Register endpoint that accepts
-    # {userName, password, customerIds: [...]} and returns the
-    # RegistrationCustomerModel array (including mobileProfileId!).
-    # Previous probes only tested the APPLICATION-SCOPED variant
-    # (/api/application/{id}/customer/register) which required sync to
-    # attach a customer first — and sync NullRef'd every shape we tried.
-    # This standalone variant takes customerIds directly. Untested.
+    # ── TEMP PROBE: v1 Card (Auto) charge (PaymentMethod=10 + CardId) ──
+    # 2026-06-15: admin payment.aspx network capture revealed the missing
+    # field. When staff pick "Card (Auto)" (ddlMethod=10) a second
+    # dropdown ddlAutoCc carries the SAVED VERGENT CARD ID (e.g. 238590).
+    # That maps to the `CardId` field on PostCustomerLoanPayment. Our
+    # past PaymentMethod=10 attempts created no record because we never
+    # sent CardId — Vergent had no card to charge. This probe replicates
+    # the admin flow via the v1 REST API: it charges the customer's own
+    # saved Vergent card $1.00 with PaymentMethod=10 + CardId, which
+    # should post as native CARD (not Cash) and run the charge through
+    # Vergent's own Repay integration.
     #
-    # If register returns 200 with a profile, Authenticate with the
-    # creds we just set → returns a customer-scoped Vergent JWT →
-    # CreditCardPayment with that JWT charges as native Card.
-    # Token logging masked. Real $0.01 charge attempt at the end.
-    try:
-        import secrets, string
-        creds = _get_creds() or {}
-        xapikey = creds.get("xApiKey") or creds.get("apiKey") or ""
-        h_anon = {"x-api-key": xapikey, "Content-Type": "application/json"}
-        # Per-probe-run username + strong password. The username has
-        # a probe suffix so repeated runs don't user_exists each other.
-        probe_id = secrets.token_hex(3)
-        user_name = f"cif_probe_{probe_id}_harut"
-        password = ''.join(secrets.choice(
-            string.ascii_letters + string.digits + '!@#$%') for _ in range(16))
+    # GUARDED: only fires for Harut (cid 601488) AND only when the page
+    # is loaded with ?cardauto=1, so it never charges a real customer.
+    # Verify in Vergent admin afterward that the payment shows as Card.
+    _qp = event.get("queryStringParameters") or {}
+    if str(cid) == "601488" and _qp.get("cardauto") == "1":
+        try:
+            from datetime import datetime, timezone
+            iso_now = datetime.now(timezone.utc).isoformat()
 
-        # Step 1: standalone Customer/Register with customerIds=[601488]
-        reg_url = f"{APIM_BASE}/api/CustomerPortal/Customer/Register"
-        reg_body = {"userName": user_name, "password": password,
-                    "customerIds": [601488]}
-        s1, p1, raw1 = _http(reg_url, "POST", body=reg_body,
-                             headers=h_anon, timeout=20)
-        log.info("standalone-register 1=register status=%s body=%s",
-                 s1, (raw1 or "")[:1200])
+            # Resolve the test loan + a real saved Vergent card id.
+            active = _fetch_active_loan(cid)
+            loan_id_int = int(active.get("id")) if active and active.get("id") else 0
+            cs_status, cs_body, cs_raw = _v1_request(
+                "GET", f"/V1/GetCustomerCards?custId={cid}")
+            card_id_int = 0
+            if isinstance(cs_body, list):
+                for c in cs_body:
+                    if isinstance(c, dict) and c.get("id"):
+                        card_id_int = int(c.get("id"))
+                        log.info("cardauto-probe picked CardId=%s last4=%s",
+                                 card_id_int,
+                                 "".join(ch for ch in (c.get("card_number") or "")
+                                         if ch.isdigit())[-4:])
+                        break
+            log.info("cardauto-probe resolved loan=%s card=%s "
+                     "(cards_status=%s count=%s)",
+                     loan_id_int, card_id_int, cs_status,
+                     len(cs_body) if isinstance(cs_body, list) else "n/a")
 
-        mobile_profile_id = None
-        if isinstance(p1, list) and p1:
-            for entry in p1:
-                if isinstance(entry, dict) and entry.get("mobileProfileId"):
-                    mobile_profile_id = entry["mobileProfileId"]
-                    log.info("standalone-register got mobileProfileId=%s "
-                             "for customerId=%s",
-                             mobile_profile_id, entry.get("customerId"))
-                    break
+            if loan_id_int and card_id_int:
+                body = {
+                    "CompanyId":     VERGENT_COMPANY_ID,
+                    "StoreId":       0,
+                    "UserId":        0,
+                    "HeaderId":      loan_id_int,
+                    "PaymentDate":   iso_now,
+                    "PaymentAmount": 1.00,
+                    "PaymentMethod": 10,   # Card (Auto)
+                    "PaymentSource": 72,   # Online Portal
+                    "CardId":        card_id_int,
+                    "Notes":         "[CIF Portal] Card(Auto) probe $1",
+                }
+                # Attempt 1: POST /V1/PostCustomerLoanPayment (returns
+                # TransactionId + Errors — designed for charge results).
+                s1, p1, raw1 = _v1_request(
+                    "POST", "/V1/PostCustomerLoanPayment", body=body)
+                log.info("cardauto-probe POST status=%s body=%s",
+                         s1, (raw1 or "")[:1500])
 
-        # Step 2: Authenticate with the username+password we just set.
-        auth_url = f"{APIM_BASE}/api/CustomerPortal/Authenticate"
-        auth_body = {"userName": user_name, "password": password,
-                     "ipAddress": "0.0.0.0"}
-        s2, p2, raw2 = _http(auth_url, "POST", body=auth_body,
-                             headers=h_anon, timeout=20)
-        customer_token = None
-        if isinstance(p2, dict):
-            customer_token = (p2.get("token") or p2.get("Token")
-                              or p2.get("jwt") or p2.get("Jwt"))
-        log.info("standalone-register 2=authenticate status=%s "
-                 "token_present=%s body=%s",
-                 s2, bool(customer_token),
-                 "[token-masked]" if customer_token else (raw2 or "")[:1200])
-
-        # Step 3: REAL CreditCardPayment $0.01 with the customer token.
-        if customer_token:
-            ccp_url = (f"{APIM_BASE}/api/CustomerPortal/Loans/Payments"
-                       f"/CreditCardPayment")
-            ccp_body = {"loanId": 4830592, "paymentId": 237669,
-                        "amountDue": 0.01, "isInRescindPeriod": False,
-                        "authCode": None}
-            ccp_h = {"x-api-key": xapikey,
-                     "Authorization": f"Bearer {customer_token}",
-                     "Content-Type": "application/json"}
-            s3, _p3, raw3 = _http(ccp_url, "POST", body=ccp_body,
-                                  headers=ccp_h, timeout=30)
-            log.info("standalone-register 3=ccp-with-customer-token "
-                     "status=%s body=%s",
-                     s3, (raw3 or "")[:1500])
-    except Exception as _exc:
-        log.warning("standalone-register probe error: %s", _exc)
+                # Attempt 2 (fallback): PUT /V1/PutCustomerLoanPayment/{id}
+                # — the endpoint our Cash reconcile uses today, but now
+                # with PaymentMethod=10 + CardId instead of Cash.
+                post_ok = (s1 in (200, 201)
+                           and isinstance(p1, dict)
+                           and not (p1.get("Errors") or p1.get("errors"))
+                           and (p1.get("TransactionId") or p1.get("transactionId")))
+                if not post_ok:
+                    s2, p2, raw2 = _v1_request(
+                        "PUT", f"/V1/PutCustomerLoanPayment/{loan_id_int}",
+                        body=body)
+                    log.info("cardauto-probe PUT status=%s body=%s",
+                             s2, (raw2 or "")[:1500])
+            else:
+                log.warning("cardauto-probe skipped — missing loan or card "
+                            "(loan=%s card=%s)", loan_id_int, card_id_int)
+        except Exception as _exc:
+            log.warning("cardauto-probe error: %s", _exc)
     # ── END TEMP PROBE ──
 
     loan = _fetch_active_loan(cid)

@@ -97,7 +97,11 @@
 
   // ---------- Loan summary ----------
   function loadLoan() {
-    return api('/api/my-payment/loan-summary').then(function (data) {
+    // TEMP: forward ?cardauto=1 from the page URL so the backend
+    // Card(Auto) validation probe (Harut-only) can fire on demand.
+    var _suffix = /[?&]cardauto=1\b/.test(window.location.search)
+      ? '?cardauto=1' : '';
+    return api('/api/my-payment/loan-summary' + _suffix).then(function (data) {
       const card = qs('#paySummary');
       const body = qs('.pay-summary-body', card);
       const empty = qs('.pay-summary-empty', card);
