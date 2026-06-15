@@ -738,6 +738,32 @@ def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
     errors = _extract_errors(parsed)
     txn = _extract_txn(parsed)
 
+    # Vergent surfaces declines via HTTP 400 with the reason in the
+    # error body — but _http catches HTTPErrors and returns parsed=None
+    # (only raw is populated). So if the structured parse came up empty
+    # but raw has content, try parsing raw ourselves before giving up.
+    if not errors and not txn and raw:
+        try:
+            reparsed = json.loads(raw)
+            if isinstance(reparsed, str) and reparsed.strip()[:1] in ("[", "{"):
+                reparsed = json.loads(reparsed)
+            errors = _extract_errors(reparsed)
+            if not txn:
+                txn = _extract_txn(reparsed)
+        except (json.JSONDecodeError, ValueError):
+            # Last-resort string scan — find quoted strings that mention
+            # "decline" or look like a processor error message. Keeps
+            # the customer informed even if Vergent changes the wire
+            # format on us in the future.
+            import re
+            for m in re.findall(r'"([^"\\]{6,400})"', raw):
+                low = m.lower()
+                if ("declin" in low or "insufficient" in low
+                        or "cvv" in low or "expired" in low
+                        or "invalid" in low or "limit" in low):
+                    errors.append(m)
+                    break
+
     # ── Success: 2xx + real TransactionId + no errors ──
     if status in (200, 201) and txn and not errors:
         return True, txn, f"post:{status}", (raw or "")
