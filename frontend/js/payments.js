@@ -379,7 +379,12 @@
 
     api('/api/my-payment/charge', { method: 'POST', body: reqBody })
       .then(function (res) {
-        if (res && res.success && res.transactionId) {
+        // STRICT success gate — only show the receipt when the backend
+        // explicitly says success AND we have a real transaction id.
+        // Anything else (success:false, missing id, unparseable) routes
+        // to the decline view. Tens of thousands of customers will pay
+        // through this; we never want a false "Payment received".
+        if (res && res.success === true && res.transactionId) {
           const paid = Number(res.authAmount || form.amount);
           const receipt = {
             amount:        paid,
@@ -389,37 +394,49 @@
             when:          Date.now(),
           };
           sessionStorage.setItem(SUCCESS_KEY, JSON.stringify(receipt));
-          // Best-effort balance refresh — we don't display the new
-          // balance on the receipt anymore (it can be misleading right
-          // after a payment posts), so failures don't matter.
           return loadLoan()
             .catch(function () {})
             .then(function () { showReceipt(receipt); });
         }
-        const reason = (res && res.resultText) || 'Card declined.';
-        showError(reason + ' Please try a different card or call (747) 270-7121.');
+        // Decline — surface the issuer's exact reason on the new page.
+        showDecline({
+          reason: (res && res.resultText) || 'Card declined.',
+          amount: form.amount,
+          last4:  form.last4 || (res && res.last4) || '',
+          brand:  form.brand || (res && res.brand) || 'Card',
+        });
       })
       .catch(function (e) {
-        let msg = "We couldn't process your payment.";
-        const errBody = e && e.body;
-        if (errBody && typeof errBody === 'object') {
-          const code = errBody.error || errBody.code || '';
-          msg = {
-            invalid_amount:           'Please enter a valid amount.',
-            amount_out_of_range:      'Amount must be between $0.01 and $5,000.',
-            invalid_card_number:      'Card number is invalid.',
-            card_failed_luhn:         'Card number is invalid — please double-check.',
-            invalid_expiry:           'Expiration is invalid.',
-            invalid_exp_month:        'Expiration month is invalid.',
-            invalid_exp_year:         'Expiration year is invalid.',
-            invalid_cvv:              'CVV is invalid.',
-            payment_method_not_found: 'That saved card is no longer available. Please add a new card.',
-            repay_creds_missing:      'Payments are temporarily unavailable. Please call (747) 270-7121.',
-            repay_creds_incomplete:   'Payments are temporarily unavailable. Please call (747) 270-7121.',
-            repay_http_error:         'Our payment processor returned an error. Please try again or call (747) 270-7121.',
-          }[code] || msg;
+        // Validation errors (bad amount, bad cvv etc.) stay inline so
+        // the customer can fix and resubmit. Transport / processor
+        // errors route to the decline page so the customer knows their
+        // money definitely did NOT move.
+        const errBody = (e && e.body) || {};
+        const code = errBody.error || errBody.code || '';
+        const inlineMsgs = {
+          invalid_amount:           'Please enter a valid amount.',
+          amount_out_of_range:      'Amount must be between $0.01 and $5,000.',
+          invalid_card_number:      'Card number is invalid.',
+          card_failed_luhn:         'Card number is invalid — please double-check.',
+          invalid_expiry:           'Expiration is invalid.',
+          invalid_exp_month:        'Expiration month is invalid.',
+          invalid_exp_year:         'Expiration year is invalid.',
+          invalid_cvv:              'CVV is invalid.',
+          payment_method_not_found: 'That saved card is no longer available. Please add a new card.',
+          missing_loan_or_card:     'Please pick a saved card.',
+          invalid_cardauto_params:  'Please pick a saved card.',
+        };
+        if (inlineMsgs[code]) {
+          showError(inlineMsgs[code]);
+          return;
         }
-        showError(msg);
+        showDecline({
+          reason: errBody.resultText
+                || 'We couldn\'t reach the payment processor. Please try again.',
+          amount: form.amount,
+          last4:  form.last4 || '',
+          brand:  form.brand || 'Card',
+        });
       })
       .then(function () {
         state.submitting = false;
@@ -472,9 +489,42 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  // Decline view — mirrors showReceipt but in the warning palette and
+  // surfaces the issuer's exact decline reason. Never shows a fake
+  // success message; reassures the customer their loan was NOT charged.
+  function showDecline(info) {
+    info = info || {};
+    var reason = String(info.reason || 'Card declined.').trim();
+    // Vergent sometimes returns multiple lines joined with "; " —
+    // present each on its own row for readability.
+    var html = reason.split(/\s*;\s+/)
+      .map(function (line) { return escapeHtml(line); })
+      .join('<br>');
+    var reasonEl = qs('#payDeclineReason');
+    if (reasonEl) reasonEl.innerHTML = html;
+
+    var brand = info.brand || 'Card';
+    var last4 = info.last4 || '';
+    var cardLine = '—';
+    if (brand && last4) cardLine = brand + ' ending ' + last4;
+    else if (last4)     cardLine = 'Card ending ' + last4;
+    else if (brand)     cardLine = brand;
+    setText(qs('[data-decline-card]'), cardLine);
+
+    var amount = Number(info.amount || 0);
+    setText(qs('[data-decline-amount]'),
+      '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+
+    qs('#payFormCard').hidden = true;
+    qs('#payReceipt').hidden = true;
+    qs('#payDecline').hidden = false;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   // "Make another payment" — reset the form state and return to the
   // pay card. Saved-card list reloads in case any state has changed.
   function resetForPayAgain() {
+    var decline = qs('#payDecline'); if (decline) decline.hidden = true;
     qs('#payReceipt').hidden = true;
     const amt = qs('#payAmount'); if (amt) amt.value = '';
     const cvv = qs('#payCvv');    if (cvv) cvv.value = '';
@@ -503,6 +553,9 @@
 
     const payAgain = qs('#payAgainBtn');
     if (payAgain) payAgain.addEventListener('click', resetForPayAgain);
+
+    const tryAgain = qs('#payTryAgainBtn');
+    if (tryAgain) tryAgain.addEventListener('click', resetForPayAgain);
 
     // Live formatting.
     const cardInput = qs('#payCardNumber');

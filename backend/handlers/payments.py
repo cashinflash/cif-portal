@@ -704,58 +704,71 @@ def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
     if cvv:
         body["CardCvv"] = str(cvv)
 
-    # Attempt 1: POST /V1/PostCustomerLoanPayment — its response model
-    # (TransactionId + Errors) is purpose-built for charge results.
-    s1, p1, raw1 = _v1_request("POST", "/V1/PostCustomerLoanPayment", body=body)
-    log.info("card-auto POST status=%s body_head=%s", s1, (raw1 or "")[:600])
+    # Vergent's PostCustomerLoanPayment is the only correct endpoint for
+    # initiating a Card (Auto) charge. Its response model carries:
+    #   - TransactionId (non-zero on a real settled charge)
+    #   - Errors[]      (populated on decline OR server error)
+    # We treat success VERY strictly: 2xx + a non-zero TransactionId +
+    # zero errors. ANYTHING else is a decline/failure — never a silent
+    # success. PUT is for updating already-recorded payments; using it
+    # as a charge-init fallback silently no-ops, creating false-success
+    # receipts. We removed that fallback after it caused exactly that.
+    status, parsed, raw = _v1_request(
+        "POST", "/V1/PostCustomerLoanPayment", body=body)
+    log.info("card-auto POST status=%s body_head=%s",
+             status, (raw or "")[:600])
 
-    # Success: 200/201 with a non-zero TransactionId and no errors.
-    if s1 in (200, 201) and isinstance(p1, dict):
-        errs = p1.get("Errors") or p1.get("errors") or []
-        txn = p1.get("TransactionId") or p1.get("transactionId")
-        if txn and not errs:
-            return True, str(txn), f"post:{s1}", (raw1 or "")
-
-    # Decline / business error: Vergent returns the processor's reason
-    # in an `Errors` array (often via 400, sometimes via 200 with Errors
-    # populated). Surface that verbatim — DO NOT fall back to PUT, that
-    # silently no-ops and falsely succeeds. Customer needs the real
-    # reason ("insufficient funds", "wrong cvv", etc).
-    def _errors(payload):
-        if not isinstance(payload, (list, dict)):
-            return []
+    def _extract_errors(payload):
         if isinstance(payload, list):
-            return [str(e) for e in payload if e]
-        return [str(e) for e in
-                (payload.get("Errors") or payload.get("errors") or []) if e]
-    errs1 = _errors(p1)
-    if errs1:
-        # Drop Vergent's internal boilerplate prefix so the customer
-        # sees only the actionable reason.
-        msg = "; ".join(
-            e for e in errs1
+            return [str(e).strip() for e in payload if e]
+        if isinstance(payload, dict):
+            arr = payload.get("Errors") or payload.get("errors") or []
+            return [str(e).strip() for e in arr if e]
+        return []
+
+    def _extract_txn(payload):
+        if not isinstance(payload, dict):
+            return None
+        for key in ("TransactionId", "transactionId", "TxnId", "txnId"):
+            v = payload.get(key)
+            if v and str(v) not in ("0", ""):
+                return str(v)
+        return None
+
+    errors = _extract_errors(parsed)
+    txn = _extract_txn(parsed)
+
+    # ── Success: 2xx + real TransactionId + no errors ──
+    if status in (200, 201) and txn and not errors:
+        return True, txn, f"post:{status}", (raw or "")
+
+    # ── Decline / failure: extract the human-readable reason. ──
+    # Vergent prefixes processor responses with internal boilerplate
+    # ("Error Processing Payment (New Model)") — strip it so the
+    # customer sees only the actionable line.
+    reason = ""
+    if errors:
+        cleaned = [
+            e for e in errors
             if e and not e.lower().startswith("error processing payment")
-        ) or errs1[-1]
-        return False, None, msg, (raw1 or "")
+        ]
+        reason = cleaned[-1] if cleaned else errors[-1]
+        # Strip the redundant "Payment declined: " prefix some processor
+        # responses include — the surrounding copy already says declined.
+        if reason.lower().startswith("payment declined: "):
+            reason = reason[len("payment declined: "):]
+    elif raw:
+        # Body parsed as neither list nor dict (server hiccup, HTML
+        # error page, etc.) — give the customer a safe generic message
+        # and log the verbatim body for ops.
+        log.warning("card-auto unparseable upstream body: %s",
+                    (raw or "")[:600])
+        reason = ("We couldn't reach the payment processor. "
+                  "Please try again in a moment.")
+    else:
+        reason = "Card declined."
 
-    # No usable POST response shape — try PUT fallback for genuine
-    # transport / server errors only.
-    if s1 >= 500 or not isinstance(p1, (dict, list)):
-        s2, p2, raw2 = _v1_request(
-            "PUT", f"/V1/PutCustomerLoanPayment/{int(loan_id)}", body=body)
-        log.info("card-auto PUT status=%s body_head=%s", s2, (raw2 or "")[:600])
-        if s2 in (200, 201, 204):
-            txn = None
-            if isinstance(p2, dict):
-                txn = (p2.get("TransactionId") or p2.get("transactionId")
-                       or p2.get("id"))
-            # No real txn id from a 204 — synthesize one so the receipt
-            # is clean and audit-traceable.
-            return True, (str(txn) if txn else f"V{int(loan_id)}-{int(amount*100)}"), f"put:{s2}", (raw2 or "")
-
-    return (False, None,
-            f"Unexpected upstream response (status {s1}).",
-            (raw1 or "")[:300])
+    return False, None, reason, (raw or "")
 
 
 

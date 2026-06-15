@@ -198,6 +198,70 @@
       </form>
     </section>
 
+    <!-- Decline view (shown when Vergent reports a card decline) -->
+    <section class="dash-card pay-decline" id="payDecline" hidden
+             style="text-align:center;border-top:4px solid #c0392b">
+      <div aria-hidden="true"
+           style="width:64px;height:64px;border-radius:50%;background:#fdecea;
+                  display:inline-flex;align-items:center;justify-content:center;
+                  margin:8px auto 0;color:#c0392b">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="15" y1="9"  x2="9"  y2="15"></line>
+          <line x1="9"  y1="9"  x2="15" y2="15"></line>
+        </svg>
+      </div>
+      <h2 style="margin:14px 0 4px;color:#1a1a2e">Payment not completed</h2>
+      <p style="margin:0 0 4px;color:#777;font-size:0.95rem">
+        Your card was <strong style="color:#c0392b">declined</strong>.
+        Nothing has been applied to your loan.
+      </p>
+
+      <div id="payDeclineReasonBox"
+           style="margin:18px auto 0;max-width:480px;background:#fdf2f2;
+                  border:1px solid #f5b8b0;border-radius:10px;padding:14px 16px;
+                  text-align:left">
+        <div style="font-size:11px;font-weight:700;color:#9c2a1f;
+                    letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px">
+          Reason from your card issuer
+        </div>
+        <div id="payDeclineReason"
+             style="color:#5a0d0d;font-weight:600;line-height:1.45;font-size:0.95rem">
+          —
+        </div>
+      </div>
+
+      <dl class="pay-receipt-grid" style="margin-top:18px">
+        <div>
+          <dt>Card</dt>
+          <dd data-decline-card>—</dd>
+        </div>
+        <div>
+          <dt>Attempted</dt>
+          <dd data-decline-amount>—</dd>
+        </div>
+      </dl>
+
+      <p style="margin:14px auto 0;max-width:520px;color:#475569;
+                line-height:1.5;font-size:0.9rem">
+        Try a different debit card, or call the number on the back of your card
+        to confirm it's active and has available funds. Then come back and try again.
+      </p>
+
+      <div class="pay-actions pay-actions--center" style="margin-top:16px">
+        <a href="/dashboard.html" class="btn-login">Back to dashboard</a>
+        <button type="button" class="btn-apply" id="payTryAgainBtn">Try a different card</button>
+      </div>
+      <p style="margin-top:14px;font-size:0.85rem;color:#777">
+        Need help? Call us at
+        <a href="tel:+17472707121" style="color:#15C15D;font-weight:700;text-decoration:none">
+          (747) 270-7121
+        </a>.
+      </p>
+    </section>
+
     <!-- Receipt view (shown after a successful charge) -->
     <section class="dash-card pay-receipt" id="payReceipt" hidden>
       <div class="pay-receipt-icon" aria-hidden="true">
