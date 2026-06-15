@@ -664,89 +664,73 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     if not cid:
         return _json_response(200, {"loan": None})
 
-    # ── TEMP PROBE: v1 Card (Auto) charge (PaymentMethod=10 + CardId) ──
-    # 2026-06-15: admin payment.aspx network capture revealed the missing
-    # field. When staff pick "Card (Auto)" (ddlMethod=10) a second
-    # dropdown ddlAutoCc carries the SAVED VERGENT CARD ID (e.g. 238590).
-    # That maps to the `CardId` field on PostCustomerLoanPayment. Our
-    # past PaymentMethod=10 attempts created no record because we never
-    # sent CardId — Vergent had no card to charge. This probe replicates
-    # the admin flow via the v1 REST API: it charges the customer's own
-    # saved Vergent card $1.00 with PaymentMethod=10 + CardId, which
-    # should post as native CARD (not Cash) and run the charge through
-    # Vergent's own Repay integration.
-    #
-    # GUARDED: only fires for Harut (cid 601488) AND only when the page
-    # is loaded with ?cardauto=1, so it never charges a real customer.
-    # Verify in Vergent admin afterward that the payment shows as Card.
-    _qp = event.get("queryStringParameters") or {}
-    if str(cid) == "601488" and _qp.get("cardauto") == "1":
-        try:
-            from datetime import datetime, timezone
-            iso_now = datetime.now(timezone.utc).isoformat()
-
-            # Resolve the test loan + a real saved Vergent card id.
-            active = _fetch_active_loan(cid)
-            loan_id_int = int(active.get("id")) if active and active.get("id") else 0
-            cs_status, cs_body, cs_raw = _v1_request(
-                "GET", f"/V1/GetCustomerCards?custId={cid}")
-            card_id_int = 0
-            if isinstance(cs_body, list):
-                for c in cs_body:
-                    if isinstance(c, dict) and c.get("id"):
-                        card_id_int = int(c.get("id"))
-                        log.info("cardauto-probe picked CardId=%s last4=%s",
-                                 card_id_int,
-                                 "".join(ch for ch in (c.get("card_number") or "")
-                                         if ch.isdigit())[-4:])
-                        break
-            log.info("cardauto-probe resolved loan=%s card=%s "
-                     "(cards_status=%s count=%s)",
-                     loan_id_int, card_id_int, cs_status,
-                     len(cs_body) if isinstance(cs_body, list) else "n/a")
-
-            if loan_id_int and card_id_int:
-                body = {
-                    "CompanyId":     VERGENT_COMPANY_ID,
-                    "StoreId":       0,
-                    "UserId":        0,
-                    "HeaderId":      loan_id_int,
-                    "PaymentDate":   iso_now,
-                    "PaymentAmount": 1.00,
-                    "PaymentMethod": 10,   # Card (Auto)
-                    "PaymentSource": 72,   # Online Portal
-                    "CardId":        card_id_int,
-                    "Notes":         "[CIF Portal] Card(Auto) probe $1",
-                }
-                # Attempt 1: POST /V1/PostCustomerLoanPayment (returns
-                # TransactionId + Errors — designed for charge results).
-                s1, p1, raw1 = _v1_request(
-                    "POST", "/V1/PostCustomerLoanPayment", body=body)
-                log.info("cardauto-probe POST status=%s body=%s",
-                         s1, (raw1 or "")[:1500])
-
-                # Attempt 2 (fallback): PUT /V1/PutCustomerLoanPayment/{id}
-                # — the endpoint our Cash reconcile uses today, but now
-                # with PaymentMethod=10 + CardId instead of Cash.
-                post_ok = (s1 in (200, 201)
-                           and isinstance(p1, dict)
-                           and not (p1.get("Errors") or p1.get("errors"))
-                           and (p1.get("TransactionId") or p1.get("transactionId")))
-                if not post_ok:
-                    s2, p2, raw2 = _v1_request(
-                        "PUT", f"/V1/PutCustomerLoanPayment/{loan_id_int}",
-                        body=body)
-                    log.info("cardauto-probe PUT status=%s body=%s",
-                             s2, (raw2 or "")[:1500])
-            else:
-                log.warning("cardauto-probe skipped — missing loan or card "
-                            "(loan=%s card=%s)", loan_id_int, card_id_int)
-        except Exception as _exc:
-            log.warning("cardauto-probe error: %s", _exc)
-    # ── END TEMP PROBE ──
-
     loan = _fetch_active_loan(cid)
     return _json_response(200, {"loan": loan})
+
+
+def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
+                         cvv: str = "", source: int = 72
+                         ) -> Tuple[bool, Optional[str], str, str]:
+    """Charge a saved Vergent card via v1 "Card (Auto)" so the payment
+    records as native CARD in Vergent admin (not Cash).
+
+    This replicates exactly what the admin payment.aspx form sends when
+    staff pick "Card (Auto)":
+        ddlMethod = 10            -> PaymentMethod = 10
+        ddlAutoCc = <saved card>  -> CardId
+    Vergent charges that saved card through ITS OWN Repay merchant
+    integration and posts the payment. No customer-scoped JWT, no
+    Repay credentials on our side — just the v1 service Token.
+
+    `card_id` is the Vergent card id from GetCustomerCards (the `id`
+    field), i.e. what the portal's /api/my-cards returns.
+
+    Returns (ok, transaction_id, detail, raw_body).
+    """
+    from datetime import datetime, timezone
+    iso_now = datetime.now(timezone.utc).isoformat()
+    body = {
+        "CompanyId":     VERGENT_COMPANY_ID,
+        "StoreId":       0,
+        "UserId":        0,
+        "HeaderId":      int(loan_id),
+        "PaymentDate":   iso_now,
+        "PaymentAmount": round(float(amount), 2),
+        "PaymentMethod": 10,        # Card (Auto)
+        "PaymentSource": int(source),  # 72 = Online Portal
+        "CardId":        int(card_id),
+        "Notes":         "[CIF Portal] Card payment (online portal)",
+    }
+    if cvv:
+        body["CardCvv"] = str(cvv)
+
+    # Attempt 1: POST /V1/PostCustomerLoanPayment — its response model
+    # (TransactionId + Errors) is purpose-built for charge results.
+    s1, p1, raw1 = _v1_request("POST", "/V1/PostCustomerLoanPayment", body=body)
+    log.info("card-auto POST status=%s body_head=%s", s1, (raw1 or "")[:600])
+    if s1 in (200, 201) and isinstance(p1, dict):
+        errs = p1.get("Errors") or p1.get("errors") or []
+        txn = p1.get("TransactionId") or p1.get("transactionId")
+        if txn and not errs:
+            return True, str(txn), f"post:{s1}", (raw1 or "")
+        if errs:
+            return False, None, "; ".join(str(e) for e in errs), (raw1 or "")
+
+    # Attempt 2 (fallback): PUT /V1/PutCustomerLoanPayment/{id} — the
+    # endpoint our Cash reconcile already uses, now with Card (Auto).
+    s2, p2, raw2 = _v1_request(
+        "PUT", f"/V1/PutCustomerLoanPayment/{int(loan_id)}", body=body)
+    log.info("card-auto PUT status=%s body_head=%s", s2, (raw2 or "")[:600])
+    if s2 in (200, 201, 204):
+        txn = None
+        if isinstance(p2, dict):
+            txn = (p2.get("TransactionId") or p2.get("transactionId")
+                   or p2.get("id"))
+        return True, (str(txn) if txn else f"put-{s2}"), f"put:{s2}", (raw2 or "")
+
+    return (False, None, f"post:{s1},put:{s2}",
+            (raw1 or "")[:300] + " | " + (raw2 or "")[:300])
+
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -1758,6 +1742,56 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     if loan_id is None:
         active = _fetch_active_loan(cid)
         loan_id = active.get("id") if active else None
+
+    # ── Vergent "Card (Auto)" — saved Vergent card, charged by Vergent ──
+    # Body: { useCardAuto: true, cardId: <vergent card id>, amount,
+    #         loanId, cvv? }. The cardId is the `id` from /api/my-cards
+    #         (GetCustomerCards). Vergent charges that saved card through
+    #         its own Repay merchant integration and posts the payment as
+    #         native CARD in admin (not Cash) — the DFPI-correct tender.
+    #         No Repay credentials on our side; service Token only.
+    if body.get("useCardAuto") and body.get("cardId"):
+        try:
+            card_id = int(body.get("cardId"))
+            loan_id_int = int(loan_id) if loan_id is not None else 0
+        except (TypeError, ValueError):
+            return _json_response(400, {"error": "invalid_cardauto_params"})
+        if not loan_id_int or not card_id:
+            return _json_response(400, {"error": "missing_loan_or_card"})
+
+        ok, txn, detail, raw = _charge_card_auto_v1(
+            loan_id=loan_id_int, card_id=card_id, amount=amount,
+            cvv=cvv_digits,
+        )
+        # Record in our DDB ledger for our own audit trail (Vergent is
+        # still the system of record for the loan balance).
+        ledger_id = _record_payment_ledger(
+            cid=cid, loan_id=loan_id_int, amount=round(amount, 2),
+            result="0" if ok else "-1", transaction_id=txn,
+            result_text=detail, last4=str(body.get("last4") or ""),
+            error_detail=None if ok else detail,
+        )
+        if ok:
+            return _json_response(200, {
+                "success":       True,
+                "via":           "card_auto",
+                "transactionId": txn,
+                "authAmount":    round(amount, 2),
+                "last4":         body.get("last4") or "",
+                "brand":         body.get("brand") or "Card",
+                "resultText":    "Approved",
+                "loanId":        loan_id_int,
+                "cardId":        card_id,
+                "ledgerId":      ledger_id,
+            })
+        return _json_response(502, {
+            "success":     False,
+            "via":         "card_auto",
+            "error":       "card_auto_failed",
+            "resultText":  detail,
+            "upstreamBody": (raw or "")[:600],
+            "ledgerId":    ledger_id,
+        })
 
     # ── OPT-IN: Vergent CustomerPortal CreditCardPayment via APIM ──
     # When body contains `useApim: true` + `cardId: <int>`, bypass the

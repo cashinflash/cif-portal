@@ -97,11 +97,7 @@
 
   // ---------- Loan summary ----------
   function loadLoan() {
-    // TEMP: forward ?cardauto=1 from the page URL so the backend
-    // Card(Auto) validation probe (Harut-only) can fire on demand.
-    var _suffix = /[?&]cardauto=1\b/.test(window.location.search)
-      ? '?cardauto=1' : '';
-    return api('/api/my-payment/loan-summary' + _suffix).then(function (data) {
+    return api('/api/my-payment/loan-summary').then(function (data) {
       const card = qs('#paySummary');
       const body = qs('.pay-summary-body', card);
       const empty = qs('.pay-summary-empty', card);
@@ -139,9 +135,28 @@
   }
 
   // ---------- Saved methods ----------
+  // Cards come from the customer's VERGENT profile (/api/my-cards).
+  // Paying with one charges it natively as Card via Vergent's own
+  // processor (see submitPayment -> useCardAuto). We normalize the
+  // Vergent card shape to the picker's method shape; `vergentCardId`
+  // is the id Vergent needs to charge it (the admin "Card (Auto)" id).
   function loadMethods() {
-    return api('/api/my-payment-methods').then(function (data) {
-      state.methods = (data && data.methods) || [];
+    return api('/api/my-cards').then(function (data) {
+      var cards = (data && data.cards) || [];
+      state.methods = cards
+        .filter(function (c) { return c && c.id; })
+        .map(function (c) {
+          return {
+            methodId:      'v:' + c.id,
+            vergentCardId: c.id,
+            brand:         c.brand || 'Card',
+            last4:         c.last4 || '',
+            expMonth:      c.expMonth || '',
+            expYear:       c.expYear || '',
+            nameOnCard:    c.nameOnCard || '',
+            fromVergent:   true,
+          };
+        });
       renderMethods();
       return state.methods;
     }).catch(function () {
@@ -188,7 +203,11 @@
             (m.nameOnCard ? ' · ' + escapeHtml(m.nameOnCard) : '') +
           '</div>' +
         '</div>' +
-        '<button type="button" class="pay-method-remove" data-method-id="' + escapeHtml(m.methodId) + '">Remove</button>';
+        // Vergent-managed cards are removed in Vergent admin, not via
+        // our DDB delete endpoint — so no Remove button for them.
+        (m.fromVergent ? '' :
+          '<button type="button" class="pay-method-remove" data-method-id="' +
+          escapeHtml(m.methodId) + '">Remove</button>');
       list.appendChild(label);
     });
 
@@ -279,9 +298,14 @@
     const usingSaved = state.selectedMethodId && state.selectedMethodId !== ADD_NEW_VALUE;
 
     if (usingSaved) {
+      var sel = (state.methods || []).find(function (m) {
+        return m.methodId === state.selectedMethodId;
+      }) || {};
       return {
         amount: amount, cvv: cvv,
         paymentMethodId: state.selectedMethodId,
+        vergentCardId: sel.vergentCardId,
+        last4: sel.last4, brand: sel.brand,
         loanId: state.loan && state.loan.id,
         usingSaved: true,
       };
@@ -335,7 +359,10 @@
     const reqBody = form.usingSaved
       ? {
           amount: form.amount,
-          paymentMethodId: form.paymentMethodId,
+          useCardAuto: true,
+          cardId: form.vergentCardId,
+          last4: form.last4,
+          brand: form.brand,
           cvv: form.cvv,
           loanId: form.loanId,
         }
