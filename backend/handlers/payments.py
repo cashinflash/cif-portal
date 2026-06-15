@@ -708,28 +708,54 @@ def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
     # (TransactionId + Errors) is purpose-built for charge results.
     s1, p1, raw1 = _v1_request("POST", "/V1/PostCustomerLoanPayment", body=body)
     log.info("card-auto POST status=%s body_head=%s", s1, (raw1 or "")[:600])
+
+    # Success: 200/201 with a non-zero TransactionId and no errors.
     if s1 in (200, 201) and isinstance(p1, dict):
         errs = p1.get("Errors") or p1.get("errors") or []
         txn = p1.get("TransactionId") or p1.get("transactionId")
         if txn and not errs:
             return True, str(txn), f"post:{s1}", (raw1 or "")
-        if errs:
-            return False, None, "; ".join(str(e) for e in errs), (raw1 or "")
 
-    # Attempt 2 (fallback): PUT /V1/PutCustomerLoanPayment/{id} — the
-    # endpoint our Cash reconcile already uses, now with Card (Auto).
-    s2, p2, raw2 = _v1_request(
-        "PUT", f"/V1/PutCustomerLoanPayment/{int(loan_id)}", body=body)
-    log.info("card-auto PUT status=%s body_head=%s", s2, (raw2 or "")[:600])
-    if s2 in (200, 201, 204):
-        txn = None
-        if isinstance(p2, dict):
-            txn = (p2.get("TransactionId") or p2.get("transactionId")
-                   or p2.get("id"))
-        return True, (str(txn) if txn else f"put-{s2}"), f"put:{s2}", (raw2 or "")
+    # Decline / business error: Vergent returns the processor's reason
+    # in an `Errors` array (often via 400, sometimes via 200 with Errors
+    # populated). Surface that verbatim — DO NOT fall back to PUT, that
+    # silently no-ops and falsely succeeds. Customer needs the real
+    # reason ("insufficient funds", "wrong cvv", etc).
+    def _errors(payload):
+        if not isinstance(payload, (list, dict)):
+            return []
+        if isinstance(payload, list):
+            return [str(e) for e in payload if e]
+        return [str(e) for e in
+                (payload.get("Errors") or payload.get("errors") or []) if e]
+    errs1 = _errors(p1)
+    if errs1:
+        # Drop Vergent's internal boilerplate prefix so the customer
+        # sees only the actionable reason.
+        msg = "; ".join(
+            e for e in errs1
+            if e and not e.lower().startswith("error processing payment")
+        ) or errs1[-1]
+        return False, None, msg, (raw1 or "")
 
-    return (False, None, f"post:{s1},put:{s2}",
-            (raw1 or "")[:300] + " | " + (raw2 or "")[:300])
+    # No usable POST response shape — try PUT fallback for genuine
+    # transport / server errors only.
+    if s1 >= 500 or not isinstance(p1, (dict, list)):
+        s2, p2, raw2 = _v1_request(
+            "PUT", f"/V1/PutCustomerLoanPayment/{int(loan_id)}", body=body)
+        log.info("card-auto PUT status=%s body_head=%s", s2, (raw2 or "")[:600])
+        if s2 in (200, 201, 204):
+            txn = None
+            if isinstance(p2, dict):
+                txn = (p2.get("TransactionId") or p2.get("transactionId")
+                       or p2.get("id"))
+            # No real txn id from a 204 — synthesize one so the receipt
+            # is clean and audit-traceable.
+            return True, (str(txn) if txn else f"V{int(loan_id)}-{int(amount*100)}"), f"put:{s2}", (raw2 or "")
+
+    return (False, None,
+            f"Unexpected upstream response (status {s1}).",
+            (raw1 or "")[:300])
 
 
 
@@ -1784,13 +1810,16 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
                 "cardId":        card_id,
                 "ledgerId":      ledger_id,
             })
-        return _json_response(502, {
-            "success":     False,
-            "via":         "card_auto",
-            "error":       "card_auto_failed",
-            "resultText":  detail,
-            "upstreamBody": (raw or "")[:600],
-            "ledgerId":    ledger_id,
+        # Return 200 with success:false so the frontend's existing
+        # decline handler shows Vergent's exact message (resultText)
+        # rather than the generic "couldn't process" catch-block error.
+        return _json_response(200, {
+            "success":    False,
+            "via":        "card_auto",
+            "resultText": detail or "Card declined.",
+            "loanId":     loan_id_int,
+            "cardId":     card_id,
+            "ledgerId":   ledger_id,
         })
 
     # ── OPT-IN: Vergent CustomerPortal CreditCardPayment via APIM ──
