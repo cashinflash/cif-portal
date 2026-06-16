@@ -903,29 +903,34 @@ def _repay_card_token(*, cid: str, pan: str, exp_month: int, exp_year: int,
     }
     base = f"https://{REPAY_TOKENIZE_HOST}/rgapi/v1.0"
 
-    def _mint():
-        return _http(f"{base}/customers/{cid}/cardtokens", "POST", body={
+    # Repay assigns its OWN customer_key and ignores the one we pass, so we
+    # create a customer record and then tokenize against the key Repay
+    # returns in the response (using our Vergent id would 404).
+    first, _, last = (name_on_card or "").strip().partition(" ")
+    cstatus, cparsed, craw = _http(f"{base}/customers", "POST", body={
+        "customer_key": str(cid),
+        "contact": {
+            "first_name": first or "Customer",
+            "last_name":  last or str(cid),
+        },
+    }, headers=headers, timeout=30)
+    repay_key = ""
+    if isinstance(cparsed, dict):
+        repay_key = str(cparsed.get("customer_key")
+                        or cparsed.get("customerKey") or "")
+    if not repay_key:
+        repay_key = str(cid)
+    log.info("repay create-customer cid=%s status=%s repay_key=%s body=%s",
+             cid, cstatus, repay_key, (craw or "")[:300])
+
+    status, parsed, raw = _http(
+        f"{base}/customers/{repay_key}/cardtokens", "POST", body={
             "card_number":  pan_digits,
             "exp_date":     f"{int(exp_month):02d}{str(int(exp_year))[-2:]}",
             "name_on_card": (name_on_card or "").strip(),
             "street":       (street or "").strip(),
             "zip":          (zip_code or "").strip(),
         }, headers=headers, timeout=30)
-
-    status, parsed, raw = _mint()
-    if status == 404:
-        # Customer not in Repay yet — create it, then retry the tokenize.
-        first, _, last = (name_on_card or "").strip().partition(" ")
-        cstatus, _cp, craw = _http(f"{base}/customers", "POST", body={
-            "customer_key": str(cid),
-            "contact": {
-                "first_name": first or "Customer",
-                "last_name":  last or str(cid),
-            },
-        }, headers=headers, timeout=30)
-        log.info("repay create-customer cid=%s status=%s body=%s",
-                 cid, cstatus, (craw or "")[:600])
-        status, parsed, raw = _mint()
 
     if status not in (200, 201) or not isinstance(parsed, dict):
         log.warning("repay cardtoken cid=%s status=%s FULL=%s",
