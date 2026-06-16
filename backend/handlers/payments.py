@@ -918,8 +918,10 @@ def _repay_card_token(*, cid: str, pan: str, exp_month: int, exp_year: int,
         first, _, last = (name_on_card or "").strip().partition(" ")
         cstatus, _cp, craw = _http(f"{base}/customers", "POST", body={
             "customer_key": str(cid),
-            "first_name":   first or "Customer",
-            "last_name":    last or str(cid),
+            "contact": {
+                "first_name": first or "Customer",
+                "last_name":  last or str(cid),
+            },
         }, headers=headers, timeout=30)
         log.info("repay create-customer cid=%s status=%s body=%s",
                  cid, cstatus, (craw or "")[:600])
