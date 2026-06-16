@@ -832,24 +832,226 @@ def _detect_card_type(digits: str) -> str:
     return "Other"
 
 
-def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
-    """POST /api/my-cards — DISABLED for PCI SAQ A compliance.
+# ─────────────────────────────────────────
+# Add a card → save to Vergent (Repay-tokenize → PostCustomerCardTokenized)
+# ─────────────────────────────────────────
+# Mirrors cif-apply's PROVEN recipe: Vergent's tenant has no server-side
+# card processor, so a raw PAN to Vergent NPEs. We tokenize the card at
+# Repay first, then store the TOKEN on the customer's Vergent profile via
+# PostCustomerCardTokenized. The card then surfaces in GetCustomerCards
+# (GET /api/my-cards) and is charged through the existing Card (Auto) flow.
+#
+# The _repay_card_token() step is the ONLY piece that changes when we move
+# to Repay hosted card fields later: the browser would post a token here
+# instead of a PAN and this function is skipped. Everything downstream
+# (save-to-Vergent + charge) is identical, so payments are never affected.
 
-    Self-service Add Card is intentionally turned off in the portal.
-    Cards are added by Cash in Flash agents via Vergent's admin UI
-    (which performs server-side Repay tokenization on Vergent's
-    infrastructure). This keeps PAN entirely off our infrastructure.
+# Tokenization always runs against PRODUCTION Repay, independent of the
+# sandbox-defaulting REPAY_API_HOSTNAME the legacy charge path used — a real
+# card must never be silently tokenized against sandbox.
+REPAY_TOKENIZE_HOST = os.environ.get("REPAY_TOKENIZE_HOST", "api.repayonline.com").rstrip("/")
 
-    Returns 410 Gone immediately — never parses the body, never
-    touches cardholder data. To re-enable, design a PCI-compliant
-    PAN flow first (e.g. Repay Hosted Fields iframe so PAN goes
-    browser → Repay, never through this Lambda).
+_repay_prod_creds_cache: Optional[Dict[str, Any]] = None
+
+
+def _get_repay_prod_creds() -> Optional[Dict[str, Any]]:
+    """Read the PRODUCTION Repay gateway credentials (cif-portal/repay/
+    credentials) used for card tokenization. Kept separate from the
+    sandbox-aware _get_repay_rgapi_creds() so saving a real card can never
+    fall through to sandbox."""
+    global _repay_prod_creds_cache
+    if _repay_prod_creds_cache is not None:
+        return _repay_prod_creds_cache
+    arn = os.environ.get("REPAY_SECRET_ARN", "cif-portal/repay/credentials")
+    try:
+        resp = _secrets.get_secret_value(SecretId=arn)
+        _repay_prod_creds_cache = json.loads(resp["SecretString"])
+        return _repay_prod_creds_cache
+    except Exception as e:
+        log.warning("repay prod creds read failed arn=%s err=%s", arn, e)
+        return None
+
+
+def _repay_card_token(*, cid: str, pan: str, exp_month: int, exp_year: int,
+                      name_on_card: str, street: str, zip_code: str
+                      ) -> Tuple[Optional[str], str]:
+    """SWAPPABLE STEP — mint a Repay card token for the customer's card.
+
+    Mirrors cif-apply's repay_client.create_card_token:
+      POST https://{host}/rgapi/v1.0/customers/{cid}/cardtokens
+      headers rg-api-user / rg-api-secure-token / rg-merchant-id
+      body {card_number, exp_date(MMYY), name_on_card, street, zip}
+      -> {card_token_key, ...}
+
+    Returns (token, debug). PAN/CVV are never logged. When we adopt Repay
+    hosted fields, replace this function's body with "the browser already
+    gave us a token" — nothing else changes.
     """
-    log.info("post_card invoked while disabled — returning 410")
-    return _json_response(410, {
-        "error": "self_service_disabled",
-        "message": "Card entry is handled by Cash in Flash agents at (747) 270-7121 or any store location.",
-    })
+    creds = _get_repay_prod_creds()
+    if not creds:
+        return None, "repay_creds_missing"
+    user = creds.get("gatewayApiUser") or creds.get("apiUser") or ""
+    secure = creds.get("gatewaySecureToken") or creds.get("secureToken") or ""
+    merchant = creds.get("gatewayMerchantId") or creds.get("merchantId") or ""
+    if not (user and secure and merchant):
+        return None, "repay_creds_incomplete"
+    pan_digits = _strip_digits(pan)
+    if not (13 <= len(pan_digits) <= 19):
+        return None, "invalid_pan_length"
+    try:
+        mm = int(exp_month)
+        yy = int(exp_year) % 100
+    except (TypeError, ValueError):
+        return None, "invalid_exp"
+    body = {
+        "card_number":  pan_digits,
+        "exp_date":     f"{mm:02d}{yy:02d}",   # MMYY
+        "name_on_card": (name_on_card or "").strip(),
+        "street":       (street or "").strip(),
+        "zip":          (zip_code or "").strip(),
+    }
+    url = f"https://{REPAY_TOKENIZE_HOST}/rgapi/v1.0/customers/{cid}/cardtokens"
+    headers = {
+        "Content-Type":        "application/json",
+        "Accept":              "application/json",
+        "rg-api-user":         user,
+        "rg-api-secure-token": secure,
+        "rg-merchant-id":      str(merchant),
+    }
+    status, parsed, raw = _http(url, "POST", body=body, headers=headers, timeout=30)
+    if status not in (200, 201) or not isinstance(parsed, dict):
+        # Never echo the raw body to the caller (may contain card metadata);
+        # log a trimmed version for ops only.
+        log.warning("repay cardtoken cid=%s status=%s body_head=%s",
+                    cid, status, (raw or "")[:200])
+        return None, f"repay_http_{status}"
+    token = parsed.get("card_token_key") or parsed.get("cardTokenKey") or ""
+    if not token:
+        log.warning("repay cardtoken cid=%s 2xx but no token", cid)
+        return None, "repay_no_token"
+    log.info("repay cardtoken cid=%s ok last4=%s", cid, pan_digits[-4:])
+    return str(token), "ok"
+
+
+def _vergent_save_card(*, cid: str, card_token: str, cardholder_name: str,
+                       last4: str, exp_month: int, exp_year: int,
+                       card_zip: str, card_type_id: int,
+                       is_eligible_for_disbursement: bool = True
+                       ) -> Tuple[bool, int, str]:
+    """Save a PRE-tokenized card to the customer's Vergent profile via
+    POST /api/V1/PostCustomerCardTokenized on the APIM gateway.
+
+    Mirrors cif-apply's vergent_client.post_customer_card_tokenized: the
+    V1 service token is used as both the `Token` header and the Bearer,
+    plus the APIM x-api-key. Returns (ok, status, trimmed_body).
+    """
+    creds = _get_creds() or {}
+    xapikey = creds.get("xApiKey") or ""
+    v1_tok = _get_v1_token() or ""
+    if not (xapikey and v1_tok):
+        return False, 0, "vergent_creds_missing"
+    yy = int(exp_year)
+    if 0 < yy < 100:
+        yy += 2000
+    body = {
+        "customer_id":                  int(cid) if str(cid).isdigit() else cid,
+        "card_type_id":                 int(card_type_id or 0),
+        "card_holder":                  (cardholder_name or "").strip(),
+        "last_four_digits":             _strip_digits(last4),
+        "card_token":                   str(card_token).strip(),
+        "expire_month":                 int(exp_month or 0),
+        "expire_year":                  yy,
+        "card_zip":                     (card_zip or "").strip(),
+        "is_eligible_for_disbursement": bool(is_eligible_for_disbursement),
+        "card_provider":                os.environ.get("VERGENT_CARD_PROVIDER", "") or "Repay",
+        "card_processor_type":          int(os.environ.get("VERGENT_CARD_PROCESSOR_TYPE", "") or 0),
+    }
+    headers = {
+        "x-api-key":     xapikey,
+        "Token":         v1_tok,
+        "Authorization": f"Bearer {v1_tok}",
+        "Content-Type":  "application/json",
+        "Accept":        "application/json",
+    }
+    url = f"{APIM_BASE}/api/V1/PostCustomerCardTokenized"
+    status, parsed, raw = _http(url, "POST", body=body, headers=headers, timeout=30)
+    log.info("vergent save-card cid=%s type_id=%s status=%s body_head=%s",
+             cid, card_type_id, status, (raw or "")[:200])
+    return (200 <= status < 300), status, (raw or "")[:300]
+
+
+def post_card(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-cards — save a new card to the customer's Vergent profile.
+
+    Body: {cardNumber, expMonth, expYear, nameOnCard?, zip?}. No CVV needed
+    to store a card; no charge happens here. On success the card appears in
+    GET /api/my-cards and is payable via the existing Card (Auto) flow.
+
+    Two steps (see helpers above):
+      1. _repay_card_token  — tokenize the PAN at Repay (swappable step).
+      2. _vergent_save_card — store the token on the Vergent customer.
+
+    The customer id comes from the JWT, never the body. PAN/CVV are never
+    logged or stored on our side.
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_json"})
+    if not isinstance(body, dict):
+        return _json_response(400, {"error": "invalid_body"})
+
+    pan = _strip_digits(body.get("cardNumber"))
+    if len(pan) < 13 or len(pan) > 19:
+        return _json_response(400, {"error": "invalid_card_number"})
+    if not _luhn_ok(pan):
+        return _json_response(400, {"error": "card_failed_luhn"})
+
+    try:
+        exp_month = int(body.get("expMonth") or 0)
+        exp_year = int(body.get("expYear") or 0)
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_expiry"})
+    if not (1 <= exp_month <= 12):
+        return _json_response(400, {"error": "invalid_exp_month"})
+    if exp_year < 100:
+        exp_year += 2000
+    if exp_year < 2026 or exp_year > 2050:
+        return _json_response(400, {"error": "invalid_exp_year"})
+
+    name_on_card = (body.get("nameOnCard") or "").strip()[:64]
+    zip_code = _strip_digits(body.get("zip"))[:5]
+    last4 = pan[-4:]
+    brand = _detect_card_type(pan)
+    card_type_id = _vergent_card_type_id(brand)
+
+    # 1) Tokenize at Repay (swappable step).
+    token, dbg = _repay_card_token(
+        cid=cid, pan=pan, exp_month=exp_month, exp_year=exp_year,
+        name_on_card=name_on_card, street="", zip_code=zip_code,
+    )
+    if not token:
+        log.warning("save-card tokenize failed cid=%s reason=%s", cid, dbg)
+        return _json_response(502, {"error": "tokenize_failed"})
+
+    # 2) Store the token on the Vergent customer.
+    ok, status, _snippet = _vergent_save_card(
+        cid=cid, card_token=token,
+        cardholder_name=name_on_card or "Cardholder",
+        last4=last4, exp_month=exp_month, exp_year=exp_year,
+        card_zip=zip_code, card_type_id=card_type_id,
+    )
+    if not ok:
+        log.warning("save-card vergent store failed cid=%s status=%s", cid, status)
+        return _json_response(502, {"error": "vergent_save_failed"})
+
+    log.info("save-card ok cid=%s brand=%s last4=%s", cid, brand, last4)
+    return _json_response(200, {"ok": True, "last4": last4, "brand": brand})
 
 
 def _extract_last4(candidates) -> str:
