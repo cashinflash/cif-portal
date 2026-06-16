@@ -981,40 +981,64 @@ def _vergent_save_card(*, cid: str, card_ref: str, pan: str,
                        exp_month: int, exp_year: int,
                        card_zip: str, card_type_id: int,
                        cvv: str = "") -> Tuple[bool, int, str]:
-    """Save the CardSafe-tokenized card to the customer's Vergent profile via
-    POST /V1/PostCustomerCardTokenized. Mirrors the portal's Instant Funding
-    push body (token goes in `card_ref`). Returns (ok, status, trimmed_body).
-    """
-    yy = int(exp_year)
+    """Save the card to the customer's Vergent profile — a faithful mirror of
+    cif-apply's proven vergent_client.post_customer_card.
+
+    The Repay token (passed in as `card_ref`) goes into
+    card_guid/card_account_guid/card_id so Vergent's null CardProcessor
+    lookup is bypassed; we also send the raw PAN, every field-name variant,
+    and mark the row active. Vergent 200-OKs a shelved inactive row, so real
+    success = is_active true AND no Errors. Returns (ok, status, detail)."""
+    token = str(card_ref or "").strip()              # the Repay card token
+    last4d = _strip_digits(last4)
+    pan_digits = _strip_digits(pan)
+    try:
+        yy = int(exp_year)
+    except (TypeError, ValueError):
+        yy = 0
     if 0 < yy < 100:
         yy += 2000
-    v1_body = {
-        "id":                           0,
-        "company_id":                   VERGENT_COMPANY_ID,
-        "customer_id":                  int(cid) if str(cid).isdigit() else cid,
-        "card_type_id":                 int(card_type_id or 0),
-        "card_holder":                  (cardholder_name or "").strip(),
-        "card_number":                  _strip_digits(pan),
-        "last_four_digits":             _strip_digits(last4),
-        "card_id":                      "",
-        "card_ref":                     str(card_ref).strip(),
-        "card_token":                   str(card_ref).strip(),
-        "card_guid":                    str(card_ref).strip(),
-        "card_account_guid":            str(card_ref).strip(),
-        "card_provider":                "Repay",
-        "is_eligible_for_disbursement": False,
-        "expire_month":                 int(exp_month or 0),
-        "expire_year":                  yy,
-        "ccv":                          cvv or "",
-        "billing_zip_code":             (card_zip or "").strip(),
+    try:
+        mm = int(exp_month or 0)
+    except (TypeError, ValueError):
+        mm = 0
+    cid_val = int(cid) if str(cid).isdigit() else cid
+    ref = f"cifportal-{cid}-{last4d}" if last4d else f"cifportal-{cid}"
+    holder = (cardholder_name or "").strip()
+    zipc = (card_zip or "").strip()
+    cvvc = (cvv or "").strip()
+    body = {
+        "customer_id": cid_val, "CustomerId": cid_val, "customerId": cid_val,
+        "company_id": VERGENT_COMPANY_ID, "CompanyId": VERGENT_COMPANY_ID,
+        "card_type_id": int(card_type_id or 0), "CardTypeId": int(card_type_id or 0),
+        "card_holder": holder, "CardHolder": holder,
+        "card_number": pan_digits, "CardNumber": pan_digits,
+        "last_four_digits": last4d, "LastFourDigits": last4d,
+        "card_ref": ref, "CardRef": ref,
+        "expire_month": mm, "ExpireMonth": mm,
+        "expire_year": yy, "ExpireYear": yy,
+        "ccv": cvvc, "Ccv": cvvc,
+        "billing_zip_code": zipc, "BillingZipCode": zipc,
+        "card_guid": token, "CardGuid": token,
+        "card_account_guid": token, "CardAccountGuid": token,
+        "card_id": token, "CardId": token,
+        "is_eligible_for_disbursement": False, "IsEligibleForDisbursement": False,
+        "status": 1, "Status": 1,
+        "is_active": True, "IsActive": True,
     }
-    status, resp, raw = _v1_request("POST", "/V1/PostCustomerCardTokenized", body=v1_body)
+    status, resp, raw = _v1_request("POST", "/V1/PostCustomerCard", body=body)
     log.info("vergent save-card cid=%s type_id=%s status=%s FULL=%s",
              cid, card_type_id, status, (raw or "")[:1500])
     if status not in (200, 201):
         return False, status, (raw or "")[:300]
-    if isinstance(resp, dict) and resp.get("Errors"):
-        return False, status, str(resp.get("Errors"))[:300]
+    # Vergent 200-OKs a shelved (inactive) row — require is_active AND no Errors.
+    rd = resp if isinstance(resp, dict) else {}
+    active = bool(rd.get("is_active") or rd.get("IsActive"))
+    errs = rd.get("Errors") or rd.get("errors") or []
+    if not active or errs:
+        log.warning("vergent save-card SHELVED cid=%s active=%s errors=%s",
+                    cid, active, errs)
+        return False, status, f"shelved active={active} errors={errs}"[:300]
     return True, status, ""
 
 
