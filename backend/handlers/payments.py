@@ -919,15 +919,15 @@ def _repay_card_token(*, cid: str, pan: str, exp_month: int, exp_year: int,
             raw = r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace") if hasattr(e, "read") else ""
-        log.warning("cardsafe StoreCard cid=%s HTTP %s: %s", cid, e.code, body[:200])
+        log.warning("cardsafe StoreCard cid=%s HTTP %s FULL=%s", cid, e.code, body[:3000])
         return None, f"cardsafe_http_{e.code}"
     except Exception as exc:
         log.warning("cardsafe StoreCard cid=%s error: %s", cid, type(exc).__name__)
         return None, f"cardsafe_{type(exc).__name__}"
     token = _extract_cardsafe_token_str(raw)
     if not token:
-        log.warning("cardsafe StoreCard cid=%s no token: %s",
-                    cid, (raw or "")[:200].replace("\n", " "))
+        log.warning("cardsafe StoreCard cid=%s NO-TOKEN-FULL=%s",
+                    cid, (raw or "")[:3000].replace("\n", " "))
         return None, "cardsafe_no_token"
     log.info("cardsafe StoreCard cid=%s ok last4=%s", cid, pan_digits[-4:])
     return token, "ok"
