@@ -220,7 +220,7 @@
         (state.selectedMethodId === ADD_NEW_VALUE ? ' checked' : '') + '>' +
       '<div class="pay-method-body">' +
         '<div class="pay-method-brand">+ Add a new card</div>' +
-        '<div class="pay-method-meta">Saved automatically for next time.</div>' +
+        '<div class="pay-method-meta">Save a debit card to your account.</div>' +
       '</div>';
     list.appendChild(addNew);
 
@@ -228,9 +228,17 @@
   }
 
   function applyMethodSelection() {
-    const newCardFields = qs('#payNewCardFields');
     const showNew = state.selectedMethodId === ADD_NEW_VALUE;
+    const newCardFields = qs('#payNewCardFields');
+    const amountSection = qs('#payAmountSection');
+    const cvvSection = qs('#payCvvSection');
+    const btn = qs('#payChargeBtn');
+    // "Add a new card" mode SAVES the card (no charge): show the card
+    // fields, hide amount + CVV, relabel the button. Saved-card mode pays.
     if (newCardFields) newCardFields.hidden = !showNew;
+    if (amountSection) amountSection.hidden = showNew;
+    if (cvvSection) cvvSection.hidden = showNew;
+    if (btn && !state.submitting) btn.textContent = showNew ? 'Save card' : 'Pay now';
     // Re-mark which .pay-method has the selected state for the
     // visual highlight (CSS hover/checked alone isn't enough since
     // the radio inputs are inside the label and we want the
@@ -292,50 +300,48 @@
   }
 
   // ---------- Submit ----------
-  function readForm() {
+  // Saved-card PAY form (amount + CVV + the selected Vergent card).
+  function readPayForm() {
     const amount = parseFloat(String(qs('#payAmount').value || '').replace(/[^\d.]/g, ''));
     const cvv = String(qs('#payCvv').value || '').trim();
-    const usingSaved = state.selectedMethodId && state.selectedMethodId !== ADD_NEW_VALUE;
+    var sel = (state.methods || []).find(function (m) {
+      return m.methodId === state.selectedMethodId;
+    }) || {};
+    return {
+      amount: amount, cvv: cvv,
+      vergentCardId: sel.vergentCardId,
+      last4: sel.last4, brand: sel.brand,
+      loanId: state.loan && state.loan.id,
+    };
+  }
 
-    if (usingSaved) {
-      var sel = (state.methods || []).find(function (m) {
-        return m.methodId === state.selectedMethodId;
-      }) || {};
-      return {
-        amount: amount, cvv: cvv,
-        paymentMethodId: state.selectedMethodId,
-        vergentCardId: sel.vergentCardId,
-        last4: sel.last4, brand: sel.brand,
-        loanId: state.loan && state.loan.id,
-        usingSaved: true,
-      };
-    }
+  function validatePayForm(f) {
+    if (!f.vergentCardId) return 'Please choose a saved card.';
+    if (!f.amount || isNaN(f.amount) || f.amount <= 0) return 'Please enter a valid amount.';
+    if (f.amount > 5000) return 'Amount must be $5,000 or less.';
+    if (!f.cvv || !/^\d{3,4}$/.test(f.cvv)) return 'Please enter the 3- or 4-digit CVV.';
+    return null;
+  }
 
+  // ADD-a-card form (new card details — saved to Vergent, not charged).
+  function readNewCard() {
     const cardNumber = String(qs('#payCardNumber').value || '').replace(/\s+/g, '');
     const expDigits = String(qs('#payExp').value || '').replace(/\D/g, '');
     const expMonth = parseInt(expDigits.slice(0, 2), 10);
     const expYearShort = parseInt(expDigits.slice(2, 4), 10);
     const expYear = isNaN(expYearShort) ? 0 : (2000 + expYearShort);
-    const nameOnCard = String(qs('#payName').value || '').trim();
-    const zip = String(qs('#payZip').value || '').trim();
     return {
-      amount: amount, cvv: cvv,
       cardNumber: cardNumber,
       expMonth: expMonth, expYear: expYear,
-      nameOnCard: nameOnCard, zip: zip,
-      loanId: state.loan && state.loan.id,
-      usingSaved: false,
+      nameOnCard: String(qs('#payName').value || '').trim(),
+      zip: String(qs('#payZip').value || '').trim(),
     };
   }
 
-  function validateForm(f) {
-    if (!f.amount || isNaN(f.amount) || f.amount <= 0) return 'Please enter a valid amount.';
-    if (f.amount > 5000) return 'Amount must be $5,000 or less.';
-    if (!f.cvv || !/^\d{3,4}$/.test(f.cvv)) return 'Please enter the 3- or 4-digit CVV.';
-    if (f.usingSaved) return null;
-    if (!f.cardNumber || f.cardNumber.length < 13) return 'Please enter a valid card number.';
-    if (!f.expMonth || f.expMonth < 1 || f.expMonth > 12) return 'Please enter a valid expiration month (01-12).';
-    if (!f.expYear || f.expYear < 2026 || f.expYear > 2050) return 'Please enter a valid expiration year.';
+  function validateNewCard(c) {
+    if (!c.cardNumber || c.cardNumber.length < 13) return 'Please enter a valid card number.';
+    if (!c.expMonth || c.expMonth < 1 || c.expMonth > 12) return 'Please enter a valid expiration month (01-12).';
+    if (!c.expYear || c.expYear < 2026 || c.expYear > 2050) return 'Please enter a valid expiration year.';
     return null;
   }
 
@@ -344,8 +350,15 @@
     if (state.submitting) return;
     clearError();
 
-    const form = readForm();
-    const err = validateForm(form);
+    // "Add a new card" mode saves the card to Vergent — it never charges.
+    if (state.selectedMethodId === ADD_NEW_VALUE) {
+      saveCard();
+      return;
+    }
+
+    // Saved-card mode: charge via Vergent Card (Auto).
+    const form = readPayForm();
+    const err = validatePayForm(form);
     if (err) { showError(err); return; }
 
     state.initialBalance = state.loan ? Number(state.loan.balance) : null;
@@ -356,28 +369,18 @@
       btn.textContent = 'Processing payment…';
     }
 
-    const reqBody = form.usingSaved
-      ? {
-          amount: form.amount,
-          useCardAuto: true,
-          cardId: form.vergentCardId,
-          last4: form.last4,
-          brand: form.brand,
-          cvv: form.cvv,
-          loanId: form.loanId,
-        }
-      : {
-          amount: form.amount,
-          cardNumber: form.cardNumber,
-          expMonth: form.expMonth,
-          expYear: form.expYear,
-          cvv: form.cvv,
-          nameOnCard: form.nameOnCard,
-          zip: form.zip,
-          loanId: form.loanId,
-        };
-
-    api('/api/my-payment/charge', { method: 'POST', body: reqBody })
+    api('/api/my-payment/charge', {
+      method: 'POST',
+      body: {
+        amount: form.amount,
+        useCardAuto: true,
+        cardId: form.vergentCardId,
+        last4: form.last4,
+        brand: form.brand,
+        cvv: form.cvv,
+        loanId: form.loanId,
+      },
+    })
       .then(function (res) {
         // STRICT success gate — only show the receipt when the backend
         // explicitly says success AND we have a real transaction id.
@@ -407,24 +410,19 @@
         });
       })
       .catch(function (e) {
-        // Validation errors (bad amount, bad cvv etc.) stay inline so
-        // the customer can fix and resubmit. Transport / processor
-        // errors route to the decline page so the customer knows their
-        // money definitely did NOT move.
+        // Validation errors stay inline so the customer can fix and
+        // resubmit. Transport / processor errors route to the decline
+        // page so the customer knows their money definitely did NOT move.
         const errBody = (e && e.body) || {};
         const code = errBody.error || errBody.code || '';
         const inlineMsgs = {
           invalid_amount:           'Please enter a valid amount.',
           amount_out_of_range:      'Amount must be between $0.01 and $5,000.',
-          invalid_card_number:      'Card number is invalid.',
-          card_failed_luhn:         'Card number is invalid — please double-check.',
-          invalid_expiry:           'Expiration is invalid.',
-          invalid_exp_month:        'Expiration month is invalid.',
-          invalid_exp_year:         'Expiration year is invalid.',
           invalid_cvv:              'CVV is invalid.',
-          payment_method_not_found: 'That saved card is no longer available. Please add a new card.',
           missing_loan_or_card:     'Please pick a saved card.',
           invalid_cardauto_params:  'Please pick a saved card.',
+          card_not_owned:           'That card isn’t on your account. Please pick one of your saved cards.',
+          loan_not_owned:           'We couldn’t match that to your loan. Please refresh and try again.',
         };
         if (inlineMsgs[code]) {
           showError(inlineMsgs[code]);
@@ -440,11 +438,83 @@
       })
       .then(function () {
         state.submitting = false;
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = 'Pay now';
-        }
+        if (btn) { btn.disabled = false; }
+        applyMethodSelection();
       });
+  }
+
+  // Save a new card to the customer's Vergent profile (no charge). On
+  // success the card appears in the saved-card list and is then payable
+  // via the normal Card (Auto) flow.
+  function saveCard() {
+    const card = readNewCard();
+    const err = validateNewCard(card);
+    if (err) { showError(err); return; }
+
+    const btn = qs('#payChargeBtn');
+    state.submitting = true;
+    hideCardAdded();
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving card…'; }
+
+    api('/api/my-cards', {
+      method: 'POST',
+      body: {
+        cardNumber: card.cardNumber,
+        expMonth:   card.expMonth,
+        expYear:    card.expYear,
+        nameOnCard: card.nameOnCard,
+        zip:        card.zip,
+      },
+    })
+      .then(function (res) {
+        const newLast4 = (res && res.last4) || '';
+        // Never keep the PAN in the DOM after a successful save.
+        ['#payCardNumber', '#payExp', '#payName', '#payZip'].forEach(function (s) {
+          const el = qs(s); if (el) el.value = '';
+        });
+        // Reload the list from Vergent and select the new card so the
+        // customer can pay with it immediately.
+        return loadMethods().then(function (methods) {
+          var match = (methods || []).find(function (m) {
+            return newLast4 && m.last4 === newLast4;
+          });
+          state.selectedMethodId = match ? match.methodId
+            : (methods && methods.length ? methods[0].methodId : ADD_NEW_VALUE);
+          renderMethods();
+          showCardAdded(newLast4);
+        });
+      })
+      .catch(function (e) {
+        const code = (e && e.body && (e.body.error || e.body.code)) || '';
+        const msgs = {
+          invalid_card_number: 'Card number is invalid.',
+          card_failed_luhn:    'Card number is invalid — please double-check it.',
+          invalid_exp_month:   'Expiration month is invalid.',
+          invalid_exp_year:    'Expiration year is invalid.',
+          tokenize_failed:     'We couldn’t verify that card. Please double-check the details and try again.',
+          vergent_save_failed: 'We couldn’t save that card right now. Please try again in a moment.',
+        };
+        showError(msgs[code] || 'We couldn’t save that card. Please try again.');
+      })
+      .then(function () {
+        state.submitting = false;
+        if (btn) { btn.disabled = false; }
+        applyMethodSelection();
+      });
+  }
+
+  function showCardAdded(last4) {
+    const el = qs('#payCardAddedNote');
+    if (!el) return;
+    el.textContent = last4
+      ? ('Card ending ' + last4 + ' added to your account. Enter an amount and pay below.')
+      : 'Card added to your account. Enter an amount and pay below.';
+    el.hidden = false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function hideCardAdded() {
+    const el = qs('#payCardAddedNote');
+    if (el) { el.hidden = true; el.textContent = ''; }
   }
 
   function showReceipt(receipt) {
