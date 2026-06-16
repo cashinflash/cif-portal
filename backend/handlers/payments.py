@@ -1944,6 +1944,50 @@ def _post_payment_to_vergent(*, cid: str, loan_id: Any, amount: float,
     return False, f"put_failed:status={status}:{head[:200]}", None
 
 
+def _customer_owns_card(cid: str, card_id: int) -> bool:
+    """True iff card_id is one of THIS customer's saved Vergent cards.
+
+    The Vergent service token can see/charge any customer's cards, so we
+    scope by the customer's own card list. Fails closed: if we can't list
+    the cards, we deny."""
+    try:
+        target = int(card_id)
+    except (TypeError, ValueError):
+        return False
+    status, body, _raw = _v1_request("GET", f"/V1/GetCustomerCards?custId={cid}")
+    if status != 200 or not isinstance(body, list):
+        return False
+    for c in body:
+        if isinstance(c, dict):
+            try:
+                if int(c.get("id") or 0) == target:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
+def _customer_owns_loan(cid: str, loan_id: int) -> bool:
+    """True iff loan_id belongs to THIS customer. Fails closed."""
+    try:
+        target = int(loan_id)
+    except (TypeError, ValueError):
+        return False
+    status, body = _v1_get(f"/V1/{cid}/loans")
+    if status != 200 or not isinstance(body, list):
+        return False
+    for rec in body:
+        if not isinstance(rec, dict):
+            continue
+        shaped = _shape_v1_loan(rec)
+        try:
+            if int(shaped.get("id") or 0) == target:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     """POST /api/my-payment/charge
 
@@ -1989,7 +2033,16 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(body, dict):
         return _json_response(400, {"error": "invalid_body"})
 
-    # ── Amount validation (shared by both flows) ──
+    # Card (Auto) on a saved Vergent card is the ONLY supported charge path.
+    # Vergent charges the saved card through its own Repay integration and
+    # records it natively as Card. The legacy Repay-direct + APIM branches
+    # further down are now unreachable (kept out of the request flow so a
+    # sandbox/false-success can never occur); they're slated for deletion in
+    # a follow-up cleanup.
+    if not body.get("useCardAuto"):
+        return _json_response(400, {"error": "unsupported_payment_method"})
+
+    # ── Amount validation ──
     try:
         amount = float(body.get("amount") or 0)
     except (TypeError, ValueError):
@@ -2025,6 +2078,14 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
             return _json_response(400, {"error": "invalid_cardauto_params"})
         if not loan_id_int or not card_id:
             return _json_response(400, {"error": "missing_loan_or_card"})
+
+        # Ownership: the Vergent service token can charge ANY customer's card
+        # on ANY loan, so confirm both belong to the signed-in customer before
+        # charging (never trust ids from the request body).
+        if not _customer_owns_card(cid, card_id):
+            return _json_response(403, {"error": "card_not_owned"})
+        if not _customer_owns_loan(cid, loan_id_int):
+            return _json_response(403, {"error": "loan_not_owned"})
 
         ok, txn, detail, raw = _charge_card_auto_v1(
             loan_id=loan_id_int, card_id=card_id, amount=amount,
