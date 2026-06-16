@@ -875,62 +875,66 @@ def _get_repay_prod_creds() -> Optional[Dict[str, Any]]:
 def _repay_card_token(*, cid: str, pan: str, exp_month: int, exp_year: int,
                       name_on_card: str, street: str, zip_code: str
                       ) -> Tuple[Optional[str], str]:
-    """SWAPPABLE STEP — tokenize the card via Repay CardSafe StoreCard.
+    """SWAPPABLE STEP — tokenize the card via Repay RgAPI.
 
-    CardSafe is customer-agnostic, so (unlike Repay's RgAPI
-    customers/{key}/cardtokens, which 404s "customer not found" when the
-    customer was never created in Repay) it works for any portal customer.
-    This is the same call the portal's Instant Funding flow uses in
-    production. Returns (token, debug); PAN/CVV are never logged.
+    The RgAPI cardtokens endpoint authenticates fine for our account but
+    404s when the customer doesn't yet exist in Repay. So we create the
+    customer first (best-effort/idempotent) and then mint the token.
+    (CardSafe is not enabled on this account — returns "Invalid Account
+    Status".) Returns (token, debug); PAN/CVV are never logged.
     """
     creds = _get_repay_prod_creds()
     if not creds:
         return None, "repay_creds_missing"
     user = creds.get("gatewayApiUser") or ""
     secure = creds.get("gatewaySecureToken") or ""
-    if not (user and secure):
+    merchant = creds.get("gatewayMerchantId") or ""
+    if not (user and secure and merchant):
         return None, "repay_creds_incomplete"
     pan_digits = _strip_digits(pan)
     if not (13 <= len(pan_digits) <= 19):
         return None, "invalid_pan_length"
-    exp_str = f"{int(exp_month):02d}{str(int(exp_year))[-2:]}"   # MMYY
-    import urllib.parse
-    import urllib.request
-    import urllib.error
-    form = urllib.parse.urlencode({
-        "UserName":    user,
-        "Password":    secure,
-        "TokenMode":   "Default",
-        "CardNum":     pan_digits,
-        "ExpDate":     exp_str,
-        "CustomerKey": str(cid or ""),
-        "NameOnCard":  name_on_card or "",
-        "Street":      street or "",
-        "Zip":         zip_code or "",
-        "ExtData":     "",
-    }).encode("utf-8")
-    url = f"https://{REPAY_TOKENIZE_HOST}/ws/CardSafe.asmx/StoreCard"
-    req = urllib.request.Request(url, data=form, method="POST", headers={
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/xml,application/xml",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            raw = r.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace") if hasattr(e, "read") else ""
-        log.warning("cardsafe StoreCard cid=%s HTTP %s FULL=%s", cid, e.code, body[:3000])
-        return None, f"cardsafe_http_{e.code}"
-    except Exception as exc:
-        log.warning("cardsafe StoreCard cid=%s error: %s", cid, type(exc).__name__)
-        return None, f"cardsafe_{type(exc).__name__}"
-    token = _extract_cardsafe_token_str(raw)
+    headers = {
+        "Content-Type":        "application/json",
+        "Accept":              "application/json",
+        "rg-api-user":         user,
+        "rg-api-secure-token": secure,
+        "rg-merchant-id":      str(merchant),
+    }
+    base = f"https://{REPAY_TOKENIZE_HOST}/rgapi/v1.0"
+
+    def _mint():
+        return _http(f"{base}/customers/{cid}/cardtokens", "POST", body={
+            "card_number":  pan_digits,
+            "exp_date":     f"{int(exp_month):02d}{str(int(exp_year))[-2:]}",
+            "name_on_card": (name_on_card or "").strip(),
+            "street":       (street or "").strip(),
+            "zip":          (zip_code or "").strip(),
+        }, headers=headers, timeout=30)
+
+    status, parsed, raw = _mint()
+    if status == 404:
+        # Customer not in Repay yet — create it, then retry the tokenize.
+        first, _, last = (name_on_card or "").strip().partition(" ")
+        cstatus, _cp, craw = _http(f"{base}/customers", "POST", body={
+            "customer_key": str(cid),
+            "first_name":   first or "Customer",
+            "last_name":    last or str(cid),
+        }, headers=headers, timeout=30)
+        log.info("repay create-customer cid=%s status=%s body=%s",
+                 cid, cstatus, (craw or "")[:600])
+        status, parsed, raw = _mint()
+
+    if status not in (200, 201) or not isinstance(parsed, dict):
+        log.warning("repay cardtoken cid=%s status=%s FULL=%s",
+                    cid, status, (raw or "")[:1500])
+        return None, f"repay_http_{status}"
+    token = parsed.get("card_token_key") or parsed.get("cardTokenKey") or ""
     if not token:
-        log.warning("cardsafe StoreCard cid=%s NO-TOKEN-FULL=%s",
-                    cid, (raw or "")[:3000].replace("\n", " "))
-        return None, "cardsafe_no_token"
-    log.info("cardsafe StoreCard cid=%s ok last4=%s", cid, pan_digits[-4:])
-    return token, "ok"
+        log.warning("repay cardtoken cid=%s 2xx no token FULL=%s", cid, (raw or "")[:1500])
+        return None, "repay_no_token"
+    log.info("repay cardtoken cid=%s ok last4=%s", cid, pan_digits[-4:])
+    return str(token), "ok"
 
 
 def _extract_cardsafe_token_str(raw: str) -> Optional[str]:
@@ -994,6 +998,10 @@ def _vergent_save_card(*, cid: str, card_ref: str, pan: str,
         "last_four_digits":             _strip_digits(last4),
         "card_id":                      "",
         "card_ref":                     str(card_ref).strip(),
+        "card_token":                   str(card_ref).strip(),
+        "card_guid":                    str(card_ref).strip(),
+        "card_account_guid":            str(card_ref).strip(),
+        "card_provider":                "Repay",
         "is_eligible_for_disbursement": False,
         "expire_month":                 int(exp_month or 0),
         "expire_year":                  yy,
@@ -1001,8 +1009,8 @@ def _vergent_save_card(*, cid: str, card_ref: str, pan: str,
         "billing_zip_code":             (card_zip or "").strip(),
     }
     status, resp, raw = _v1_request("POST", "/V1/PostCustomerCardTokenized", body=v1_body)
-    log.info("vergent save-card cid=%s type_id=%s status=%s body_head=%s",
-             cid, card_type_id, status, (raw or "")[:200])
+    log.info("vergent save-card cid=%s type_id=%s status=%s FULL=%s",
+             cid, card_type_id, status, (raw or "")[:1500])
     if status not in (200, 201):
         return False, status, (raw or "")[:300]
     if isinstance(resp, dict) and resp.get("Errors"):
