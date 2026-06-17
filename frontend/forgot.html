@@ -12,6 +12,17 @@
   .forgot-note { color: #6b7280; font-size: .88rem; margin-top: 10px; }
   .forgot-success { color: #0a6e35; background: rgba(14,135,65,.08); padding: 12px 14px; border-radius: 10px; font-weight: 600; margin: 12px 0; }
   .pw-requirements { color: #6b7280; font-size: .82rem; margin-top: -8px; margin-bottom: 12px; }
+  /* Render the resend control as a text link, not a default browser
+     button. (.link-button lives in portal.css which is S3-only; define
+     it inline so this page is self-sufficient.) */
+  .link-button {
+    background: none; border: none; padding: 0;
+    color: #0E8741; font-weight: 600; font-size: inherit;
+    font-family: inherit; cursor: pointer; text-decoration: underline;
+  }
+  .link-button:hover { color: #0a6e35; }
+  .link-button:disabled { color: #9ca3af; cursor: default; text-decoration: none; }
+  .forgot-help { color: #6b7280; font-size: .85rem; line-height: 1.5; margin: 16px 0 0; text-align: center; }
 </style>
 </head>
 <body>
@@ -55,12 +66,13 @@
         </div>
         <div class="form-field">
           <label>New password</label>
-          <input type="password" name="newPassword" id="newPwInput" minlength="8" required autocomplete="new-password">
+          <input type="password" name="newPassword" id="newPwInput" minlength="10" required autocomplete="new-password">
         </div>
-        <p class="pw-requirements">At least 8 characters with upper, lower, number, and symbol.</p>
+        <p class="pw-requirements">10+ characters, 1 upper, 1 lower, 1 number, 1 symbol.</p>
         <div id="confirmErr" class="form-error" style="display:none;"></div>
         <button type="submit" class="btn btn-primary btn-block btn-lg" id="confirmBtn">Set new password</button>
-        <p class="forgot-note"><button type="button" class="link-button" id="resendBtn">Resend code</button></p>
+        <p class="forgot-help">Didn't get it? The code can take a minute to arrive — check your spam folder too.</p>
+        <p class="forgot-note" style="text-align:center;margin-top:6px;"><button type="button" class="link-button" id="resendBtn">Resend code</button></p>
       </form>
 
       <!-- Step 3: done -->
