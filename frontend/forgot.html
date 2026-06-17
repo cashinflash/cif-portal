@@ -44,8 +44,8 @@
   <span class="gate-blob gate-blob-2"></span>
   <div class="gate-inner">
     <div class="gate-card">
-      <h1 class="page-title">Reset your password</h1>
-      <p class="page-sub" id="gateSub">Enter the email on your account. We'll send you a 6-digit code.</p>
+      <h1 class="page-title">Reset your password.</h1>
+      <p class="page-sub" id="gateSub">Enter the email on your account and we'll send you a 6-digit code.</p>
 
       <!-- Step 1: request code -->
       <form id="requestForm" class="forgot-steps">
@@ -59,7 +59,10 @@
 
       <!-- Step 2: enter code + new password -->
       <form id="confirmForm" class="forgot-steps" style="display:none;">
-        <div id="confirmSuccess" class="forgot-success" style="display:none;">Code sent! Check your email.</div>
+        <div id="confirmSuccess" class="forgot-success" style="display:none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>
+          Code sent. Check your email.
+        </div>
         <div class="form-field">
           <label>6-digit code</label>
           <input type="text" name="code" id="codeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required style="font-size:1.2rem; letter-spacing:.4em; text-align:center;">
@@ -89,6 +92,10 @@
           <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
         </svg>
         Secure area
+      </span>
+      <span class="legal-links">
+        <a href="https://cashinflash.com/terms">Terms &amp; Privacy</a>
+        <a href="https://cashinflash.com/contact">Contact</a>
       </span>
     </div>
   </div>
