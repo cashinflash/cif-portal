@@ -133,6 +133,17 @@
 
 /* Hamburger */
 .menu-toggle { display: none; width: 28px; height: 20px; position: relative; }
+/* Invisible 44x44 centered hit area (WCAG/Apple min tap target) without
+   altering the visible 3-line glyph or its span positioning. */
+.menu-toggle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
 .menu-toggle span {
   display: block;
   position: absolute;
