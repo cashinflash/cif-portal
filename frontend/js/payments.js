@@ -1,18 +1,14 @@
 /* ═══════════════════════════════════════
-   CASH IN FLASH — Payments page controller (saved-card flow).
+   CASH IN FLASH — Payments page controller.
 
-   Customer either:
-     a) Picks a saved card from their list → enters CVV + amount →
-        Pay now. We POST {paymentMethodId, cvv, amount} to
-        /api/my-payment/charge.
-     b) "Add a new card" → enters full PAN + exp + CVV + name +
-        zip + amount → Pay now. We POST {cardNumber, expMonth,
-        expYear, cvv, nameOnCard, zip, amount}. On success the
-        backend auto-tokenizes via Repay CardSafe and stores in
-        DDB so the card appears in the saved list next time.
+   Pay:  pick a saved Vergent card → enter amount + CVV → Pay now.
+         POST /api/my-payment/charge {useCardAuto, cardId, amount, cvv, loanId};
+         Vergent charges the card natively (Card Auto) and posts to the loan.
 
-   No Vergent handoff. PAN-on-PCI scope is SAQ A-EP for the new-card
-   path; the saved-card path is strictly tighter (card_token only).
+   Add a card:  "+ Add a debit card" opens a modal → enter card → Save card.
+         POST /api/my-cards; the backend tokenizes at Repay and saves the card
+         to the customer's Vergent profile. It then appears in the saved-card
+         list and is payable via the flow above. The PAN is never stored by us.
    ═══════════════════════════════════════ */
 (function () {
   'use strict';
@@ -20,7 +16,6 @@
   const TOKEN_KEY = 'cif_id_token';
   const LOGIN_URL = '/start.html';
   const SUCCESS_KEY = 'cif_payment_success';
-  const ADD_NEW_VALUE = '__add_new__';
 
   function qs(sel, root) { return (root || document).querySelector(sel); }
 
@@ -90,7 +85,7 @@
   const state = {
     loan: null,
     methods: [],
-    selectedMethodId: ADD_NEW_VALUE,
+    selectedMethodId: null,
     submitting: false,
     initialBalance: null,
   };
@@ -134,16 +129,11 @@
     });
   }
 
-  // ---------- Saved methods ----------
-  // Cards come from the customer's VERGENT profile (/api/my-cards).
-  // Paying with one charges it natively as Card via Vergent's own
-  // processor (see submitPayment -> useCardAuto). We normalize the
-  // Vergent card shape to the picker's method shape; `vergentCardId`
-  // is the id Vergent needs to charge it (the admin "Card (Auto)" id).
+  // ---------- Saved methods (from the customer's Vergent profile) ----------
   function loadMethods() {
     return api('/api/my-cards').then(function (data) {
       var cards = (data && data.cards) || [];
-      state.methods = cards
+      var mapped = cards
         .filter(function (c) { return c && c.id; })
         .map(function (c) {
           return {
@@ -154,9 +144,19 @@
             expMonth:      c.expMonth || '',
             expYear:       c.expYear || '',
             nameOnCard:    c.nameOnCard || '',
-            fromVergent:   true,
           };
         });
+      // De-dupe by last 4: repeated saves of the same physical card create
+      // several Vergent card rows; show one entry per card (any of those
+      // rows charges the same card via Card Auto, so we keep the first).
+      var seen = {};
+      state.methods = [];
+      mapped.forEach(function (m) {
+        var key = m.last4 || m.methodId;
+        if (seen[key]) return;
+        seen[key] = true;
+        state.methods.push(m);
+      });
       renderMethods();
       return state.methods;
     }).catch(function () {
@@ -167,28 +167,24 @@
   }
 
   function renderMethods() {
-    const wrap = qs('#paySavedMethodsWrap');
     const list = qs('#paySavedMethods');
-    if (!wrap || !list) return;
+    const noCards = qs('#payNoCardsHint');
+    if (!list) return;
     list.innerHTML = '';
 
     if (!state.methods || state.methods.length === 0) {
-      // No saved cards yet — hide the picker, default to new-card form.
-      wrap.hidden = true;
-      state.selectedMethodId = ADD_NEW_VALUE;
+      state.selectedMethodId = null;
+      if (noCards) noCards.hidden = false;
       applyMethodSelection();
       return;
     }
-    wrap.hidden = false;
+    if (noCards) noCards.hidden = true;
 
-    // If the previously-selected method got deleted, fall back to
-    // the newest saved card.
+    // Keep the current selection if it still exists, else select the first.
     const selectedExists = state.methods.some(function (m) {
       return m.methodId === state.selectedMethodId;
     });
-    if (!selectedExists || state.selectedMethodId === ADD_NEW_VALUE) {
-      state.selectedMethodId = state.methods[0].methodId;
-    }
+    if (!selectedExists) state.selectedMethodId = state.methods[0].methodId;
 
     state.methods.forEach(function (m) {
       const label = document.createElement('label');
@@ -202,47 +198,20 @@
             String(m.expMonth).padStart(2, '0') + '/' + String(m.expYear).slice(-2) +
             (m.nameOnCard ? ' · ' + escapeHtml(m.nameOnCard) : '') +
           '</div>' +
-        '</div>' +
-        // Vergent-managed cards are removed in Vergent admin, not via
-        // our DDB delete endpoint — so no Remove button for them.
-        (m.fromVergent ? '' :
-          '<button type="button" class="pay-method-remove" data-method-id="' +
-          escapeHtml(m.methodId) + '">Remove</button>');
+        '</div>';
       list.appendChild(label);
     });
-
-    // "Add a new card" row.
-    const addNew = document.createElement('label');
-    addNew.className = 'pay-method pay-method--addnew' +
-      (state.selectedMethodId === ADD_NEW_VALUE ? ' is-selected' : '');
-    addNew.innerHTML =
-      '<input type="radio" name="payMethod" value="' + ADD_NEW_VALUE + '"' +
-        (state.selectedMethodId === ADD_NEW_VALUE ? ' checked' : '') + '>' +
-      '<div class="pay-method-body">' +
-        '<div class="pay-method-brand">+ Add a new card</div>' +
-        '<div class="pay-method-meta">Save a debit card to your account.</div>' +
-      '</div>';
-    list.appendChild(addNew);
 
     applyMethodSelection();
   }
 
   function applyMethodSelection() {
-    const showNew = state.selectedMethodId === ADD_NEW_VALUE;
-    const newCardFields = qs('#payNewCardFields');
-    const amountSection = qs('#payAmountSection');
-    const cvvSection = qs('#payCvvSection');
     const btn = qs('#payChargeBtn');
-    // "Add a new card" mode SAVES the card (no charge): show the card
-    // fields, hide amount + CVV, relabel the button. Saved-card mode pays.
-    if (newCardFields) newCardFields.hidden = !showNew;
-    if (amountSection) amountSection.hidden = showNew;
-    if (cvvSection) cvvSection.hidden = showNew;
-    if (btn && !state.submitting) btn.textContent = showNew ? 'Save card' : 'Pay now';
-    // Re-mark which .pay-method has the selected state for the
-    // visual highlight (CSS hover/checked alone isn't enough since
-    // the radio inputs are inside the label and we want the
-    // whole row tinted).
+    const hasCard = !!state.selectedMethodId;
+    if (btn && !state.submitting) {
+      btn.disabled = !hasCard;
+      btn.textContent = 'Pay now';
+    }
     document.querySelectorAll('.pay-method').forEach(function (el) {
       const radio = el.querySelector('input[type="radio"]');
       el.classList.toggle('is-selected', !!radio && radio.checked);
@@ -256,23 +225,34 @@
     }
   }
 
-  function onMethodRemoveClick(e) {
-    const btn = e.target.closest('.pay-method-remove');
-    if (!btn) return;
-    e.preventDefault();
-    const methodId = btn.getAttribute('data-method-id');
-    if (!methodId) return;
-    if (!confirm('Remove this saved card?')) return;
-    btn.disabled = true;
-    api('/api/my-payment-methods/' + encodeURIComponent(methodId), {
-      method: 'DELETE',
-    }).then(function () {
-      // Refresh the list. The render handles picking a new selection.
-      return loadMethods();
-    }).catch(function () {
-      btn.disabled = false;
-      showError("We couldn't remove that card. Please try again.");
+  // ---------- Add-card modal ----------
+  function openAddCard() {
+    clearAddCardError();
+    ['#payCardNumber', '#payExp', '#payName', '#payZip'].forEach(function (s) {
+      const el = qs(s); if (el) el.value = '';
     });
+    const modal = qs('#payAddCardModal');
+    if (!modal) return;
+    modal.hidden = false;
+    requestAnimationFrame(function () { modal.classList.add('is-open'); });
+    const first = qs('#payCardNumber');
+    if (first) { try { first.focus(); } catch (e) { /* ignore */ } }
+  }
+  function closeAddCard() {
+    const modal = qs('#payAddCardModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    setTimeout(function () { modal.hidden = true; }, 180);
+  }
+  function showAddCardError(msg) {
+    const el = qs('#payAddCardError');
+    if (!el) return;
+    el.textContent = msg || "We couldn't save that card. Please try again.";
+    el.hidden = false;
+  }
+  function clearAddCardError() {
+    const el = qs('#payAddCardError');
+    if (el) { el.hidden = true; el.textContent = ''; }
   }
 
   // ---------- Input formatting ----------
@@ -286,7 +266,7 @@
     return digits.slice(0, 2) + '/' + digits.slice(2);
   }
 
-  // ---------- Errors ----------
+  // ---------- Pay-form errors ----------
   function showError(msg) {
     const el = qs('#payError');
     if (!el) return;
@@ -299,8 +279,7 @@
     if (el) { el.hidden = true; el.textContent = ''; }
   }
 
-  // ---------- Submit ----------
-  // Saved-card PAY form (amount + CVV + the selected Vergent card).
+  // ---------- Read + validate ----------
   function readPayForm() {
     const amount = parseFloat(String(qs('#payAmount').value || '').replace(/[^\d.]/g, ''));
     const cvv = String(qs('#payCvv').value || '').trim();
@@ -314,16 +293,13 @@
       loanId: state.loan && state.loan.id,
     };
   }
-
   function validatePayForm(f) {
-    if (!f.vergentCardId) return 'Please choose a saved card.';
+    if (!f.vergentCardId) return 'Please choose a saved card, or add one below.';
     if (!f.amount || isNaN(f.amount) || f.amount <= 0) return 'Please enter a valid amount.';
     if (f.amount > 5000) return 'Amount must be $5,000 or less.';
     if (!f.cvv || !/^\d{3,4}$/.test(f.cvv)) return 'Please enter the 3- or 4-digit CVV.';
     return null;
   }
-
-  // ADD-a-card form (new card details — saved to Vergent, not charged).
   function readNewCard() {
     const cardNumber = String(qs('#payCardNumber').value || '').replace(/\s+/g, '');
     const expDigits = String(qs('#payExp').value || '').replace(/\D/g, '');
@@ -337,7 +313,6 @@
       zip: String(qs('#payZip').value || '').trim(),
     };
   }
-
   function validateNewCard(c) {
     if (!c.cardNumber || c.cardNumber.length < 13) return 'Please enter a valid card number.';
     if (!c.expMonth || c.expMonth < 1 || c.expMonth > 12) return 'Please enter a valid expiration month (01-12).';
@@ -345,18 +320,12 @@
     return null;
   }
 
+  // ---------- Pay ----------
   function submitPayment(e) {
     if (e) e.preventDefault();
     if (state.submitting) return;
     clearError();
 
-    // "Add a new card" mode saves the card to Vergent — it never charges.
-    if (state.selectedMethodId === ADD_NEW_VALUE) {
-      saveCard();
-      return;
-    }
-
-    // Saved-card mode: charge via Vergent Card (Auto).
     const form = readPayForm();
     const err = validatePayForm(form);
     if (err) { showError(err); return; }
@@ -384,9 +353,6 @@
       .then(function (res) {
         // STRICT success gate — only show the receipt when the backend
         // explicitly says success AND we have a real transaction id.
-        // Anything else (success:false, missing id, unparseable) routes
-        // to the decline view. Tens of thousands of customers will pay
-        // through this; we never want a false "Payment received".
         if (res && res.success === true && res.transactionId) {
           const paid = Number(res.authAmount || form.amount);
           const receipt = {
@@ -401,7 +367,7 @@
             .catch(function () {})
             .then(function () { showReceipt(receipt); });
         }
-        // Decline — surface the issuer's exact reason on the new page.
+        // Decline — surface the issuer's exact reason on the decline page.
         showDecline({
           reason: (res && res.resultText) || 'Card declined.',
           amount: form.amount,
@@ -409,11 +375,8 @@
           brand:  form.brand || (res && res.brand) || 'Card',
         });
       })
-      .catch(function (e) {
-        // Validation errors stay inline so the customer can fix and
-        // resubmit. Transport / processor errors route to the decline
-        // page so the customer knows their money definitely did NOT move.
-        const errBody = (e && e.body) || {};
+      .catch(function (e2) {
+        const errBody = (e2 && e2.body) || {};
         const code = errBody.error || errBody.code || '';
         const inlineMsgs = {
           invalid_amount:           'Please enter a valid amount.',
@@ -424,10 +387,7 @@
           card_not_owned:           'That card isn’t on your account. Please pick one of your saved cards.',
           loan_not_owned:           'We couldn’t match that to your loan. Please refresh and try again.',
         };
-        if (inlineMsgs[code]) {
-          showError(inlineMsgs[code]);
-          return;
-        }
+        if (inlineMsgs[code]) { showError(inlineMsgs[code]); return; }
         showDecline({
           reason: errBody.resultText
                 || 'We couldn\'t reach the payment processor. Please try again.',
@@ -443,18 +403,19 @@
       });
   }
 
-  // Save a new card to the customer's Vergent profile (no charge). On
-  // success the card appears in the saved-card list and is then payable
-  // via the normal Card (Auto) flow.
-  function saveCard() {
+  // ---------- Save a new card (from the modal) ----------
+  function saveCard(e) {
+    if (e) e.preventDefault();
+    if (state.submitting) return;
+    clearAddCardError();
+
     const card = readNewCard();
     const err = validateNewCard(card);
-    if (err) { showError(err); return; }
+    if (err) { showAddCardError(err); return; }
 
-    const btn = qs('#payChargeBtn');
+    const btn = qs('#payAddCardSave');
     state.submitting = true;
-    hideCardAdded();
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving card…'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
     api('/api/my-cards', {
       method: 'POST',
@@ -472,20 +433,20 @@
         ['#payCardNumber', '#payExp', '#payName', '#payZip'].forEach(function (s) {
           const el = qs(s); if (el) el.value = '';
         });
-        // Reload the list from Vergent and select the new card so the
-        // customer can pay with it immediately.
+        // Reload from Vergent, select the new card, close the modal.
         return loadMethods().then(function (methods) {
           var match = (methods || []).find(function (m) {
             return newLast4 && m.last4 === newLast4;
           });
           state.selectedMethodId = match ? match.methodId
-            : (methods && methods.length ? methods[0].methodId : ADD_NEW_VALUE);
+            : (methods && methods.length ? methods[0].methodId : null);
           renderMethods();
+          closeAddCard();
           showCardAdded(newLast4);
         });
       })
-      .catch(function (e) {
-        const code = (e && e.body && (e.body.error || e.body.code)) || '';
+      .catch(function (e2) {
+        const code = (e2 && e2.body && (e2.body.error || e2.body.code)) || '';
         const msgs = {
           invalid_card_number: 'Card number is invalid.',
           card_failed_luhn:    'Card number is invalid — please double-check it.',
@@ -494,11 +455,11 @@
           tokenize_failed:     'We couldn’t verify that card. Please double-check the details and try again.',
           vergent_save_failed: 'We couldn’t save that card right now. Please try again in a moment.',
         };
-        showError(msgs[code] || 'We couldn’t save that card. Please try again.');
+        showAddCardError(msgs[code] || 'We couldn’t save that card. Please try again.');
       })
       .then(function () {
         state.submitting = false;
-        if (btn) { btn.disabled = false; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Save card'; }
         applyMethodSelection();
       });
   }
@@ -507,14 +468,10 @@
     const el = qs('#payCardAddedNote');
     if (!el) return;
     el.textContent = last4
-      ? ('Card ending ' + last4 + ' added to your account. Enter an amount and pay below.')
+      ? ('Card ending ' + last4 + ' added. Enter an amount and pay below.')
       : 'Card added to your account. Enter an amount and pay below.';
     el.hidden = false;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-  function hideCardAdded() {
-    const el = qs('#payCardAddedNote');
-    if (el) { el.hidden = true; el.textContent = ''; }
   }
 
   function showReceipt(receipt) {
@@ -525,23 +482,15 @@
     const when   = (receipt && receipt.when) || Date.now();
 
     qs('#payFormCard').hidden = true;
-    // Amount split across two spans so the "$" sits smaller than the
-    // number — matches the dashboard's hero-balance typography.
     setText(qs('[data-receipt-amount]'),
       amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
 
-    // "Visa ending 5556" — graceful when fields are missing.
     let cardLine = '—';
-    if (brand && last4) {
-      cardLine = brand + ' ending ' + last4;
-    } else if (last4) {
-      cardLine = 'Card ending ' + last4;
-    } else if (brand) {
-      cardLine = brand;
-    }
+    if (brand && last4) cardLine = brand + ' ending ' + last4;
+    else if (last4)     cardLine = 'Card ending ' + last4;
+    else if (brand)     cardLine = brand;
     setText(qs('[data-receipt-card]'), cardLine);
 
-    // Human-readable timestamp in the customer's locale.
     let dateLine = '—';
     try {
       const d = new Date(when);
@@ -559,14 +508,11 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  // Decline view — mirrors showReceipt but in the warning palette and
-  // surfaces the issuer's exact decline reason. Never shows a fake
-  // success message; reassures the customer their loan was NOT charged.
+  // Decline view — surfaces the issuer's exact decline reason; never shows
+  // a fake success, and reassures the customer their loan was NOT charged.
   function showDecline(info) {
     info = info || {};
     var reason = String(info.reason || 'Card declined.').trim();
-    // Vergent sometimes returns multiple lines joined with "; " —
-    // present each on its own row for readability.
     var html = reason.split(/\s*;\s+/)
       .map(function (line) { return escapeHtml(line); })
       .join('<br>');
@@ -591,22 +537,16 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  // "Make another payment" — reset the form state and return to the
-  // pay card. Saved-card list reloads in case any state has changed.
+  // "Make another payment" / "Try a different card" — reset to the pay card.
   function resetForPayAgain() {
     var decline = qs('#payDecline'); if (decline) decline.hidden = true;
     qs('#payReceipt').hidden = true;
     const amt = qs('#payAmount'); if (amt) amt.value = '';
     const cvv = qs('#payCvv');    if (cvv) cvv.value = '';
-    const num = qs('#payCardNumber'); if (num) num.value = '';
-    const exp = qs('#payExp'); if (exp) exp.value = '';
-    const nm  = qs('#payName'); if (nm)  nm.value  = '';
-    const zip = qs('#payZip'); if (zip) zip.value = '';
     const err = qs('#payError'); if (err) { err.hidden = true; err.textContent = ''; }
+    const note = qs('#payCardAddedNote'); if (note) { note.hidden = true; note.textContent = ''; }
     qs('#payFormCard').hidden = false;
-    if (typeof loadSavedMethods === 'function') {
-      try { loadSavedMethods(); } catch (e) { /* non-fatal */ }
-    }
+    loadMethods();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -616,34 +556,38 @@
     if (form) form.addEventListener('submit', submitPayment);
 
     const methodsList = qs('#paySavedMethods');
-    if (methodsList) {
-      methodsList.addEventListener('change', onMethodChange);
-      methodsList.addEventListener('click', onMethodRemoveClick);
-    }
+    if (methodsList) methodsList.addEventListener('change', onMethodChange);
+
+    // Add-card modal wiring.
+    const addBtn = qs('#payAddCardBtn');
+    if (addBtn) addBtn.addEventListener('click', openAddCard);
+    const addForm = qs('#payAddCardForm');
+    if (addForm) addForm.addEventListener('submit', saveCard);
+    const addCancel = qs('#payAddCardCancel');
+    if (addCancel) addCancel.addEventListener('click', closeAddCard);
+    const addBackdrop = qs('#payAddCardBackdrop');
+    if (addBackdrop) addBackdrop.addEventListener('click', closeAddCard);
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') {
+        const modal = qs('#payAddCardModal');
+        if (modal && !modal.hidden) closeAddCard();
+      }
+    });
 
     const payAgain = qs('#payAgainBtn');
     if (payAgain) payAgain.addEventListener('click', resetForPayAgain);
-
     const tryAgain = qs('#payTryAgainBtn');
     if (tryAgain) tryAgain.addEventListener('click', resetForPayAgain);
 
-    // Live formatting.
+    // Live formatting (the card inputs live in the modal).
     const cardInput = qs('#payCardNumber');
-    if (cardInput) cardInput.addEventListener('input', function () {
-      this.value = formatCardNumber(this.value);
-    });
+    if (cardInput) cardInput.addEventListener('input', function () { this.value = formatCardNumber(this.value); });
     const expInput = qs('#payExp');
-    if (expInput) expInput.addEventListener('input', function () {
-      this.value = formatExp(this.value);
-    });
-    const cvvInput = qs('#payCvv');
-    if (cvvInput) cvvInput.addEventListener('input', function () {
-      this.value = (this.value || '').replace(/\D/g, '').slice(0, 4);
-    });
+    if (expInput) expInput.addEventListener('input', function () { this.value = formatExp(this.value); });
     const zipInput = qs('#payZip');
-    if (zipInput) zipInput.addEventListener('input', function () {
-      this.value = (this.value || '').replace(/\D/g, '').slice(0, 5);
-    });
+    if (zipInput) zipInput.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 5); });
+    const cvvInput = qs('#payCvv');
+    if (cvvInput) cvvInput.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 4); });
     const amtInput = qs('#payAmount');
     if (amtInput) amtInput.addEventListener('blur', function () {
       const v = parseFloat(String(this.value || '').replace(/[^\d.]/g, ''));
@@ -653,7 +597,6 @@
     // Load loan + methods in parallel.
     const loanP = loadLoan();
     const methodsP = loadMethods();
-
     Promise.all([loanP, methodsP]).then(function (results) {
       const loan = results[0];
       const formCard = qs('#payFormCard');

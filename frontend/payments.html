@@ -88,7 +88,7 @@
     <div class="container dash-hero-inner">
       <p class="dash-eyebrow">Payments</p>
       <h1 class="dash-title">Make a payment on your loan.</h1>
-      <p class="dash-sub">Pay using your saved card or bank account on Cash in Flash's secure payment page.</p>
+      <p class="dash-sub">Pay your loan securely with a debit card — saved right to your account.</p>
     </div>
   </section>
 
@@ -119,16 +119,13 @@
       </div>
     </section>
 
-    <!-- Card-entry pay form (Path 1: Repay RgAPI direct-charge).
-         Customer picks a saved card OR enters a new one, picks an
-         amount, clicks Pay. We POST to /api/my-payment/charge
-         which calls Repay's REST transactions/card/sale endpoint
-         directly. Saved cards are stored in our DDB (tokenized by
-         Repay CardSafe on first successful charge). -->
+    <!-- Pay form: pick a saved Vergent card -> amount -> CVV -> Pay now.
+         POSTs /api/my-payment/charge (useCardAuto) so Vergent charges the
+         card natively as Card. "Add a debit card" opens the modal below. -->
     <section class="dash-card pay-form-card" id="payFormCard" hidden>
       <h2 style="margin:0 0 8px 0;font-size:1.25rem;">Make a payment</h2>
       <p style="margin:0 0 16px 0;color:#475569;line-height:1.5;font-size:0.95rem">
-        Pay using a saved card or add a new one. Your payment is processed by our secure payment partner.
+        Choose a saved debit card and enter an amount, or add a new card. Your payment is processed securely.
       </p>
 
       <form id="payChargeForm" autocomplete="off" novalidate>
@@ -143,44 +140,21 @@
           </div>
         </div>
 
-        <!-- Saved methods (radio list — populated by JS on load).
-             Hidden when the customer has no saved cards yet. -->
-        <div id="paySavedMethodsWrap" hidden style="margin-top:14px">
+        <!-- Payment method: saved cards + "Add a debit card" (opens modal) -->
+        <div id="paySavedMethodsWrap" style="margin-top:14px">
           <label class="pay-field-label">Payment method</label>
           <div id="paySavedMethods"></div>
-        </div>
-
-        <!-- New-card fields (Card number / Exp / Name / ZIP).
-             Hidden when the customer picks a saved card; shown when
-             they pick "Add a new card" OR have no saved cards yet. -->
-        <div id="payNewCardFields">
-          <p class="pay-field-hint" style="margin:0 0 10px;color:#475569;font-size:0.85rem;line-height:1.4">
-            We'll save this debit card to your account — you won't be charged now.
-            After it's saved, choose it and enter an amount to make a payment.
+          <p id="payNoCardsHint" hidden
+             style="margin:8px 0 0;color:#475569;font-size:.9rem;line-height:1.5">
+            You don't have a saved card yet — add a debit card to make a payment.
           </p>
-          <label class="pay-field-label" for="payCardNumber">Card number</label>
-          <input type="text" inputmode="numeric" id="payCardNumber" name="cardNumber"
-                 class="pay-input" placeholder="0000 0000 0000 0000"
-                 autocomplete="cc-number" maxlength="23">
-
-          <div class="pay-field-row">
-            <div class="pay-field-col">
-              <label class="pay-field-label" for="payExp">Expiration (MM/YY)</label>
-              <input type="text" inputmode="numeric" id="payExp" name="exp"
-                     class="pay-input" placeholder="MM/YY" maxlength="5"
-                     autocomplete="cc-exp">
-            </div>
-          </div>
-
-          <label class="pay-field-label" for="payName">Name on card</label>
-          <input type="text" id="payName" name="nameOnCard"
-                 class="pay-input" placeholder="Jane Smith"
-                 autocomplete="cc-name" maxlength="64">
-
-          <label class="pay-field-label" for="payZip">Billing ZIP</label>
-          <input type="text" inputmode="numeric" id="payZip" name="zip"
-                 class="pay-input pay-input--narrow" placeholder="12345"
-                 autocomplete="postal-code" maxlength="5">
+          <button type="button" id="payAddCardBtn"
+                  style="margin-top:12px;width:100%;display:inline-flex;align-items:center;
+                         justify-content:center;gap:8px;padding:13px 18px;border:1.5px dashed #6cb1e2;
+                         border-radius:12px;background:#f3f9fd;color:#0E8741;font-weight:700;
+                         font-size:.95rem;cursor:pointer;font-family:inherit">
+            + Add a debit card
+          </button>
         </div>
 
         <!-- CVV (shown when paying a saved card; required to charge, never stored) -->
@@ -208,6 +182,56 @@
         </div>
       </form>
     </section>
+
+    <!-- Add-card modal (saves a debit card to Vergent; never charges).
+         Reuses the Profile page's modal classes -> mobile bottom-sheet. -->
+    <div class="profile-modal" id="payAddCardModal" hidden>
+      <button type="button" class="profile-modal-backdrop" id="payAddCardBackdrop" aria-label="Close"></button>
+      <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="payAddCardTitle">
+        <div class="profile-modal-head">
+          <h3 class="profile-modal-title" id="payAddCardTitle">Add a debit card</h3>
+        </div>
+        <div class="profile-modal-body">
+          <p class="profile-modal-intro">
+            We'll securely save this debit card to your account. You won't be charged now —
+            you can pay with it from the payment screen.
+          </p>
+          <form id="payAddCardForm" class="profile-modal-form" autocomplete="off" novalidate>
+            <div class="profile-modal-field">
+              <label class="profile-modal-field-label" for="payCardNumber">Card number</label>
+              <input type="text" inputmode="numeric" id="payCardNumber" name="cardNumber"
+                     placeholder="0000 0000 0000 0000" autocomplete="cc-number" maxlength="23">
+            </div>
+            <div class="profile-modal-row">
+              <div class="profile-modal-field profile-modal-field--narrow">
+                <label class="profile-modal-field-label" for="payExp">Expiration</label>
+                <input type="text" inputmode="numeric" id="payExp" name="exp"
+                       placeholder="MM/YY" maxlength="5" autocomplete="cc-exp">
+              </div>
+              <div class="profile-modal-field profile-modal-field--narrow">
+                <label class="profile-modal-field-label" for="payZip">Billing ZIP</label>
+                <input type="text" inputmode="numeric" id="payZip" name="zip"
+                       placeholder="12345" maxlength="5" autocomplete="postal-code">
+              </div>
+            </div>
+            <div class="profile-modal-field">
+              <label class="profile-modal-field-label" for="payName">Name on card</label>
+              <input type="text" id="payName" name="nameOnCard"
+                     placeholder="Jane Smith" autocomplete="cc-name" maxlength="64">
+            </div>
+            <p class="profile-modal-error" id="payAddCardError" hidden></p>
+            <div class="pay-trust" style="margin-top:4px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Debit cards only. Secured with bank-grade encryption — we never store your card number.
+            </div>
+            <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">
+              <button type="button" class="btn-login" id="payAddCardCancel">Cancel</button>
+              <button type="submit" class="btn-apply" id="payAddCardSave">Save card</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
 
     <!-- Decline view (shown when Vergent reports a card decline) -->
     <section class="dash-card pay-decline" id="payDecline" hidden
