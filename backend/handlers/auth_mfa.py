@@ -631,13 +631,14 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
         phone_digits=phone_digits, vergent_customer_id=vergent_cid,
     )
 
-    channels = [{"key": "email", "label": "Email", "target": _mask_email(email)}]
-    # SMS delivery goes through Telnyx Verify using the Vergent-on-file phone.
-    # We surface the SMS option whenever we have a phone — if Telnyx creds
-    # aren't yet configured, /send-code returns a clean delivery_failed_sms
-    # rather than hiding the option entirely.
+    # SMS (Telnyx) arrives instantly, so list it FIRST as the default/
+    # fastest option; email (Resend) can lag on delivery. SMS is surfaced
+    # whenever we have a phone — if Telnyx creds aren't configured,
+    # /send-code returns a clean delivery_failed_sms rather than hiding it.
+    channels = []
     if phone_digits:
         channels.append({"key": "sms", "label": "Text message", "target": _mask_phone(phone_digits)})
+    channels.append({"key": "email", "label": "Email", "target": _mask_email(email)})
 
     return _resp(200, {
         "mfaSession": session_id,
