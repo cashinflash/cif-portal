@@ -374,8 +374,8 @@ const PORTAL = (() => {
     st.id = 'cif-pw-eye-css';
     st.textContent =
       '.cif-pw-wrap{position:relative;display:block}' +
-      '.cif-pw-wrap>input{width:100%;box-sizing:border-box;padding-right:46px}' +
-      '.cif-pw-toggle{position:absolute;top:0;bottom:0;right:6px;margin:auto 0;height:38px;width:38px;' +
+      '.cif-pw-wrap>input{width:100%;box-sizing:border-box;padding-right:48px}' +
+      '.cif-pw-toggle{position:absolute;top:0;bottom:0;right:4px;margin:auto 0;height:44px;width:44px;' +
       'display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:none;' +
       'color:#94a3b8;cursor:pointer;border-radius:8px;transition:color .15s ease}' +
       '.cif-pw-toggle:hover{color:#475569}.cif-pw-toggle.is-on{color:#0E8741}';

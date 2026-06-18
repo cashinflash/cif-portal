@@ -190,7 +190,7 @@
     b.id = 'cif-plaid-success-banner';
     b.setAttribute('role', 'status');
     b.style.cssText = [
-      'position:fixed', 'top:16px', 'left:50%',
+      'position:fixed', 'top:max(16px, env(safe-area-inset-top))', 'left:50%',
       'transform:translateX(-50%)',
       'background:#e8f5ee', 'color:#1a6b3c',
       'border:1px solid #1a6b3c33',

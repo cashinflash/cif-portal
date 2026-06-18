@@ -2322,7 +2322,7 @@ button.dash-doc-download:disabled {
   padding: 11px 14px;
   border: 1px solid #d1d5db;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: 16px; /* 16px min: <16px triggers iOS Safari auto-zoom on focus */
   font-family: inherit;
   outline: none;
   background: #fff;
@@ -3803,4 +3803,60 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
     width: 100%;
     margin-top: 6px;
   }
+}
+
+/* ============================================================
+   Mobile / native-app readiness (audit-driven, kept LAST so the
+   overrides win). env(safe-area-inset-*) is 0 in a normal browser,
+   so these are no-ops on web and only engage inside a notched
+   native (iOS/Android) wrap.
+   ============================================================ */
+
+/* Keep fixed/edge chrome clear of the notch + home indicator. */
+.site-header { padding-top: env(safe-area-inset-top); }
+.mobile-menu-header { padding-top: env(safe-area-inset-top); }
+.dash-sidebar {
+  padding-top: calc(24px + env(safe-area-inset-top));
+  padding-bottom: calc(18px + env(safe-area-inset-bottom));
+}
+
+/* Modal height tracks the VISIBLE viewport (dvh) so the on-screen
+   keyboard can't trap the submit button below the fold. */
+.profile-modal-card { max-height: calc(100dvh - 64px); }
+
+/* Full bottom-sheet up to tablet width (was <=600px only). */
+@media (max-width: 768px) {
+  .profile-modal { align-items: flex-end; }
+  .profile-modal-card {
+    width: 100%;
+    border-radius: 16px 16px 0 0;
+    align-self: flex-end;
+    max-height: 92dvh;
+  }
+}
+
+/* 44x44 minimum tap targets on touch devices; mouse desktops stay compact. */
+@media (pointer: coarse) {
+  .pw-toggle,
+  .pay-modal-close,
+  .pay-notice-close,
+  .dash-banner-close,
+  .dash-doc-modal-close,
+  .dash-esign-modal-close,
+  .pay-method-remove {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* Recent-activity rows never force horizontal scroll on a narrow phone. */
+.dash-recent-activity-title,
+.dash-recent-activity-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
