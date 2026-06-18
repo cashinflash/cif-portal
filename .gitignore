@@ -10,3 +10,7 @@ node_modules/
 dist/
 build/
 *.zip
+
+# Ad-hoc debug captures — these have held real customer PII + log dumps.
+# Never commit them. Keep production diagnostics in CloudWatch, not the repo.
+debug/

@@ -35,6 +35,7 @@ Environment:
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import logging
 import os
@@ -656,7 +657,9 @@ def _list_auth_ok(event: Dict[str, Any]) -> bool:
     """X-View-Secret check shared by list + view."""
     headers = event.get("headers") or {}
     got = headers.get("x-view-secret") or headers.get("X-View-Secret") or ""
-    return bool(IF_VIEW_SHARED_SECRET) and got == IF_VIEW_SHARED_SECRET
+    # Constant-time compare — a plain `==` leaks the secret one byte at a
+    # time via response-timing. compare_digest is O(len) regardless of match.
+    return bool(IF_VIEW_SHARED_SECRET) and hmac.compare_digest(got, IF_VIEW_SHARED_SECRET)
 
 
 def list_submissions(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -796,15 +799,20 @@ def view(event: Dict[str, Any]) -> Dict[str, Any]:
              submission_id, payload.get("card_type"),
              (payload.get("card_number") or "")[-4:])
 
+    # Card number is masked to last-4 and CVV is omitted entirely. The
+    # staff dashboard never needs raw cardholder data on the wire —
+    # push_to_vergent reads the full PAN+CVV from the encrypted vault
+    # server-side. This way a leaked X-View-Secret can't yield a full
+    # PAN/CVV dump; the blast radius is last-4 + expiry + name.
+    _pan = payload.get("card_number") or ""
     return _json_response(200, {
         "submissionId": submission_id,
         "borrowerName":   item.get("borrower_name",   {}).get("S"),
         "cardholderName": item.get("cardholder_name", {}).get("S"),
-        "cardNumber":     payload.get("card_number"),
+        "cardLast4":      _pan[-4:] if _pan else "",
         "cardType":       payload.get("card_type"),
         "expMonth":       payload.get("exp_month"),
         "expYear":        payload.get("exp_year"),
-        "cvv":            payload.get("cvv"),
         "billingZip":     payload.get("billing_zip"),
         "submittedAt":    item.get("submitted_at",    {}).get("S"),
         "applicationFbId": item.get("application_fb_id", {}).get("S") or None,
