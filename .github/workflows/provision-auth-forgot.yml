@@ -1,0 +1,151 @@
+name: Provision Auth — Password Reset
+
+# One-shot / re-runnable provisioning for the self-service password-reset
+# flow that replaces Cognito's slow default ForgotPassword email with our
+# own Resend-delivered code (handlers/auth_mfa.py:_forgot_start /
+# _forgot_confirm).
+#
+# It does two things AWS-side that the code alone can't:
+#   1. Grants cognito-idp:AdminSetUserPassword to the auth-mfa Lambda role
+#      (so _forgot_confirm can set the new password after the code checks).
+#   2. Creates two UNAUTHENTICATED HttpApi routes (the user is locked out,
+#      so no JWT) pointing at the existing auth-mfa Lambda integration:
+#        POST /api/auth/forgot/start
+#        POST /api/auth/forgot/confirm
+#      (+ matching OPTIONS for CORS preflight.)
+#
+# Run from the Actions tab (workflow_dispatch) after the auth_mfa.py
+# changes have deployed. Safe to re-run — every step is idempotent.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/workflows/provision-auth-forgot.yml'
+
+env:
+  AWS_REGION: us-east-1
+  HTTP_API_ID: anh066l1wf
+  FN: cif-portal-auth-mfa-dev
+  COGNITO_USER_POOL_ID: us-east-1_U508xOs95
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Grant AdminSetUserPassword to auth-mfa role
+        run: |
+          set -e
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          USER_POOL_ARN="arn:aws:cognito-idp:$AWS_REGION:$ACCT:userpool/$COGNITO_USER_POOL_ID"
+
+          ROLE_ARN=$(aws lambda get-function-configuration \
+            --function-name "$FN" --query 'Role' --output text)
+          ROLE_NAME="${ROLE_ARN##*/}"
+
+          POLICY_DOC=$(cat <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "ResetPassword",
+                "Effect": "Allow",
+                "Action": [
+                  "cognito-idp:AdminSetUserPassword",
+                  "cognito-idp:AdminGetUser"
+                ],
+                "Resource": "$USER_POOL_ARN"
+              }
+            ]
+          }
+          EOF
+          )
+          aws iam put-role-policy \
+            --role-name "$ROLE_NAME" \
+            --policy-name auth-mfa-password-reset \
+            --policy-document "$POLICY_DOC" \
+            --no-cli-pager
+          echo "Inline policy auth-mfa-password-reset attached to $ROLE_NAME."
+
+      - name: Wire HttpApi routes (unauthenticated — these ARE auth endpoints)
+        run: |
+          set -e
+          FN_ARN=$(aws lambda get-function --function-name "$FN" \
+            --query 'Configuration.FunctionArn' --output text)
+
+          # Reuse the existing AWS_PROXY integration for the auth-mfa Lambda.
+          INTEG_ID=$(aws apigatewayv2 get-integrations --api-id "$HTTP_API_ID" \
+            --query "Items[?IntegrationUri=='$FN_ARN'].IntegrationId | [0]" \
+            --output text 2>/dev/null || echo "")
+          if [ -z "$INTEG_ID" ] || [ "$INTEG_ID" = "None" ]; then
+            INTEG_ID=$(aws apigatewayv2 create-integration \
+              --api-id "$HTTP_API_ID" \
+              --integration-type AWS_PROXY \
+              --integration-uri "$FN_ARN" \
+              --payload-format-version 2.0 \
+              --query IntegrationId --output text)
+            echo "Created integration $INTEG_ID"
+          else
+            echo "Reusing integration $INTEG_ID"
+          fi
+
+          ROUTES=(
+            "POST /api/auth/forgot/start"
+            "POST /api/auth/forgot/confirm"
+            "OPTIONS /api/auth/forgot/start"
+            "OPTIONS /api/auth/forgot/confirm"
+          )
+          for RK in "${ROUTES[@]}"; do
+            EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
+              --query "Items[?RouteKey=='$RK'].RouteId | [0]" \
+              --output text 2>/dev/null || echo "")
+            if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
+              echo "Route '$RK' already exists ($EXISTING)"
+              continue
+            fi
+            aws apigatewayv2 create-route \
+              --api-id "$HTTP_API_ID" \
+              --route-key "$RK" \
+              --target "integrations/$INTEG_ID" \
+              --authorization-type NONE \
+              --no-cli-pager >/dev/null
+            echo "Created route '$RK'"
+          done
+
+          # Ensure HttpApi can invoke the Lambda (idempotent).
+          STMT_ID=apigateway-invoke-auth-forgot
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          EXISTING_SIDS=$(aws lambda get-policy --function-name "$FN" 2>/dev/null \
+            | jq -r '.Policy | fromjson | .Statement[].Sid' 2>/dev/null || true)
+          if echo "$EXISTING_SIDS" | grep -qxF "$STMT_ID"; then
+            echo "Invoke permission $STMT_ID already present"
+          else
+            aws lambda add-permission \
+              --function-name "$FN" \
+              --statement-id "$STMT_ID" \
+              --action lambda:InvokeFunction \
+              --principal apigateway.amazonaws.com \
+              --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCT:$HTTP_API_ID/*/*/api/auth/forgot/*" \
+              --no-cli-pager
+            echo "Added invoke permission $STMT_ID"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Auth password-reset provisioning"
+            echo ""
+            echo "- Lambda: \`$FN\`"
+            echo "- IAM: \`cognito-idp:AdminSetUserPassword\` (+ AdminGetUser)"
+            echo "- Routes (auth NONE): \`POST /api/auth/forgot/start\`, \`POST /api/auth/forgot/confirm\`"
+          } >> "$GITHUB_STEP_SUMMARY"

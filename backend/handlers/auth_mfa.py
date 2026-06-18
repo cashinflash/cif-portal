@@ -730,6 +730,184 @@ def _verify_code(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# Password reset (forgot password)
+#
+# Replaces the slow Cognito-default ForgotPassword email with our own
+# 6-digit code delivered through Resend — same trust model as the login
+# MFA code (CSPRNG code, sha256-hashed at rest, constant-time compare,
+# 3-try cap, 5-min TTL). On confirm we set the new password directly via
+# AdminSetUserPassword(Permanent=True).
+#
+#   POST /api/auth/forgot/start    {email}
+#       -> {ok, resetSession, masked, expiresInSec}   (always, even if the
+#          email isn't a real account — no enumeration oracle)
+#   POST /api/auth/forgot/confirm  {resetSession, code, newPassword}
+#       -> {ok}  on success
+# ─────────────────────────────────────────
+def _store_reset_session(session_id: str, *, email: str, username: str,
+                         code_hash: str, real: bool) -> None:
+    now = int(time.time())
+    item = {
+        "sessionId": {"S": session_id},
+        "createdAt": {"N": str(now)},
+        "expiresAt": {"N": str(now + CODE_TTL)},
+        "email": {"S": email},
+        "mode": {"S": "reset"},
+        "attempts": {"N": "0"},
+        "codeHash": {"S": code_hash},
+        "resetReal": {"BOOL": bool(real)},
+    }
+    if username:
+        item["resetUsername"] = {"S": username}
+    ddb.put_item(TableName=TABLE, Item=item)
+
+
+def _load_reset_session(session_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        r = ddb.get_item(TableName=TABLE, Key={"sessionId": {"S": session_id}})
+    except ClientError:
+        return None
+    item = r.get("Item")
+    if not item:
+        return None
+    if int(item["expiresAt"]["N"]) <= int(time.time()):
+        ddb.delete_item(TableName=TABLE, Key={"sessionId": {"S": session_id}})
+        return None
+    if item.get("mode", {}).get("S") != "reset":
+        return None
+    return {
+        "sessionId": session_id,
+        "email": item.get("email", {}).get("S", ""),
+        "username": item.get("resetUsername", {}).get("S", ""),
+        "codeHash": item.get("codeHash", {}).get("S", ""),
+        "attempts": int(item.get("attempts", {}).get("N", "0")),
+        "real": item.get("resetReal", {}).get("BOOL", False),
+    }
+
+
+def _send_reset_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    body_text = (
+        f"Cash in Flash — Password reset code\n\n"
+        f"Your password reset code is: {code}\n\n"
+        f"Enter it on the reset page to choose a new password. This code "
+        f"expires in 5 minutes.\n\n"
+        f"Didn't request this? You can ignore this email — your password "
+        f"won't change unless someone enters the code above.\n\n"
+        f"Please do not share this code with anyone. A Cash in Flash "
+        f"Representative will NEVER ask you for it.\n\n"
+        f"Questions? Call our Customer Service Team at (747) 270-7121.\n\n"
+        f"---\n"
+        f"© 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. "
+        f"License #214840.\n"
+        f"Cash in Flash, 13937B Van Nuys Blvd, Arleta, CA 91331"
+    )
+    body_html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:24px 12px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
+        <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+        </td></tr>
+        <tr><td style="padding:36px 40px 20px;">
+          <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your password reset code is: {code}</h1>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Enter it on the reset page to choose a new password. This code expires in 5 minutes.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Didn't request this? You can safely ignore this email — your password won't change unless someone enters the code above.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Please do not provide this code to anyone. A Cash in Flash Representative will <strong>never</strong> ask you for it.</p>
+          <p style="margin:0 0 4px;font-size:14px;line-height:1.55;color:#1a1a2e;">Questions? Call our Customer Service Team at <a href="tel:+17472707121" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(747) 270-7121</a>.</p>
+        </td></tr>
+        <tr><td style="padding:22px 40px 34px;color:#6b7280;font-size:11px;line-height:1.6;">
+          <p style="margin:0 0 10px;">&copy; 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.</p>
+          <p style="margin:0 0 4px;">This email was sent by Cash in Flash<br>13937B Van Nuys Blvd, Arleta, CA 91331</p>
+          <p style="margin:10px 0 0;"><a href="https://cashinflash.com/privacy/" style="color:#0E8741;text-decoration:underline;">Privacy Policy</a></p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+    return resend_email.send(
+        to=to,
+        subject="Your Cash in Flash password reset code",
+        text=body_text,
+        html=body_html,
+    )
+
+
+def _forgot_start(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = _parse(event)
+    email = (body.get("email") or "").strip().lower()
+    session_id = _new_session_id()
+    code = _new_code()
+    code_hash = _hash_code(code)
+
+    # Resolve the user WITHOUT leaking existence to the caller. We always
+    # mint a session and return the same shape; only a real account gets
+    # an email. A bogus/typo'd email advances to the code screen too but
+    # no code ever arrives (and confirm can never succeed for it).
+    user = _admin_get_user(email) if (email and "@" in email) else {}
+    exists = bool(user)
+    username = user.get("Username") or email if exists else ""
+    _store_reset_session(session_id, email=email, username=username,
+                         code_hash=code_hash, real=exists)
+
+    if exists:
+        ok, _c, _m = _send_reset_email(email, code)
+        if not ok:
+            log.warning("reset email delivery failed for %s", _mask_email(email))
+    else:
+        log.info("reset requested for unknown email %s (no-op)", _mask_email(email))
+
+    return _resp(200, {
+        "ok": True,
+        "resetSession": session_id,
+        "masked": _mask_email(email),
+        "expiresInSec": CODE_TTL,
+    })
+
+
+def _forgot_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = _parse(event)
+    session_id = body.get("resetSession") or ""
+    code = (body.get("code") or "").strip()
+    new_password = body.get("newPassword") or ""
+    if not session_id or not code or not new_password:
+        return _resp(400, {"error": "missing_fields"})
+
+    s = _load_reset_session(session_id)
+    if not s:
+        return _resp(401, {"error": "session_expired"})
+
+    code_ok = hmac.compare_digest(_hash_code(code), s.get("codeHash") or "")
+    # A no-op session (bogus email) is treated exactly like a wrong code so
+    # /confirm can't be used to probe which emails are real accounts.
+    if not code_ok or not s.get("real"):
+        attempts = s["attempts"] + 1
+        if attempts >= MAX_ATTEMPTS:
+            _delete_session(session_id)
+            return _resp(401, {"error": "too_many_attempts"})
+        _bump_attempts(session_id, attempts)
+        return _resp(401, {"error": "invalid_code", "attemptsRemaining": MAX_ATTEMPTS - attempts})
+
+    username = s.get("username") or s.get("email")
+    try:
+        cognito.admin_set_user_password(
+            UserPoolId=USER_POOL_ID,
+            Username=username,
+            Password=new_password,
+            Permanent=True,
+        )
+    except ClientError as e:
+        err = e.response.get("Error", {}).get("Code", "")
+        if err == "InvalidPasswordException":
+            return _resp(400, {"error": "invalid_password"})
+        log.warning("admin_set_user_password failed: %s", err)
+        return _resp(500, {"error": "reset_failed"})
+
+    _delete_session(session_id)
+    return _resp(200, {"ok": True})
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -746,6 +924,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _send_code(event)
         if path.endswith("/auth/verify-code"):
             return _verify_code(event)
+        if path.endswith("/auth/forgot/start"):
+            return _forgot_start(event)
+        if path.endswith("/auth/forgot/confirm"):
+            return _forgot_confirm(event)
         return _resp(404, {"error": "not_found"})
     except Exception as exc:
         log.exception("auth_mfa unexpected error: %s", exc)

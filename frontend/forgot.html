@@ -119,40 +119,35 @@
   var success     = document.getElementById('confirmSuccess');
   var gateSub     = document.getElementById('gateSub');
 
-  // Thin wrappers around Cognito's unsigned API.
-  function cognito(target, body) {
-    return fetch('https://cognito-idp.us-east-1.amazonaws.com/', {
+  // Calls our own reset endpoints. The code is delivered through Resend
+  // (fast + branded), NOT Cognito's slow default email. Returns the parsed
+  // body with the HTTP status attached as _status.
+  function post(path, body) {
+    return fetch(path, {
       method: 'POST',
-      headers: {
-        'X-Amz-Target': 'AWSCognitoIdentityProviderService.' + target,
-        'Content-Type': 'application/x-amz-json-1.1'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
-        if (!r.ok) {
-          var err = new Error(data.message || data.Message || r.statusText);
-          err.code = (data.__type || '').split('#').pop() || r.statusText;
-          throw err;
-        }
+        data._status = r.status;
         return data;
       });
     });
   }
 
-  function humanizeErr(err) {
-    var map = {
-      UserNotFoundException:   "We can't find an account with that email.",
-      LimitExceededException:  'Too many attempts. Wait a few minutes and try again.',
-      CodeMismatchException:   'That code is incorrect. Double-check your email.',
-      ExpiredCodeException:    'This code expired. Tap "Resend code" to get a new one.',
-      InvalidPasswordException:'Password must have upper, lower, number, and symbol (8+ chars).',
-      InvalidParameterException:'Please check your input and try again.',
-    };
-    return map[err.code] || err.message || 'Something went wrong. Please try again.';
+  function codeErrMsg(data) {
+    if (data.error === 'too_many_attempts') return 'Too many tries. Start over to get a new code.';
+    if (data.error === 'session_expired')   return 'This code expired. Tap "Resend code" to get a new one.';
+    if (data.error === 'invalid_password')   return 'Password must be 10+ characters with an upper, lower, number, and symbol.';
+    if (data.error === 'invalid_code') {
+      var n = data.attemptsRemaining;
+      return 'That code is incorrect.' + (typeof n === 'number' ? ' ' + n + ' attempt' + (n === 1 ? '' : 's') + ' left.' : '');
+    }
+    return 'Something went wrong. Please try again.';
   }
 
   var pendingEmail = '';
+  var resetSession = '';
 
   requestForm.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -161,18 +156,26 @@
     if (!email) return;
     requestBtn.disabled = true;
     requestBtn.textContent = 'Sending…';
-    cognito('ForgotPassword', { ClientId: '1mddi61n19hftaldt9t3r622b', Username: email })
+    post('/api/auth/forgot/start', { email: email })
       .then(function (data) {
+        if (data._status !== 200 || !data.resetSession) {
+          requestErr.textContent = 'We couldn’t start a reset right now. Please try again in a moment.';
+          requestErr.style.display = 'block';
+          return;
+        }
+        // Intentionally identical whether or not the email is a real
+        // account — no "we can't find that email" enumeration oracle.
         pendingEmail = email;
-        var dest = (data.CodeDeliveryDetails && data.CodeDeliveryDetails.Destination) || 'your email';
-        gateSub.textContent = 'We sent a 6-digit code to ' + dest + '. Enter it below with your new password.';
+        resetSession = data.resetSession;
+        gateSub.textContent = 'If an account exists for ' + (data.masked || 'that email') +
+          ', we sent a 6-digit code. Enter it below with your new password.';
         success.style.display = 'block';
         requestForm.style.display = 'none';
         confirmForm.style.display = 'block';
         setTimeout(function () { codeInput.focus(); }, 50);
       })
-      .catch(function (err) {
-        requestErr.textContent = humanizeErr(err);
+      .catch(function () {
+        requestErr.textContent = 'Network error. Please try again.';
         requestErr.style.display = 'block';
       })
       .finally(function () {
@@ -193,19 +196,19 @@
     }
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Updating…';
-    cognito('ConfirmForgotPassword', {
-      ClientId: '1mddi61n19hftaldt9t3r622b',
-      Username: pendingEmail,
-      ConfirmationCode: code,
-      Password: pw,
-    })
-      .then(function () {
-        confirmForm.style.display = 'none';
-        doneStep.style.display = 'block';
-        gateSub.textContent = 'All set.';
+    post('/api/auth/forgot/confirm', { resetSession: resetSession, code: code, newPassword: pw })
+      .then(function (data) {
+        if (data._status === 200 && data.ok) {
+          confirmForm.style.display = 'none';
+          doneStep.style.display = 'block';
+          gateSub.textContent = 'All set.';
+          return;
+        }
+        confirmErr.textContent = codeErrMsg(data);
+        confirmErr.style.display = 'block';
       })
-      .catch(function (err) {
-        confirmErr.textContent = humanizeErr(err);
+      .catch(function () {
+        confirmErr.textContent = 'Network error. Please try again.';
         confirmErr.style.display = 'block';
       })
       .finally(function () {
@@ -219,15 +222,16 @@
     resendBtn.disabled = true;
     var orig = resendBtn.textContent;
     resendBtn.textContent = 'Sending…';
-    cognito('ForgotPassword', { ClientId: '1mddi61n19hftaldt9t3r622b', Username: pendingEmail })
-      .then(function () {
+    post('/api/auth/forgot/start', { email: pendingEmail })
+      .then(function (data) {
+        if (data.resetSession) resetSession = data.resetSession;
         resendBtn.textContent = 'Code resent';
         setTimeout(function () { resendBtn.textContent = orig; resendBtn.disabled = false; }, 3000);
       })
-      .catch(function (err) {
+      .catch(function () {
         resendBtn.textContent = orig;
         resendBtn.disabled = false;
-        confirmErr.textContent = humanizeErr(err);
+        confirmErr.textContent = 'Network error. Please try again.';
         confirmErr.style.display = 'block';
       });
   });
