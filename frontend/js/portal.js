@@ -360,18 +360,158 @@ const PORTAL = (() => {
     setInterval(tick, 1000);
   }
 
-  // Inject banner whenever the DOM is ready. portal.js is loaded
-  // synchronously near the top of every portal page so this fires
+  // ---------- Show/hide eye toggle on every password field ----------
+  // Self-contained: injects its own CSS and wraps each password input, so
+  // it works on the gate pages (portal.css, not dashboard.css) without
+  // touching their markup. Skips autocomplete="off" fields (masked SSN)
+  // and anything marked [data-no-eye].
+  var _PW_EYE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var _PW_EYE_OFF = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+  function _injectPwEyeCss() {
+    if (document.getElementById('cif-pw-eye-css')) return;
+    var st = document.createElement('style');
+    st.id = 'cif-pw-eye-css';
+    st.textContent =
+      '.cif-pw-wrap{position:relative;display:block}' +
+      '.cif-pw-wrap>input{width:100%;box-sizing:border-box;padding-right:46px}' +
+      '.cif-pw-toggle{position:absolute;top:0;bottom:0;right:6px;margin:auto 0;height:38px;width:38px;' +
+      'display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;background:none;' +
+      'color:#94a3b8;cursor:pointer;border-radius:8px;transition:color .15s ease}' +
+      '.cif-pw-toggle:hover{color:#475569}.cif-pw-toggle.is-on{color:#0E8741}';
+    document.head.appendChild(st);
+  }
+
+  function _initPasswordEyes(root) {
+    _injectPwEyeCss();
+    var scope = (root && root.querySelectorAll) ? root : document;
+    Array.prototype.forEach.call(scope.querySelectorAll('input[type="password"]'), function (inp) {
+      if (inp.getAttribute('autocomplete') === 'off') return;
+      if (inp.getAttribute('data-no-eye') !== null) return;
+      if (inp.dataset.cifEye) return;
+      inp.dataset.cifEye = '1';
+      var wrap = document.createElement('span');
+      wrap.className = 'cif-pw-wrap';
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cif-pw-toggle';
+      btn.setAttribute('aria-label', 'Show password');
+      btn.setAttribute('aria-pressed', 'false');
+      btn.innerHTML = _PW_EYE;
+      btn.addEventListener('click', function () {
+        var showing = inp.type === 'text';
+        inp.type = showing ? 'password' : 'text';
+        btn.innerHTML = showing ? _PW_EYE : _PW_EYE_OFF;
+        btn.classList.toggle('is-on', !showing);
+        btn.setAttribute('aria-pressed', showing ? 'false' : 'true');
+        btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+        inp.focus();
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
+  // ---------- Reusable segmented code (OTP) input ----------
+  // Upgrades a single <input> (the value store the page already reads)
+  // into N single-digit boxes. Mobile-aware CSS. Returns {focus, clear}.
+  function _injectOtpCss() {
+    if (document.getElementById('cif-otp-css')) return;
+    var st = document.createElement('style');
+    st.id = 'cif-otp-css';
+    st.textContent =
+      '.cif-otp{display:flex;gap:8px}' +
+      '.cif-otp-box{flex:1 1 0;min-width:0;height:56px;text-align:center;font-size:1.5rem;font-weight:600;' +
+      'font-family:inherit;color:#0f172a;background:#fff;border:1.5px solid #d4dae3;border-radius:12px;' +
+      '-moz-appearance:textfield;transition:border-color .15s ease,box-shadow .15s ease}' +
+      '.cif-otp-box::-webkit-outer-spin-button,.cif-otp-box::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}' +
+      '.cif-otp-box.filled{border-color:#0E8741}' +
+      '.cif-otp-box:focus{outline:none;border-color:#0E8741;box-shadow:0 0 0 3px rgba(14,135,65,.15)}' +
+      '@media (max-width:400px){.cif-otp{gap:6px}.cif-otp-box{height:50px;font-size:1.3rem;border-radius:10px}}';
+    document.head.appendChild(st);
+  }
+
+  function _initOtp(input, opts) {
+    opts = opts || {};
+    if (!input) return null;
+    _injectOtpCss();
+    var len = opts.length || parseInt(input.getAttribute('maxlength'), 10) || 6;
+    if (input._otp) {
+      // Already built. Same length → just reset. Different length (e.g. the
+      // user switched email↔SMS) → tear down and rebuild.
+      if (input._otp.length === len) { input._otp.clear(); return input._otp; }
+      if (input._otp.el && input._otp.el.parentNode) { input._otp.el.parentNode.removeChild(input._otp.el); }
+      input._otp = null;
+    }
+    var wrap = document.createElement('div');
+    wrap.className = 'cif-otp';
+    var boxes = [];
+    for (var i = 0; i < len; i++) {
+      var b = document.createElement('input');
+      b.type = 'text';
+      b.setAttribute('inputmode', 'numeric');
+      b.maxLength = 1;
+      b.className = 'cif-otp-box';
+      b.setAttribute('aria-label', 'Digit ' + (i + 1));
+      if (i === 0) b.setAttribute('autocomplete', 'one-time-code');
+      wrap.appendChild(b);
+      boxes.push(b);
+    }
+    input.type = 'hidden';
+    input.parentNode.insertBefore(wrap, input);
+    function sync() {
+      input.value = boxes.map(function (b) { return b.value; }).join('');
+      boxes.forEach(function (b) { b.classList.toggle('filled', !!b.value); });
+      try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    }
+    boxes.forEach(function (box, i) {
+      box.addEventListener('input', function () {
+        box.value = box.value.replace(/\D/g, '').slice(0, 1);
+        if (box.value && i < len - 1) boxes[i + 1].focus();
+        sync();
+      });
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Backspace' && !box.value && i > 0) { boxes[i - 1].focus(); boxes[i - 1].value = ''; sync(); e.preventDefault(); }
+        else if (e.key === 'ArrowLeft' && i > 0) { boxes[i - 1].focus(); e.preventDefault(); }
+        else if (e.key === 'ArrowRight' && i < len - 1) { boxes[i + 1].focus(); e.preventDefault(); }
+      });
+      box.addEventListener('paste', function (e) {
+        e.preventDefault();
+        var t = ((e.clipboardData || window.clipboardData).getData('text') || '').replace(/\D/g, '').slice(0, len).split('');
+        for (var j = 0; j < len; j++) boxes[j].value = t[j] || '';
+        sync();
+        boxes[Math.min(t.length, len - 1)].focus();
+      });
+    });
+    var api = {
+      length: len,
+      el: wrap,
+      focus: function () { boxes[0].focus(); },
+      clear: function () { boxes.forEach(function (b) { b.value = ''; }); sync(); boxes[0].focus(); }
+    };
+    input._otp = api;
+    return api;
+  }
+
+  // Inject banner + password eyes whenever the DOM is ready. portal.js is
+  // loaded synchronously near the top of every portal page so this fires
   // once per navigation.
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _renderImpersonationBanner);
-  } else {
+  function _onPortalReady() {
     _renderImpersonationBanner();
+    _initPasswordEyes(document);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _onPortalReady);
+  } else {
+    _onPortalReady();
   }
 
   return {
     apiFetch, setToken, getToken, logout, requireAuth,
     formatMoney, formatDate, cognito,
     getImpersonation, endImpersonation,
+    initPasswordEyes: _initPasswordEyes,
+    initOtp: _initOtp,
   };
 })();

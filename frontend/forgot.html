@@ -127,6 +127,11 @@
           <li data-rule="num"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One number</li>
           <li data-rule="sym"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One symbol (e.g. ! @ # $)</li>
         </ul>
+        <div class="form-field">
+          <label>Confirm new password</label>
+          <input type="password" id="newPwConfirm" minlength="10" required autocomplete="new-password">
+          <p class="pw-match-hint" id="pwMatchHint" style="display:none;color:#b42318;font-size:.82rem;margin:6px 0 0;">Passwords don't match.</p>
+        </div>
         <div id="confirmErr" class="form-error" style="display:none;"></div>
         <button type="submit" class="btn btn-primary btn-block btn-lg" id="confirmBtn">Set new password</button>
         <p class="forgot-help" style="margin-bottom:0;">Didn't receive the code?</p>
@@ -169,6 +174,8 @@
   var emailInput  = document.getElementById('emailInput');
   var codeInput   = document.getElementById('codeInput');
   var newPwInput  = document.getElementById('newPwInput');
+  var newPwConfirm = document.getElementById('newPwConfirm');
+  var pwMatchHint = document.getElementById('pwMatchHint');
   var requestErr  = document.getElementById('requestErr');
   var confirmErr  = document.getElementById('confirmErr');
   var success     = document.getElementById('confirmSuccess');
@@ -266,6 +273,16 @@
     });
   }
 
+  // Live confirm-password match feedback.
+  function checkPwMatch() {
+    if (!newPwConfirm || !pwMatchHint) return;
+    pwMatchHint.style.display = (newPwConfirm.value && newPwInput.value !== newPwConfirm.value) ? 'block' : 'none';
+  }
+  if (newPwConfirm) {
+    newPwConfirm.addEventListener('input', checkPwMatch);
+    newPwInput.addEventListener('input', checkPwMatch);
+  }
+
   requestForm.addEventListener('submit', function (e) {
     e.preventDefault();
     requestErr.style.display = 'none';
@@ -309,6 +326,12 @@
     if (!/^\d{6}$/.test(code)) {
       confirmErr.textContent = 'Please enter the 6-digit code.';
       confirmErr.style.display = 'block';
+      return;
+    }
+    if (pw !== (newPwConfirm ? newPwConfirm.value : '')) {
+      confirmErr.textContent = "Your passwords don't match. Please re-enter them.";
+      confirmErr.style.display = 'block';
+      if (pwMatchHint) pwMatchHint.style.display = 'block';
       return;
     }
     confirmBtn.disabled = true;

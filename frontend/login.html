@@ -233,6 +233,7 @@ const channelBack  = document.getElementById('mfaChannelBack');
 const codeStep     = document.getElementById('mfaCodeStep');
 const codeForm     = document.getElementById('mfaCodeForm');
 const codeInput    = document.getElementById('mfaCodeInput');
+let codeOtp = null;
 const codeErr      = document.getElementById('mfaCodeError');
 const codeIntro    = document.getElementById('mfaCodeIntro');
 const verifyBtn    = document.getElementById('mfaVerifyBtn');
@@ -300,8 +301,10 @@ function moveToCodeEntry(channel) {
       : 'We texted a 5-digit code to ' + target + '. Enter it below.';
   codeErr.style.display = 'none';
   codeInput.value = '';
+  // Segmented code boxes — 6 digits for email, 5 for the SMS code.
+  codeOtp = PORTAL.initOtp(codeInput, { length: channel === 'email' ? 6 : 5 });
   showStep('code');
-  setTimeout(() => codeInput.focus(), 50);
+  setTimeout(() => { if (codeOtp) { codeOtp.focus(); } }, 50);
 }
 
 channelBack.addEventListener('click', () => {
@@ -371,6 +374,7 @@ codeForm.addEventListener('submit', async (e) => {
         ? 'Wrong code. ' + remaining + ' attempt' + (remaining === 1 ? '' : 's') + ' remaining.'
         : (err.message || 'Verification failed.');
     codeErr.style.display = 'block';
+    if (codeOtp) { codeOtp.clear(); }
   } finally {
     verifyBtn.disabled = false;
     verifyBtn.textContent = 'Verify and continue';

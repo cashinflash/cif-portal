@@ -229,6 +229,7 @@ const subEl       = document.getElementById('welcomeLine');
 
 let pendingEmail = '';
 let pendingPassword = '';
+let signupOtp = null;
 // True when we arrived here because login failed with UserNotConfirmedException.
 // In that case we don't have the user's password, so after they confirm we
 // send them back to login.html rather than auto-signing-in.
@@ -243,7 +244,8 @@ function showConfirmState() {
   titleEl.textContent       = 'Check your email.';
   subEl.textContent         = `We sent a 6-digit code to ${pendingEmail}.`;
   codeHint.textContent      = "Enter the code to finish creating your account.";
-  document.getElementById('codeInput').focus();
+  signupOtp = PORTAL.initOtp(document.getElementById('codeInput'), { length: 6 });
+  if (signupOtp) { signupOtp.focus(); }
 }
 
 // Cognito's PreSignUp trigger raises coded exceptions (DUPLICATE_EMAIL,
@@ -361,6 +363,7 @@ confirmForm.addEventListener('submit', async (e) => {
     window.location.href = '/dashboard.html';
   } catch (err) {
     showErr(confirmErr, humanizeError(err));
+    if (signupOtp) { signupOtp.clear(); }
     confirmBtn.disabled = false;
     confirmBtn.textContent = 'Verify & Sign In';
   }
