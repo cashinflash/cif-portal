@@ -230,6 +230,23 @@ const subEl       = document.getElementById('welcomeLine');
 let pendingEmail = '';
 let pendingPassword = '';
 let signupOtp = null;
+let signupSession = '';
+
+function signupErrMsg(code) {
+  var map = {
+    DUPLICATE_EMAIL: 'You already have an account with Cash in Flash. Please sign in instead.',
+    EMAIL_MISMATCH: "This email doesn't match the one on file for your loan. Please start over.",
+    MISSING_VERGENT_EMAIL: "We don't have an email on file for your loan yet. Please call (888) 999-9859 so we can help you finish setting up your portal.",
+    VERGENT_UNAVAILABLE: "We couldn't reach our systems to finish setting up your account. Please try again in a few minutes.",
+    invalid_password: 'Password must be 10+ characters with an upper, lower, number, and symbol.',
+    invalid_code: 'The code you entered is incorrect.',
+    too_many_attempts: 'Too many attempts. Please start over to get a new code.',
+    session_expired: 'This code has expired. Please request a new one.',
+    missing_customer: 'Please look up your account first.',
+    missing_email: 'Please enter a valid email.',
+  };
+  return map[code] || 'Something went wrong. Please try again.';
+}
 // True when we arrived here because login failed with UserNotConfirmedException.
 // In that case we don't have the user's password, so after they confirm we
 // send them back to login.html rather than auto-signing-in.
@@ -308,35 +325,39 @@ signupForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   hideErr(errBox);
   // The email field is locked — always use what came from the Vergent search.
-  // Read from vergentEmail rather than the input to guarantee alignment.
   const email    = (vergentEmail || signupForm.email.value).trim().toLowerCase();
   const password = signupForm.password.value;
   signupBtn.disabled = true;
   signupBtn.textContent = 'Creating account…';
   try {
-    await PORTAL.cognito.signUp({
-      email,
-      password,
-      firstName: ctx.firstName,
-      lastName:  ctx.lastName,
-      vergentCustomerId: ctx.vergentCustomerId,
+    const r = await fetch('/api/auth/signup/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email, password,
+        firstName: ctx.firstName, lastName: ctx.lastName,
+        vergentCustomerId: ctx.vergentCustomerId,
+      }),
     });
-    pendingEmail    = email;
-    pendingPassword = password;
-    showConfirmState();
-  } catch (err) {
-    const code = extractLambdaCode(err);
-    if (isDuplicateError(err)) {
-      showDuplicateError();
-    } else if (code === 'EMAIL_MISMATCH' || code === 'MISSING_VERGENT_EMAIL') {
-      // The submitted email didn't match what's on file — force a fresh search.
-      sessionStorage.removeItem('cif_signup_context');
-      sessionStorage.setItem('cif_search_banner', humanizeError(err));
-      setTimeout(() => { window.location.replace('/search.html'); }, 1500);
-      showErr(errBox, humanizeError(err));
-    } else {
-      showErr(errBox, humanizeError(err));
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 200 && data.signupSession) {
+      signupSession   = data.signupSession;
+      pendingEmail    = email;
+      pendingPassword = password;
+      showConfirmState();
+      return;
     }
+    if (data.error === 'DUPLICATE_EMAIL') { showDuplicateError(); return; }
+    if (data.error === 'EMAIL_MISMATCH' || data.error === 'MISSING_VERGENT_EMAIL') {
+      sessionStorage.removeItem('cif_signup_context');
+      sessionStorage.setItem('cif_search_banner', signupErrMsg(data.error));
+      setTimeout(() => { window.location.replace('/search.html'); }, 1500);
+      showErr(errBox, signupErrMsg(data.error));
+      return;
+    }
+    showErr(errBox, signupErrMsg(data.error));
+  } catch (err) {
+    showErr(errBox, 'Network error. Please try again.');
   } finally {
     signupBtn.disabled = false;
     signupBtn.textContent = 'Create Account';
@@ -346,21 +367,36 @@ signupForm.addEventListener('submit', async (e) => {
 confirmForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   hideErr(confirmErr);
-  const code = confirmForm.code.value.trim();
+  const code = (document.getElementById('codeInput').value || '').trim();
   confirmBtn.disabled = true;
   confirmBtn.textContent = 'Verifying…';
   try {
-    await PORTAL.cognito.confirmSignUp({ email: pendingEmail, code });
-    sessionStorage.removeItem('cif_signup_context');
-    if (confirmOnlyMode || !pendingPassword) {
-      // We arrived via the "unconfirmed recovery" path — no password on hand.
-      // Send the customer to login to sign in manually.
-      sessionStorage.setItem('cif_pending_email', pendingEmail);
-      window.location.href = '/login.html';
+    if (signupSession) {
+      // New server-side flow: confirm sets the password permanent + verifies email.
+      const r = await fetch('/api/auth/signup/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signupSession, code, password: pendingPassword }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 200 && data.ok) {
+        sessionStorage.removeItem('cif_signup_context');
+        // Account is active — send them to sign in (password + MFA).
+        sessionStorage.setItem('cif_pending_email', pendingEmail);
+        window.location.href = '/login.html';
+        return;
+      }
+      showErr(confirmErr, signupErrMsg(data.error));
+      if (data.error === 'invalid_code' && signupOtp) { signupOtp.clear(); }
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Verify & Sign In';
       return;
     }
-    await PORTAL.cognito.signIn({ email: pendingEmail, password: pendingPassword });
-    window.location.href = '/dashboard.html';
+    // Legacy recovery path (a pre-existing Cognito-unconfirmed account).
+    await PORTAL.cognito.confirmSignUp({ email: pendingEmail, code });
+    sessionStorage.removeItem('cif_signup_context');
+    sessionStorage.setItem('cif_pending_email', pendingEmail);
+    window.location.href = '/login.html';
   } catch (err) {
     showErr(confirmErr, humanizeError(err));
     if (signupOtp) { signupOtp.clear(); }
@@ -372,6 +408,25 @@ confirmForm.addEventListener('submit', async (e) => {
 document.getElementById('resendLink').addEventListener('click', async (e) => {
   e.preventDefault();
   hideErr(confirmErr);
+  if (signupSession) {
+    try {
+      const r = await fetch('/api/auth/signup/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: pendingEmail, password: pendingPassword,
+          firstName: ctx.firstName, lastName: ctx.lastName,
+          vergentCustomerId: ctx.vergentCustomerId,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.signupSession) signupSession = data.signupSession;
+      codeHint.textContent = 'We sent a new code. Please check your inbox.';
+    } catch (err) {
+      showErr(confirmErr, 'Network error. Please try again.');
+    }
+    return;
+  }
   try {
     await PORTAL.cognito.resendCode({ email: pendingEmail });
     codeHint.textContent = 'We sent a new code. Please check your inbox.';

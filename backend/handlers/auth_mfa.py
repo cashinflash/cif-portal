@@ -908,6 +908,231 @@ def _forgot_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# Signup (server-side, code delivered via Resend)
+#
+# Replaces the client-side Cognito SignUp (whose confirmation email is on
+# Cognito's slow default path) with: create the user via AdminCreateUser
+# (email SUPPRESSED, PreSignUp still validates email==Vergent / dedup),
+# deliver our own 6-digit code through Resend, then on confirm set the
+# chosen password permanent + mark email_verified. Same trust model as
+# the login MFA / reset codes.
+#
+#   POST /api/auth/signup/start    {email, password, firstName, lastName, vergentCustomerId}
+#   POST /api/auth/signup/confirm  {signupSession, code, password}
+# ─────────────────────────────────────────
+_SIGNUP_LAMBDA_CODES = (
+    "EMAIL_MISMATCH", "MISSING_VERGENT_EMAIL", "DUPLICATE_EMAIL",
+    "DUPLICATE_VERGENT_CUSTOMER", "VERGENT_UNAVAILABLE",
+)
+
+
+def _password_ok(pw: str) -> bool:
+    return (
+        len(pw or "") >= 10
+        and any(c.isupper() for c in pw)
+        and any(c.islower() for c in pw)
+        and any(c.isdigit() for c in pw)
+        and any((not c.isalnum()) for c in pw)
+    )
+
+
+def _temp_password() -> str:
+    # Strong throwaway temp password (immediately replaced at confirm).
+    return "Aa1!" + secrets.token_urlsafe(24)
+
+
+def _user_status(email: str) -> Optional[str]:
+    u = _admin_get_user(email)
+    return u.get("Status") if u else None
+
+
+def _store_signup_session(session_id: str, *, email: str, code_hash: str) -> None:
+    now = int(time.time())
+    ddb.put_item(TableName=TABLE, Item={
+        "sessionId": {"S": session_id},
+        "createdAt": {"N": str(now)},
+        "expiresAt": {"N": str(now + CODE_TTL)},
+        "email": {"S": email},
+        "mode": {"S": "signup"},
+        "attempts": {"N": "0"},
+        "codeHash": {"S": code_hash},
+    })
+
+
+def _load_signup_session(session_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        r = ddb.get_item(TableName=TABLE, Key={"sessionId": {"S": session_id}})
+    except ClientError:
+        return None
+    item = r.get("Item")
+    if not item:
+        return None
+    if int(item["expiresAt"]["N"]) <= int(time.time()):
+        ddb.delete_item(TableName=TABLE, Key={"sessionId": {"S": session_id}})
+        return None
+    if item.get("mode", {}).get("S") != "signup":
+        return None
+    return {
+        "sessionId": session_id,
+        "email": item.get("email", {}).get("S", ""),
+        "codeHash": item.get("codeHash", {}).get("S", ""),
+        "attempts": int(item.get("attempts", {}).get("N", "0")),
+    }
+
+
+def _send_signup_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    body_text = (
+        f"Cash in Flash — Confirm your account\n\n"
+        f"Your verification code is: {code}\n\n"
+        f"Enter it to finish creating your Cash in Flash account. This code "
+        f"expires in 5 minutes.\n\n"
+        f"Didn't try to create an account? You can safely ignore this email.\n\n"
+        f"Please do not share this code with anyone. A Cash in Flash "
+        f"Representative will NEVER ask you for it.\n\n"
+        f"Questions? Call our Customer Service Team at (888) 999-9859.\n\n"
+        f"---\n"
+        f"© 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. "
+        f"License #214840.\n"
+        f"Cash in Flash, 13937B Van Nuys Blvd, Arleta, CA 91331"
+    )
+    body_html = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f5f7f6;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a2e;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f7f6;padding:24px 12px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
+        <tr><td align="center" style="background:#ffffff;padding:32px 24px 22px;border-bottom:3px solid #0E8741;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="180" height="23" style="display:block;width:180px;height:23px;border:0;">
+        </td></tr>
+        <tr><td style="padding:36px 40px 20px;">
+          <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your verification code is: {code}</h1>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Enter it to finish creating your Cash in Flash account. This code expires in 5 minutes.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Didn't try to create an account? You can safely ignore this email.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Please do not provide this code to anyone. A Cash in Flash Representative will <strong>never</strong> ask you for it.</p>
+          <p style="margin:0 0 4px;font-size:14px;line-height:1.55;color:#1a1a2e;">Questions? Call our Customer Service Team at <a href="tel:+18889999859" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(888) 999-9859</a>.</p>
+        </td></tr>
+        <tr><td style="padding:22px 40px 34px;color:#6b7280;font-size:11px;line-height:1.6;">
+          <p style="margin:0 0 10px;">&copy; 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.</p>
+          <p style="margin:0 0 4px;">This email was sent by Cash in Flash<br>13937B Van Nuys Blvd, Arleta, CA 91331</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>"""
+    return resend_email.send(
+        to=to,
+        subject="Confirm your Cash in Flash account",
+        text=body_text,
+        html=body_html,
+    )
+
+
+def _signup_start(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = _parse(event)
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    first = (body.get("firstName") or "").strip()
+    last = (body.get("lastName") or "").strip()
+    vcid = str(body.get("vergentCustomerId") or "").strip()
+    if not email or "@" not in email:
+        return _resp(400, {"error": "missing_email"})
+    if not vcid:
+        return _resp(400, {"error": "missing_customer"})
+    if not _password_ok(password):
+        return _resp(400, {"error": "invalid_password"})
+
+    status = _user_status(email)
+    if status and status not in ("FORCE_CHANGE_PASSWORD", "UNCONFIRMED"):
+        # Fully-registered account already exists.
+        return _resp(409, {"error": "DUPLICATE_EMAIL"})
+
+    if not status:
+        attrs = [
+            {"Name": "email", "Value": email},
+            {"Name": "custom:vergentCustomerId", "Value": vcid},
+        ]
+        if first:
+            attrs.append({"Name": "given_name", "Value": first})
+        if last:
+            attrs.append({"Name": "family_name", "Value": last})
+        try:
+            cognito.admin_create_user(
+                UserPoolId=USER_POOL_ID,
+                Username=email,
+                MessageAction="SUPPRESS",
+                TemporaryPassword=_temp_password(),
+                UserAttributes=attrs,
+            )
+        except ClientError as e:
+            cn = e.response.get("Error", {}).get("Code", "")
+            msg = e.response.get("Error", {}).get("Message") or ""
+            if cn == "UsernameExistsException":
+                pass  # race / resume — fall through to send a fresh code
+            elif cn in ("UserLambdaValidationException", "InvalidLambdaResponseException"):
+                for c in _SIGNUP_LAMBDA_CODES:
+                    if c in msg:
+                        return _resp(400, {"error": c})
+                return _resp(400, {"error": "validation_failed"})
+            elif cn == "InvalidPasswordException":
+                return _resp(400, {"error": "invalid_password"})
+            else:
+                log.warning("admin_create_user failed: %s", cn)
+                return _resp(500, {"error": "signup_failed"})
+
+    session_id = _new_session_id()
+    code = _new_code()
+    _store_signup_session(session_id, email=email, code_hash=_hash_code(code))
+    ok, _c, _m = _send_signup_email(email, code)
+    if not ok:
+        log.warning("signup email delivery failed for %s", _mask_email(email))
+    return _resp(200, {
+        "ok": True,
+        "signupSession": session_id,
+        "masked": _mask_email(email),
+        "expiresInSec": CODE_TTL,
+    })
+
+
+def _signup_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = _parse(event)
+    session_id = body.get("signupSession") or ""
+    code = (body.get("code") or "").strip()
+    password = body.get("password") or ""
+    if not session_id or not code or not password:
+        return _resp(400, {"error": "missing_fields"})
+
+    s = _load_signup_session(session_id)
+    if not s:
+        return _resp(401, {"error": "session_expired"})
+
+    if not hmac.compare_digest(_hash_code(code), s.get("codeHash") or ""):
+        attempts = s["attempts"] + 1
+        if attempts >= MAX_ATTEMPTS:
+            _delete_session(session_id)
+            return _resp(401, {"error": "too_many_attempts"})
+        _bump_attempts(session_id, attempts)
+        return _resp(401, {"error": "invalid_code", "attemptsRemaining": MAX_ATTEMPTS - attempts})
+
+    email = s["email"]
+    try:
+        cognito.admin_set_user_password(
+            UserPoolId=USER_POOL_ID, Username=email, Password=password, Permanent=True,
+        )
+        cognito.admin_update_user_attributes(
+            UserPoolId=USER_POOL_ID, Username=email,
+            UserAttributes=[{"Name": "email_verified", "Value": "true"}],
+        )
+    except ClientError as e:
+        cn = e.response.get("Error", {}).get("Code", "")
+        if cn == "InvalidPasswordException":
+            return _resp(400, {"error": "invalid_password"})
+        log.warning("signup confirm failed: %s", cn)
+        return _resp(500, {"error": "confirm_failed"})
+
+    _delete_session(session_id)
+    return _resp(200, {"ok": True})
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -928,6 +1153,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _forgot_start(event)
         if path.endswith("/auth/forgot/confirm"):
             return _forgot_confirm(event)
+        if path.endswith("/auth/signup/start"):
+            return _signup_start(event)
+        if path.endswith("/auth/signup/confirm"):
+            return _signup_confirm(event)
         return _resp(404, {"error": "not_found"})
     except Exception as exc:
         log.exception("auth_mfa unexpected error: %s", exc)
