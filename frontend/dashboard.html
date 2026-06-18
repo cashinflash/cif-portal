@@ -211,7 +211,19 @@
             </div>
           </div>
           <p class="dash-loan-countdown" data-loan-countdown hidden></p>
-          <div class="dash-loan-stats">
+          <!-- Next payment — the #1 reason a borrower opens the app -->
+          <div class="dash-nextpay">
+            <div class="dash-nextpay-info">
+              <span class="dash-nextpay-label">Next payment</span>
+              <span class="dash-nextpay-amount" data-loan-next-amount>&mdash;</span>
+              <span class="dash-nextpay-due">due <strong data-loan-next-due>&mdash;</strong></span>
+            </div>
+            <a href="/payments.html#new" class="dash-nextpay-btn">
+              Pay now
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            </a>
+          </div>
+          <div class="dash-loan-stats dash-loan-stats--pair">
             <div>
               <div class="dash-loan-stat-label">Borrowed</div>
               <div class="dash-loan-stat-value" data-loan-principal>&mdash;</div>
@@ -220,17 +232,8 @@
               <div class="dash-loan-stat-label">Fee</div>
               <div class="dash-loan-stat-value" data-loan-fee>&mdash;</div>
             </div>
-            <div>
-              <div class="dash-loan-stat-label">Due date</div>
-              <div class="dash-loan-stat-value" data-loan-next-due>&mdash;</div>
-            </div>
-            <div>
-              <div class="dash-loan-stat-label">Amount due</div>
-              <div class="dash-loan-stat-value" data-loan-next-amount>&mdash;</div>
-            </div>
           </div>
           <div class="dash-loan-cta-row">
-            <a href="/payments.html#new" class="btn-apply">Make a payment</a>
             <a href="/loans.html" class="btn-login">View loan details</a>
           </div>
         </div>

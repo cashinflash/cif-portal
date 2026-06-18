@@ -3860,3 +3860,81 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ============================================================
+   Dashboard visual refinement (Fortune-500 pass) — additive,
+   kept LAST so the overrides win.
+   ============================================================ */
+
+/* Tabular figures everywhere money + dates appear → aligned, engineered. */
+.dash-loan-amount,
+.dash-nextpay-amount,
+.dash-loan-stat-value,
+.dash-stat-card-value,
+.dash-recent-activity-amount,
+[data-loan-paid], [data-loan-remaining] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Confident, tighter-tracked balance. */
+.dash-loan-amount { letter-spacing: -.02em; }
+
+/* Next-payment hero — lead module of the loan card. */
+.dash-nextpay {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; margin: 6px 0 18px; padding: 16px 18px;
+  background: linear-gradient(135deg, rgba(14,135,65,.08), rgba(14,135,65,.03));
+  border: 1px solid rgba(14,135,65,.18);
+  border-radius: 16px;
+}
+.dash-nextpay-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dash-nextpay-label {
+  font-size: .7rem; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--cif-green-dark, #0C7137);
+}
+.dash-nextpay-amount {
+  font-size: 1.65rem; font-weight: 800; line-height: 1.1;
+  color: var(--cif-navy, #1a1a2e); letter-spacing: -.01em;
+}
+.dash-nextpay-due { font-size: .85rem; color: var(--cif-muted, #555); }
+.dash-nextpay-due strong { color: var(--cif-ink, #1a1a2e); font-weight: 700; }
+.dash-nextpay-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
+  background: var(--cif-green, #0E8741); color: #fff;
+  font-weight: 700; font-size: .95rem; text-decoration: none;
+  padding: 12px 20px; border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(14,135,65,.25);
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.dash-nextpay-btn:hover {
+  background: var(--cif-green-dark, #0C7137);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(14,135,65,.32);
+}
+.dash-nextpay-btn:active { transform: translateY(0); box-shadow: 0 4px 12px rgba(14,135,65,.25); }
+@media (max-width: 480px) {
+  .dash-nextpay { flex-direction: column; align-items: stretch; }
+  .dash-nextpay-btn { justify-content: center; }
+}
+
+/* Two-up stat grid beneath the hero. */
+.dash-loan-stats--pair { grid-template-columns: 1fr 1fr; }
+
+/* Progress bar: branded gradient + animated fill on load. */
+[data-loan-progress-fill] {
+  background: linear-gradient(90deg, var(--cif-green, #0E8741), #15a04f);
+  transition: width .8s cubic-bezier(.2, .8, .2, 1);
+}
+
+/* Refined empty state for Recent activity. */
+.dash-recent-activity-empty {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 6px; padding: 30px 16px;
+  color: var(--cif-subtle, #888);
+}
+.dash-recent-activity-empty svg { color: #cbd5e1; margin-bottom: 2px; }
+.dash-recent-activity-empty-title {
+  margin: 0; font-weight: 700; font-size: .95rem; color: var(--cif-muted, #555);
+}
+.dash-recent-activity-empty-sub { margin: 0; font-size: .85rem; }

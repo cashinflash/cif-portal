@@ -496,10 +496,12 @@
     root.innerHTML = '';
 
     if (!allLoans || !allLoans.length) {
-      const p = document.createElement('p');
-      p.className = 'dash-recent-activity-empty';
-      p.textContent = "Nothing here yet — your account activity will show up after your first loan.";
-      root.appendChild(p);
+      root.innerHTML =
+        '<div class="dash-recent-activity-empty">' +
+        '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="14" x2="13" y2="14"/></svg>' +
+        '<p class="dash-recent-activity-empty-title">No activity yet</p>' +
+        '<p class="dash-recent-activity-empty-sub">Your payments and loan history will appear here.</p>' +
+        '</div>';
       return;
     }
 
