@@ -508,11 +508,11 @@ def _send_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]
         f"https://portal.cashinflash.com/forgot.html.\n\n"
         f"Please do not share this code with anyone. A Cash in Flash Representative "
         f"will NEVER ask you to provide them with your sign-in code.\n\n"
-        f"Questions? Call our Customer Service Team at (747) 270-7121.\n\n"
+        f"Questions? Call our Customer Service Team at (888) 999-9859.\n\n"
         f"---\n"
         f"This email message contains information from Cash in Flash and is confidential. "
-        f"If you received this email in error, please notify us at (747) 270-7121 or "
-        f"support@cashinflash.com.\n\n"
+        f"If you received this email in error, please notify us at (888) 999-9859 or "
+        f"info@cashinflash.com.\n\n"
         f"© 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.\n"
         f"Cash in Flash, 13937B Van Nuys Blvd, Arleta, CA 91331"
     )
@@ -528,11 +528,11 @@ def _send_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]
           <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your sign-in code is: {code}</h1>
           <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Didn't try to sign in? Please <a href="https://d1zucrj1ouu3c.cloudfront.net/forgot.html" style="color:#0E8741;text-decoration:underline;">reset your password</a>.</p>
           <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Please do not provide this code to anyone. A Cash in Flash Representative will <strong>never</strong> ask you to provide them with your sign-in code.</p>
-          <p style="margin:0 0 4px;font-size:14px;line-height:1.55;color:#1a1a2e;">If you still have questions, contact our Customer Service Team at <a href="tel:+17472707121" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(747) 270-7121</a>.</p>
+          <p style="margin:0 0 4px;font-size:14px;line-height:1.55;color:#1a1a2e;">If you still have questions, contact our Customer Service Team at <a href="tel:+18889999859" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(888) 999-9859</a>.</p>
         </td></tr>
         <tr><td style="padding:22px 40px 34px;color:#6b7280;font-size:11px;line-height:1.6;">
           <p style="margin:0 0 10px;">This email message contains information from Cash in Flash and is confidential. The included information is intended only for the use of the individual or entity named above. If you are not the intended recipient, be aware that any disclosure, copying, distribution, or use of the contents of this message is prohibited.</p>
-          <p style="margin:0 0 10px;">If you received this email in error, please notify us immediately by telephone at <a href="tel:+17472707121" style="color:#6b7280;text-decoration:underline;">(747) 270-7121</a> or email at <a href="mailto:support@cashinflash.com" style="color:#6b7280;text-decoration:underline;">support@cashinflash.com</a>.</p>
+          <p style="margin:0 0 10px;">If you received this email in error, please notify us immediately by telephone at <a href="tel:+18889999859" style="color:#6b7280;text-decoration:underline;">(888) 999-9859</a> or email at <a href="mailto:info@cashinflash.com" style="color:#6b7280;text-decoration:underline;">info@cashinflash.com</a>.</p>
           <p style="margin:0 0 10px;">&copy; 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.</p>
           <p style="margin:0 0 4px;">This email was sent by Cash in Flash<br>13937B Van Nuys Blvd, Arleta, CA 91331</p>
           <p style="margin:10px 0 0;"><a href="https://cashinflash.com/privacy/" style="color:#0E8741;text-decoration:underline;">Privacy Policy</a></p>
@@ -795,7 +795,7 @@ def _send_reset_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional
         f"won't change unless someone enters the code above.\n\n"
         f"Please do not share this code with anyone. A Cash in Flash "
         f"Representative will NEVER ask you for it.\n\n"
-        f"Questions? Call our Customer Service Team at (747) 270-7121.\n\n"
+        f"Questions? Call our Customer Service Team at (888) 999-9859.\n\n"
         f"---\n"
         f"© 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. "
         f"License #214840.\n"
@@ -814,7 +814,7 @@ def _send_reset_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional
           <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Enter it on the reset page to choose a new password. This code expires in 5 minutes.</p>
           <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Didn't request this? You can safely ignore this email — your password won't change unless someone enters the code above.</p>
           <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Please do not provide this code to anyone. A Cash in Flash Representative will <strong>never</strong> ask you for it.</p>
-          <p style="margin:0 0 4px;font-size:14px;line-height:1.55;color:#1a1a2e;">Questions? Call our Customer Service Team at <a href="tel:+17472707121" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(747) 270-7121</a>.</p>
+          <p style="margin:0 0 4px;font-size:14px;line-height:1.55;color:#1a1a2e;">Questions? Call our Customer Service Team at <a href="tel:+18889999859" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(888) 999-9859</a>.</p>
         </td></tr>
         <tr><td style="padding:22px 40px 34px;color:#6b7280;font-size:11px;line-height:1.6;">
           <p style="margin:0 0 10px;">&copy; 2026 Dhan Corporation d/b/a Cash in Flash. All Rights Reserved. License #214840.</p>

@@ -10,11 +10,32 @@
 <style>
   .forgot-steps { margin-top: 8px; }
   .forgot-note { color: #6b7280; font-size: .88rem; margin-top: 10px; }
-  .forgot-success { color: #0a6e35; background: rgba(14,135,65,.08); padding: 12px 14px; border-radius: 10px; font-weight: 600; margin: 12px 0; }
-  .pw-requirements { color: #6b7280; font-size: .82rem; margin-top: -8px; margin-bottom: 12px; }
-  /* Render the resend control as a text link, not a default browser
-     button. (.link-button lives in portal.css which is S3-only; define
-     it inline so this page is self-sufficient.) */
+  .forgot-success {
+    display: flex; align-items: center; gap: 8px;
+    color: #0a6e35; background: rgba(14,135,65,.08);
+    padding: 12px 14px; border-radius: 10px; font-weight: 600;
+    font-size: .92rem; margin: 12px 0;
+  }
+  /* Live password-requirement checklist — each row turns green as the
+     rule is satisfied, the pattern used by most banks / large-scale
+     sign-up flows. Self-contained (no dependency on portal.css). */
+  .pw-rules { list-style: none; margin: 4px 0 18px; padding: 0; display: grid; gap: 7px; }
+  .pw-rules li {
+    display: flex; align-items: center; gap: 9px;
+    font-size: .82rem; color: #64748b; transition: color .15s ease;
+  }
+  .pw-rules li .ck {
+    width: 16px; height: 16px; flex: 0 0 16px; border-radius: 50%;
+    border: 1.5px solid #cbd5e1; display: inline-flex; align-items: center;
+    justify-content: center; color: #fff; transition: background .15s ease, border-color .15s ease;
+  }
+  .pw-rules li .ck svg { opacity: 0; transition: opacity .15s ease; }
+  .pw-rules li.met { color: #0a6e35; }
+  .pw-rules li.met .ck { background: #0E8741; border-color: #0E8741; }
+  .pw-rules li.met .ck svg { opacity: 1; }
+  /* Resend control as a text link, not a default browser button.
+     (.link-button lives in portal.css which is S3-only; defined inline
+     so this page is self-sufficient.) */
   .link-button {
     background: none; border: none; padding: 0;
     color: #0E8741; font-weight: 600; font-size: inherit;
@@ -22,7 +43,7 @@
   }
   .link-button:hover { color: #0a6e35; }
   .link-button:disabled { color: #9ca3af; cursor: default; text-decoration: none; }
-  .forgot-help { color: #6b7280; font-size: .85rem; line-height: 1.5; margin: 16px 0 0; text-align: center; }
+  .forgot-help { color: #64748b; font-size: .85rem; line-height: 1.5; margin: 18px 0 0; text-align: center; }
 </style>
 </head>
 <body>
@@ -45,7 +66,7 @@
   <div class="gate-inner">
     <div class="gate-card">
       <h1 class="page-title">Reset your password.</h1>
-      <p class="page-sub" id="gateSub">Enter the email on your account and we'll send you a 6-digit code.</p>
+      <p class="page-sub" id="gateSub">Enter the email associated with your account and we'll send a 6-digit verification code.</p>
 
       <!-- Step 1: request code -->
       <form id="requestForm" class="forgot-steps">
@@ -60,22 +81,28 @@
       <!-- Step 2: enter code + new password -->
       <form id="confirmForm" class="forgot-steps" style="display:none;">
         <div id="confirmSuccess" class="forgot-success" style="display:none;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>
-          Code sent. Check your email.
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Verification code sent to your email.
         </div>
         <div class="form-field">
-          <label>6-digit code</label>
+          <label>Verification code</label>
           <input type="text" name="code" id="codeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required style="font-size:1.2rem; letter-spacing:.4em; text-align:center;">
         </div>
         <div class="form-field">
           <label>New password</label>
           <input type="password" name="newPassword" id="newPwInput" minlength="10" required autocomplete="new-password">
         </div>
-        <p class="pw-requirements">10+ characters, 1 upper, 1 lower, 1 number, 1 symbol.</p>
+        <ul class="pw-rules" id="pwRules">
+          <li data-rule="len"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>At least 10 characters</li>
+          <li data-rule="upper"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One uppercase letter</li>
+          <li data-rule="lower"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One lowercase letter</li>
+          <li data-rule="num"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One number</li>
+          <li data-rule="sym"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One symbol (e.g. ! @ # $)</li>
+        </ul>
         <div id="confirmErr" class="form-error" style="display:none;"></div>
         <button type="submit" class="btn btn-primary btn-block btn-lg" id="confirmBtn">Set new password</button>
-        <p class="forgot-help">Didn't get it? The code can take a minute to arrive — check your spam folder too.</p>
-        <p class="forgot-note" style="text-align:center;margin-top:6px;"><button type="button" class="link-button" id="resendBtn">Resend code</button></p>
+        <p class="forgot-help" style="margin-bottom:0;">Didn't receive the code?</p>
+        <p class="forgot-note" style="text-align:center;margin-top:4px;"><button type="button" class="link-button" id="resendBtn">Resend code</button></p>
       </form>
 
       <!-- Step 3: done -->
@@ -136,18 +163,40 @@
   }
 
   function codeErrMsg(data) {
-    if (data.error === 'too_many_attempts') return 'Too many tries. Start over to get a new code.';
-    if (data.error === 'session_expired')   return 'This code expired. Tap "Resend code" to get a new one.';
-    if (data.error === 'invalid_password')   return 'Password must be 10+ characters with an upper, lower, number, and symbol.';
+    if (data.error === 'too_many_attempts') return 'Too many attempts. Please request a new code to continue.';
+    if (data.error === 'session_expired')   return 'This code has expired. Please request a new one below.';
+    if (data.error === 'invalid_password')   return 'Please choose a password that meets all of the requirements above.';
     if (data.error === 'invalid_code') {
       var n = data.attemptsRemaining;
-      return 'That code is incorrect.' + (typeof n === 'number' ? ' ' + n + ' attempt' + (n === 1 ? '' : 's') + ' left.' : '');
+      return 'The code you entered is incorrect.' + (typeof n === 'number' ? ' ' + n + ' attempt' + (n === 1 ? '' : 's') + ' remaining.' : '');
     }
-    return 'Something went wrong. Please try again.';
+    return 'We were unable to complete your request. Please try again.';
   }
 
   var pendingEmail = '';
   var resetSession = '';
+
+  // Live password-requirement checklist — rows turn green as each rule
+  // is satisfied as the customer types.
+  var pwRules = document.getElementById('pwRules');
+  if (pwRules && newPwInput) {
+    newPwInput.addEventListener('input', function () {
+      var v = newPwInput.value;
+      var met = {
+        len:   v.length >= 10,
+        upper: /[A-Z]/.test(v),
+        lower: /[a-z]/.test(v),
+        num:   /[0-9]/.test(v),
+        sym:   /[^A-Za-z0-9]/.test(v)
+      };
+      var items = pwRules.querySelectorAll('li');
+      for (var i = 0; i < items.length; i++) {
+        var rule = items[i].getAttribute('data-rule');
+        if (met[rule]) { items[i].classList.add('met'); }
+        else { items[i].classList.remove('met'); }
+      }
+    });
+  }
 
   requestForm.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -168,7 +217,7 @@
         pendingEmail = email;
         resetSession = data.resetSession;
         gateSub.textContent = 'If an account exists for ' + (data.masked || 'that email') +
-          ', we sent a 6-digit code. Enter it below with your new password.';
+          ", we've sent a 6-digit verification code. Enter it below with your new password.";
         success.style.display = 'block';
         requestForm.style.display = 'none';
         confirmForm.style.display = 'block';
