@@ -35,6 +35,14 @@ _log.setLevel(logging.INFO)
 _cognito = boto3.client("cognito-idp", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 _POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
 
+# Fail-open per-IP rate limiter for this pre-auth SSN-lookup endpoint.
+# DISABLED until SEARCH_RATELIMIT_TABLE is set (provision-search-ratelimit.yml),
+# so deploying this code is a no-op until the table + env vars exist.
+_ddb = boto3.client("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+_RL_TABLE = os.environ.get("SEARCH_RATELIMIT_TABLE", "")
+_RL_MAX = int(os.environ.get("SEARCH_RATELIMIT_MAX", "8"))
+_RL_WINDOW = int(os.environ.get("SEARCH_RATELIMIT_WINDOW", "600"))  # 10 min
+
 V1_BASE = os.environ.get("VERGENT_V1_BASE_URL", "https://shared.vergentlms.com/api/api").rstrip("/")
 VERGENT_CREDS_SECRET = os.environ.get("VERGENT_CREDS_SECRET", "cif-portal/vergent/credentials")
 
@@ -42,6 +50,39 @@ VERGENT_CREDS_SECRET = os.environ.get("VERGENT_CREDS_SECRET", "cif-portal/vergen
 _v1_token = None
 _v1_token_exp = 0.0
 _V1_TOKEN_TTL = 60 * 60
+
+
+def _client_ip(event) -> str:
+    rc = event.get("requestContext") or {}
+    return (rc.get("http") or {}).get("sourceIp") or "unknown"
+
+
+def _rate_limited(event) -> bool:
+    """Per-IP limiter that FAILS OPEN: any error (table missing, IAM,
+    throttling) returns False, so a legitimate customer is never blocked by
+    an infra hiccup. Returns True only when we positively counted more than
+    _RL_MAX lookups from this IP in the current window."""
+    if not _RL_TABLE:
+        return False
+    try:
+        ip = _client_ip(event)
+        window = int(time.time()) // _RL_WINDOW
+        r = _ddb.update_item(
+            TableName=_RL_TABLE,
+            Key={"k": {"S": f"{ip}:{window}"}},
+            UpdateExpression="ADD #c :one SET expiresAt = if_not_exists(expiresAt, :exp)",
+            ExpressionAttributeNames={"#c": "count"},
+            ExpressionAttributeValues={
+                ":one": {"N": "1"},
+                ":exp": {"N": str((window + 2) * _RL_WINDOW)},
+            },
+            ReturnValues="UPDATED_NEW",
+        )
+        count = int(r.get("Attributes", {}).get("count", {}).get("N", "0"))
+        return count > _RL_MAX
+    except Exception as e:
+        _log.warning("search rate-limit check failed (fail-open): %s", e)
+        return False
 
 
 def lambda_handler(event, context):
@@ -65,6 +106,13 @@ def _handle_search(event, context):
     missing = [k for k in required if not body.get(k)]
     if missing:
         return error(f"Missing fields: {', '.join(missing)}", status=400)
+
+    if _rate_limited(event):
+        return error(
+            "Too many lookups from your connection. Please wait a few minutes "
+            "and try again, or call us at (747) 270-7121.",
+            status=429, code="rate_limited",
+        )
 
     phone_digits = "".join(c for c in (body.get("phone") or "") if c.isdigit())
     # SSN: strip dashes and spaces. Both '123-45-6789' and '123456789'
