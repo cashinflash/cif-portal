@@ -3914,8 +3914,24 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .dash-loan-pay-btn:active { transform: translateY(0); box-shadow: 0 6px 16px rgba(14,135,65,.26); }
 .dash-loan-pay-btn svg { stroke: #fff; }
 
-/* Two-up stat grid beneath the pay button. */
-.dash-loan-stats--pair { grid-template-columns: 1fr 1fr; }
+/* Loan summary strip — Borrowed | Fee grouped into one designed unit
+   (replaces the two values marooned at opposite edges of the card). */
+.dash-loan-summary {
+  display: flex; align-items: stretch; margin: 4px 0 0;
+  padding: 16px 22px; border-radius: 14px;
+  background: var(--cif-bg-tint, #f7f9fb);
+  border: 1px solid var(--cif-hairline, #eceff3);
+}
+.dash-loan-summary-item { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dash-loan-summary-label {
+  font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--cif-subtle, #888);
+}
+.dash-loan-summary-value {
+  font-size: 1.2rem; font-weight: 800; color: var(--cif-navy, #1a1a2e);
+  font-variant-numeric: tabular-nums;
+}
+.dash-loan-summary-divider { width: 1px; background: var(--cif-hairline, #eceff3); margin: 0 22px; }
 
 /* Progress bar: branded gradient + animated fill on load. */
 [data-loan-progress-fill] {

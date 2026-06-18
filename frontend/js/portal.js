@@ -422,13 +422,13 @@ const PORTAL = (() => {
     st.id = 'cif-otp-css';
     st.textContent =
       '.cif-otp{display:flex;gap:8px}' +
-      '.cif-otp-box{flex:1 1 0;min-width:0;height:56px;text-align:center;font-size:1.5rem;font-weight:600;' +
+      '.cif-otp-box{flex:1 1 0;min-width:0;height:62px;text-align:center;font-size:2rem;font-weight:700;' +
       'font-family:inherit;color:#0f172a;background:#fff;border:1.5px solid #d4dae3;border-radius:12px;' +
       '-moz-appearance:textfield;transition:border-color .15s ease,box-shadow .15s ease}' +
       '.cif-otp-box::-webkit-outer-spin-button,.cif-otp-box::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}' +
       '.cif-otp-box.filled{border-color:#0E8741}' +
       '.cif-otp-box:focus{outline:none;border-color:#0E8741;box-shadow:0 0 0 3px rgba(14,135,65,.15)}' +
-      '@media (max-width:400px){.cif-otp{gap:6px}.cif-otp-box{height:50px;font-size:1.3rem;border-radius:10px}}';
+      '@media (max-width:400px){.cif-otp{gap:6px}.cif-otp-box{height:56px;font-size:1.65rem;border-radius:10px}}';
     document.head.appendChild(st);
   }
 

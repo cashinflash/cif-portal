@@ -50,13 +50,14 @@
   /* Segmented verification-code input — one box per digit. */
   .otp { display: flex; gap: 8px; }
   .otp input {
-    flex: 1 1 0; min-width: 0; height: 56px;
-    text-align: center; font-size: 1.5rem; font-weight: 600;
+    flex: 1 1 0; min-width: 0; height: 62px;
+    text-align: center; font-size: 2rem; font-weight: 700;
     font-family: inherit; color: #0f172a; background: #fff;
     border: 1.5px solid #d4dae3; border-radius: 12px;
     transition: border-color .15s ease, box-shadow .15s ease;
     -moz-appearance: textfield;
   }
+  @media (max-width: 400px) { .otp input { height: 56px; font-size: 1.65rem; border-radius: 10px; } }
   .otp input::-webkit-outer-spin-button,
   .otp input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .otp input.filled { border-color: #0E8741; }
