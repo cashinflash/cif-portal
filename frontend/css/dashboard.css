@@ -180,10 +180,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid rgba(255,255,255,.12);
+  padding: 18px 22px;
+  background: #fff;
+  border-bottom: 1px solid rgba(0,0,0,.06);
 }
-.mobile-menu-logo img { height: 26px; width: auto; display: block; }
+.mobile-menu-logo img { height: 30px; width: auto; display: block; }
 .mobile-menu-close { padding: 4px; }
 .mobile-nav-list { padding: 16px; display: flex; flex-direction: column; gap: 2px; }
 .mobile-nav-item a {

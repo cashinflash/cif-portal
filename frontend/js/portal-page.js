@@ -61,8 +61,8 @@
       m.innerHTML =
         '<div class="mobile-menu-inner">' +
           '<div class="mobile-menu-header">' +
-            '<a href="/dashboard.html" class="mobile-menu-logo"><img src="/images/white_logo_350.png" alt="Cash in Flash" width="140" height="26"></a>' +
-            '<button class="mobile-menu-close" id="mobile-menu-close" aria-label="Close menu"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>' +
+            '<a href="/dashboard.html" class="mobile-menu-logo"><img src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="190" height="24"></a>' +
+            '<button class="mobile-menu-close" id="mobile-menu-close" aria-label="Close menu"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>' +
           '</div>' +
           '<ul class="mobile-nav-list">' +
             '<li class="mobile-nav-item"><a href="/dashboard.html">Dashboard</a></li>' +
