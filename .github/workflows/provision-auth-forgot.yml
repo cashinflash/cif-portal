@@ -105,20 +105,26 @@ jobs:
             "OPTIONS /api/auth/forgot/confirm"
           )
           for RK in "${ROUTES[@]}"; do
-            EXISTING=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
-              --query "Items[?RouteKey=='$RK'].RouteId | [0]" \
-              --output text 2>/dev/null || echo "")
-            if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
-              echo "Route '$RK' already exists ($EXISTING)"
-              continue
+            # Robust lookup: `--output text` on a no-match list is empty;
+            # a match yields the RouteId(s). Filter out any literal "None"
+            # and collapse whitespace so the guard can't misfire. (An
+            # earlier version used `.RouteId | [0]` which returned a
+            # multi-line "None" that compared as != "None" and wrongly
+            # skipped route creation — leaving /api/auth/forgot/* as 404.)
+            RID=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
+              --query "Items[?RouteKey=='$RK'].RouteId" --output text 2>/dev/null \
+              | tr '\t' '\n' | grep -viE '^(none)?$' | head -n1)
+            if [ -n "$RID" ]; then
+              aws apigatewayv2 update-route --api-id "$HTTP_API_ID" \
+                --route-id "$RID" --target "integrations/$INTEG_ID" \
+                --authorization-type NONE --no-cli-pager >/dev/null
+              echo "Ensured route '$RK' ($RID) -> $INTEG_ID"
+            else
+              aws apigatewayv2 create-route --api-id "$HTTP_API_ID" \
+                --route-key "$RK" --target "integrations/$INTEG_ID" \
+                --authorization-type NONE --no-cli-pager >/dev/null
+              echo "Created route '$RK'"
             fi
-            aws apigatewayv2 create-route \
-              --api-id "$HTTP_API_ID" \
-              --route-key "$RK" \
-              --target "integrations/$INTEG_ID" \
-              --authorization-type NONE \
-              --no-cli-pager >/dev/null
-            echo "Created route '$RK'"
           done
 
           # Ensure HttpApi can invoke the Lambda (idempotent).
