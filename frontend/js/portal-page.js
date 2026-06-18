@@ -49,14 +49,46 @@
     var so = document.getElementById('signOutBtn');
     if (so) so.addEventListener('click', signOut);
 
-    // Mobile menu toggle (basic)
+    // Mobile menu — these pages ship the hamburger button but NOT a drawer,
+    // so the toggle was a dead control on phones. Inject a consistent drawer
+    // (same styled menu as the dashboard) when one is missing, then wire it.
     var t = document.getElementById('menu-toggle');
     var m = document.getElementById('mobile-menu');
+    if (t && !m) {
+      m = document.createElement('div');
+      m.className = 'mobile-menu';
+      m.id = 'mobile-menu';
+      m.innerHTML =
+        '<div class="mobile-menu-inner">' +
+          '<div class="mobile-menu-header">' +
+            '<a href="/dashboard.html" class="mobile-menu-logo"><img src="/images/white_logo_350.png" alt="Cash in Flash" width="140" height="26"></a>' +
+            '<button class="mobile-menu-close" id="mobile-menu-close" aria-label="Close menu"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>' +
+          '</div>' +
+          '<ul class="mobile-nav-list">' +
+            '<li class="mobile-nav-item"><a href="/dashboard.html">Dashboard</a></li>' +
+            '<li class="mobile-nav-item"><a href="/loans.html">My Loans</a></li>' +
+            '<li class="mobile-nav-item"><a href="/payments.html">Payments</a></li>' +
+            '<li class="mobile-nav-item"><a href="/profile.html">Profile</a></li>' +
+          '</ul>' +
+          '<div class="mobile-menu-extra"><div class="mobile-btn-row">' +
+            '<button id="signOutBtnMobile" class="btn-login" type="button">Sign out</button>' +
+          '</div></div>' +
+        '</div>';
+      document.body.appendChild(m);
+    }
     if (t && m) {
+      var closeMenu = function () { m.classList.remove('open'); t.classList.remove('active'); };
       t.addEventListener('click', function () {
         m.classList.toggle('open');
         t.classList.toggle('active');
       });
+      var mc = document.getElementById('mobile-menu-close');
+      if (mc) mc.addEventListener('click', closeMenu);
+      Array.prototype.forEach.call(m.querySelectorAll('.mobile-nav-item a'), function (a) {
+        a.addEventListener('click', closeMenu);
+      });
+      var soM = document.getElementById('signOutBtnMobile');
+      if (soM) soM.addEventListener('click', signOut);
     }
 
     // Vergent handoff for "Open Vergent portal" + "Request a new loan" buttons.
@@ -80,7 +112,7 @@
             }
             btn.disabled = false;
             btn.textContent = orig;
-            alert('Could not connect to the portal. Please try again or call (818) 800-5227.');
+            alert('Could not connect to the portal. Please try again or call (888) 999-9859.');
           })
           .catch(function () {
             btn.disabled = false;
