@@ -71,7 +71,7 @@
   <div class="gate-inner">
     <div class="gate-card">
     <h1 class="page-title">Find your account.</h1>
-    <p class="page-sub">Match your details to your existing loan — this just looks you up.</p>
+    <p class="page-sub">Confirm your details to register for secure online access to your account.</p>
 
     <div id="searchBanner" class="form-error" style="display:none;background:#fff4e5;border:1px solid #f3c98a;color:#7a4d00;border-radius:10px;padding:12px 14px;margin:0 0 18px;font-size:.92rem;line-height:1.5;"></div>
 
@@ -206,7 +206,7 @@ document.getElementById('searchForm').addEventListener('submit', async (e) => {
     } else if (result.match === 'none') {
       window.location.href = 'https://apply.cashinflash.com';
     } else if (result.match === 'multiple') {
-      errDiv.textContent = 'We found more than one record matching that information. Please call us at (747) 270-7121 so we can help.';
+      errDiv.textContent = 'We found more than one record matching that information. Please call us at (888) 999-9859 so we can help.';
       errDiv.style.display = 'block';
       btn.disabled = false;
       btn.textContent = 'Search';
@@ -217,7 +217,7 @@ document.getElementById('searchForm').addEventListener('submit', async (e) => {
     // "Internal Server Error" default.
     let msg = err && err.body && err.body.error;
     if (!msg || msg === 'Internal Server Error') {
-      msg = "We couldn't look up your account right now. Please try again in a moment, or call us at (747) 270-7121.";
+      msg = "We couldn't look up your account right now. Please try again in a moment, or call us at (888) 999-9859.";
     }
     errDiv.textContent = msg;
     errDiv.style.display = 'block';

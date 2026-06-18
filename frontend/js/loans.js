@@ -220,7 +220,7 @@
     var body = qs('#loansListBody');
     if (!body) return;
     body.innerHTML =
-      '<p class="dash-loanlist-empty">We couldn’t load your loans right now. Please refresh, or call us at <a href="tel:+17472707121">(747) 270-7121</a>.</p>';
+      '<p class="dash-loanlist-empty">We couldn’t load your loans right now. Please refresh, or call us at <a href="tel:+18889999859">(888) 999-9859</a>.</p>';
   }
 
   function statusPillClass(loan) {
@@ -490,7 +490,7 @@
       var b = qs('#esignModalBody');
       if (b) {
         b.innerHTML = '<p class="dash-esign-error" style="display:block">' +
-          'We couldn’t load this document. Please refresh, or call (747) 270-7121.</p>';
+          'We couldn’t load this document. Please refresh, or call (888) 999-9859.</p>';
       }
     });
 
@@ -597,7 +597,7 @@
           submitBtn.textContent = 'Sign now';
           submitBtn.disabled = false;
           if (errorEl) {
-            var msg = 'Sorry — we couldn’t complete the signature. Please try again, or call us at (747) 270-7121.';
+            var msg = 'Sorry — we couldn’t complete the signature. Please try again, or call us at (888) 999-9859.';
             if (res.data && res.data.upstreamStatus) {
               msg += ' (Vergent ' + res.data.upstreamStatus + ')';
             }
@@ -734,7 +734,7 @@
     var root = qs('#loanDocuments');
     if (!root) return;
     root.innerHTML =
-      '<p class="dash-loanlist-empty">We couldn’t load documents right now. Please refresh, or call us at <a href="tel:+17472707121">(747) 270-7121</a>.</p>';
+      '<p class="dash-loanlist-empty">We couldn’t load documents right now. Please refresh, or call us at <a href="tel:+18889999859">(888) 999-9859</a>.</p>';
   }
 
   // ---------- DOCUMENT VIEWER (MODAL) + DOWNLOAD ----------
@@ -831,7 +831,7 @@
     }).catch(function (err) {
       if (err && err.message === 'unauthorized') return;
       if (btn) { btn.disabled = false; btn.textContent = orig; }
-      alert('Sorry — we couldn’t open that document right now. Please try again, or call (747) 270-7121.');
+      alert('Sorry — we couldn’t open that document right now. Please try again, or call (888) 999-9859.');
     });
   }
 
@@ -914,7 +914,7 @@
       }).catch(function (err2) {
         if (err2 && err2.message === 'unauthorized') return;
         if (btn) { btn.disabled = false; btn.textContent = orig; }
-        alert('Sorry — we couldn’t download that document right now. Please try again, or call (747) 270-7121.');
+        alert('Sorry — we couldn’t download that document right now. Please try again, or call (888) 999-9859.');
       });
     });
   }
@@ -938,7 +938,7 @@
         '<a href="/loans.html" class="dash-back-link">' +
         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg> All loans</a>' +
         '<section class="dash-card"><div class="dash-card-head"><h3>Couldn’t load loan</h3></div>' +
-        '<p style="color:#555;">Please refresh, or call us at <a href="tel:+17472707121" style="color:#0E8741;">(747) 270-7121</a>.</p></section>';
+        '<p style="color:#555;">Please refresh, or call us at <a href="tel:+18889999859" style="color:#0E8741;">(888) 999-9859</a>.</p></section>';
     }
   }
 })();

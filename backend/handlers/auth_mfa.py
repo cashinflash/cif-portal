@@ -522,7 +522,7 @@ def _send_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/white_logo_350.png" alt="Cash in Flash" width="170" height="32" style="display:block;width:170px;height:32px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 40px 20px;">
           <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your sign-in code is: {code}</h1>
@@ -807,7 +807,7 @@ def _send_reset_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/white_logo_350.png" alt="Cash in Flash" width="170" height="32" style="display:block;width:170px;height:32px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 40px 20px;">
           <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your password reset code is: {code}</h1>

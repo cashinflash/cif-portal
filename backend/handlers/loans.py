@@ -1068,7 +1068,7 @@ def _send_customer_confirmation(claims: Dict[str, Any], field: str,
           "one business day. For your security, this update won't take "
           "effect until we've verified it.\n\n"
           "If you didn't request this, please call us right away at "
-          "(747) 270-7121.\n\n"
+          "(888) 999-9859.\n\n"
           "Thank you for being a Cash in Flash customer.\n\n"
           "— The Cash in Flash Team\n\n"
           "---\n"
@@ -1098,7 +1098,7 @@ def _send_customer_confirmation(claims: Dict[str, Any], field: str,
             {requested_row}
           </table>
           <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#1a1a2e;">For your security, this change is reviewed by a Cash in Flash specialist before it takes effect — usually within <strong>one business day</strong>. We'll email you once it's applied.</p>
-          <p style="margin:0 0 4px;font-size:13px;line-height:1.6;color:#6b7280;">Didn't request this? Call us right away at <a href="tel:+17472707121" style="color:#0E8741;font-weight:600;text-decoration:none;">(747) 270-7121</a>.</p>
+          <p style="margin:0 0 4px;font-size:13px;line-height:1.6;color:#6b7280;">Didn't request this? Call us right away at <a href="tel:+18889999859" style="color:#0E8741;font-weight:600;text-decoration:none;">(888) 999-9859</a>.</p>
         </td></tr>
         <tr><td style="padding:22px 36px 32px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.6;">
           <p style="margin:0 0 6px;">Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840</p>
@@ -1140,7 +1140,7 @@ def _send_email_verify_code(to_email: str, code: str) -> Tuple[bool, str]:
         f"before our team applies the change to your Cash in Flash account. "
         f"It expires in 10 minutes.\n\n"
         f"If you didn't request this, you can safely ignore this email "
-        f"or call us at (747) 270-7121.\n\n"
+        f"or call us at (888) 999-9859.\n\n"
         f"---\n"
         f"Cash in Flash · Licensed by the California Department of "
         f"Financial Protection and Innovation #214840\n"
@@ -1158,7 +1158,7 @@ def _send_email_verify_code(to_email: str, code: str) -> Tuple[bool, str]:
           <p style="margin:0 0 8px;font-size:13px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;font-weight:600;">Verification code</p>
           <h1 style="margin:0 0 18px;font-size:28px;font-weight:700;color:#1a1a2e;letter-spacing:-0.01em;">{code}</h1>
           <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1a1a2e;">Enter this code in your account profile to confirm <strong>{to_email}</strong>.</p>
-          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#6b7280;">This code expires in <strong>10 minutes</strong>. If you didn't request this change, you can safely ignore this email or call us at <a href="tel:+17472707121" style="color:#0E8741;text-decoration:none;font-weight:600;">(747) 270-7121</a>.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#6b7280;">This code expires in <strong>10 minutes</strong>. If you didn't request this change, you can safely ignore this email or call us at <a href="tel:+18889999859" style="color:#0E8741;text-decoration:none;font-weight:600;">(888) 999-9859</a>.</p>
         </td></tr>
         <tr><td style="padding:18px 36px 28px;border-top:1px solid #e5e7eb;background:#fafafa;color:#6b7280;font-size:11px;line-height:1.5;">
           Cash in Flash &middot; Licensed by the California Department of Financial Protection and Innovation #214840<br>
@@ -1335,7 +1335,7 @@ def _send_email_applied_alert(claims: Dict[str, Any], new_email: str) -> None:
         f"Future account notices, sign-in codes, and statements will be "
         f"delivered here. There's nothing else you need to do.\n\n"
         f"If you didn't make this change, please call us right away at "
-        f"(747) 270-7121 so we can secure your account.\n\n"
+        f"(888) 999-9859 so we can secure your account.\n\n"
         f"---\n"
         f"Cash in Flash · Licensed by the California Department of "
         f"Financial Protection and Innovation #214840\n"
@@ -1356,7 +1356,7 @@ def _send_email_applied_alert(claims: Dict[str, Any], new_email: str) -> None:
           <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#1a1a2e;">Future account notices, sign-in codes, and statements will be delivered here. There's nothing else you need to do.</p>
           <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0;margin:6px 0 22px;background:#fef3f2;border-radius:10px;border-left:4px solid #dc2626;">
             <tr><td style="padding:14px 18px;color:#991b1b;font-size:14px;line-height:1.55;">
-              <strong>Didn't make this change?</strong> Call us right away at <a href="tel:+17472707121" style="color:#991b1b;font-weight:700;text-decoration:underline;">(747) 270-7121</a> and we'll secure your account.
+              <strong>Didn't make this change?</strong> Call us right away at <a href="tel:+18889999859" style="color:#991b1b;font-weight:700;text-decoration:underline;">(888) 999-9859</a> and we'll secure your account.
             </td></tr>
           </table>
         </td></tr>
@@ -1738,7 +1738,7 @@ def _send_password_changed_alert(claims: Dict[str, Any]) -> None:
         f"Your Cash in Flash account password was just changed at {when}.\n\n"
         f"If this was you, no further action is needed.\n\n"
         f"If you did NOT change your password, your account may be at risk. "
-        f"Please call us immediately at (747) 270-7121 and we'll secure your account.\n\n"
+        f"Please call us immediately at (888) 999-9859 and we'll secure your account.\n\n"
         f"---\n"
         f"Cash in Flash · Licensed by the California Department of "
         f"Financial Protection and Innovation #214840\n"
@@ -1760,7 +1760,7 @@ def _send_password_changed_alert(claims: Dict[str, Any]) -> None:
           <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;border-spacing:0;margin:6px 0 22px;background:#fef3f2;border-radius:10px;border-left:4px solid #dc2626;">
             <tr><td style="padding:14px 18px;color:#991b1b;font-size:14px;line-height:1.55;">
               <strong>Didn't change your password?</strong> Your account may be at risk.
-              Call us right away at <a href="tel:+17472707121" style="color:#991b1b;font-weight:700;text-decoration:underline;">(747) 270-7121</a> and we'll secure it.
+              Call us right away at <a href="tel:+18889999859" style="color:#991b1b;font-weight:700;text-decoration:underline;">(888) 999-9859</a> and we'll secure it.
             </td></tr>
           </table>
         </td></tr>

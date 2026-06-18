@@ -329,7 +329,7 @@
         err.textContent = "That's the same email we have on file.";
         err.hidden = false;
       } else {
-        err.textContent = "We couldn't send the code right now. Please try again or call (747) 270-7121.";
+        err.textContent = "We couldn't send the code right now. Please try again or call (888) 999-9859.";
         err.hidden = false;
       }
     }).catch(function (e) {
@@ -483,7 +483,7 @@
         var ci = qs('#profilePhoneCodeInput');
         if (ci) ci.focus();
       } else {
-        err.textContent = "We couldn't send the code right now. Please try again or call (747) 270-7121.";
+        err.textContent = "We couldn't send the code right now. Please try again or call (888) 999-9859.";
         err.hidden = false;
       }
     }).catch(function (e) {

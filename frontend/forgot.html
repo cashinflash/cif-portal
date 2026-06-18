@@ -16,6 +16,9 @@
     padding: 12px 14px; border-radius: 10px; font-weight: 600;
     font-size: .92rem; margin: 12px 0;
   }
+  /* Optical-center the checkmark — a box-centered check reads slightly
+     high because its visual weight sits low-right. */
+  .forgot-success > svg { flex: 0 0 auto; position: relative; top: 1px; }
   /* Live password-requirement checklist — each row turns green as the
      rule is satisfied, the pattern used by most banks / large-scale
      sign-up flows. Self-contained (no dependency on portal.css). */
@@ -44,6 +47,23 @@
   .link-button:hover { color: #0a6e35; }
   .link-button:disabled { color: #9ca3af; cursor: default; text-decoration: none; }
   .forgot-help { color: #64748b; font-size: .85rem; line-height: 1.5; margin: 18px 0 0; text-align: center; }
+  /* Segmented verification-code input — one box per digit. */
+  .otp { display: flex; gap: 8px; }
+  .otp input {
+    flex: 1 1 0; min-width: 0; height: 56px;
+    text-align: center; font-size: 1.5rem; font-weight: 600;
+    font-family: inherit; color: #0f172a; background: #fff;
+    border: 1.5px solid #d4dae3; border-radius: 12px;
+    transition: border-color .15s ease, box-shadow .15s ease;
+    -moz-appearance: textfield;
+  }
+  .otp input::-webkit-outer-spin-button,
+  .otp input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .otp input.filled { border-color: #0E8741; }
+  .otp input:focus {
+    outline: none; border-color: #0E8741;
+    box-shadow: 0 0 0 3px rgba(14,135,65,.15);
+  }
 </style>
 </head>
 <body>
@@ -86,7 +106,15 @@
         </div>
         <div class="form-field">
           <label>Verification code</label>
-          <input type="text" name="code" id="codeInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required style="font-size:1.2rem; letter-spacing:.4em; text-align:center;">
+          <div class="otp" id="otpWrap">
+            <input type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
+            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 2">
+            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 3">
+            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 4">
+            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 5">
+            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+          </div>
+          <input type="hidden" id="codeInput">
         </div>
         <div class="form-field">
           <label>New password</label>
@@ -176,6 +204,46 @@
   var pendingEmail = '';
   var resetSession = '';
 
+  // Segmented verification-code input: six single-digit boxes that write
+  // to the hidden #codeInput the rest of the flow already reads. Handles
+  // typing, backspace, arrow keys, and pasting a full code.
+  (function initOtp() {
+    var wrap = document.getElementById('otpWrap');
+    var hidden = document.getElementById('codeInput');
+    if (!wrap || !hidden) return;
+    var boxes = Array.prototype.slice.call(wrap.querySelectorAll('input'));
+    function sync() {
+      hidden.value = boxes.map(function (b) { return b.value; }).join('');
+      boxes.forEach(function (b) { b.classList.toggle('filled', !!b.value); });
+    }
+    boxes.forEach(function (box, i) {
+      box.addEventListener('input', function () {
+        box.value = box.value.replace(/\D/g, '').slice(0, 1);
+        if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
+        sync();
+      });
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Backspace' && !box.value && i > 0) {
+          boxes[i - 1].focus(); boxes[i - 1].value = ''; sync(); e.preventDefault();
+        } else if (e.key === 'ArrowLeft' && i > 0) {
+          boxes[i - 1].focus(); e.preventDefault();
+        } else if (e.key === 'ArrowRight' && i < boxes.length - 1) {
+          boxes[i + 1].focus(); e.preventDefault();
+        }
+      });
+      box.addEventListener('paste', function (e) {
+        e.preventDefault();
+        var txt = ((e.clipboardData || window.clipboardData).getData('text') || '');
+        var digits = txt.replace(/\D/g, '').slice(0, boxes.length).split('');
+        for (var j = 0; j < boxes.length; j++) boxes[j].value = digits[j] || '';
+        sync();
+        boxes[Math.min(digits.length, boxes.length - 1)].focus();
+      });
+    });
+    window.__otpFocus = function () { boxes[0].focus(); };
+    window.__otpClear = function () { boxes.forEach(function (b) { b.value = ''; }); sync(); boxes[0].focus(); };
+  })();
+
   // Live password-requirement checklist — rows turn green as each rule
   // is satisfied as the customer types.
   var pwRules = document.getElementById('pwRules');
@@ -221,7 +289,7 @@
         success.style.display = 'block';
         requestForm.style.display = 'none';
         confirmForm.style.display = 'block';
-        setTimeout(function () { codeInput.focus(); }, 50);
+        setTimeout(function () { if (window.__otpFocus) { window.__otpFocus(); } }, 50);
       })
       .catch(function () {
         requestErr.textContent = 'Network error. Please try again.';
@@ -255,6 +323,9 @@
         }
         confirmErr.textContent = codeErrMsg(data);
         confirmErr.style.display = 'block';
+        if ((data.error === 'invalid_code' || data.error === 'session_expired') && window.__otpClear) {
+          window.__otpClear();
+        }
       })
       .catch(function () {
         confirmErr.textContent = 'Network error. Please try again.';

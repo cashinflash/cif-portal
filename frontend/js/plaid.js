@@ -138,7 +138,7 @@
                 if (onDone) onDone(true);
               } else {
                 console.warn('[plaid] exchange failed', res);
-                window.alert('Connected to your bank but couldn’t save the link. Please try again, or call (747) 270-7121.');
+                window.alert('Connected to your bank but couldn’t save the link. Please try again, or call (888) 999-9859.');
                 if (onDone) onDone(false);
               }
             });
@@ -173,7 +173,7 @@
         } else {
           lines.push('Error: ' + msg);
         }
-        lines.push('Please refresh and try again, or call (747) 270-7121.');
+        lines.push('Please refresh and try again, or call (888) 999-9859.');
         window.alert(lines.join('\n\n'));
       });
   }

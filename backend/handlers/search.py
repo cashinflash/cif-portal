@@ -94,7 +94,7 @@ def lambda_handler(event, context):
     except Exception as exc:
         _log.exception("search handler unhandled exception: %s", exc)
         return error(
-            "We couldn't look up your account right now. Please try again or call (747) 270-7121.",
+            "We couldn't look up your account right now. Please try again or call (888) 999-9859.",
             status=500,
             code="internal_error",
         )
@@ -110,7 +110,7 @@ def _handle_search(event, context):
     if _rate_limited(event):
         return error(
             "Too many lookups from your connection. Please wait a few minutes "
-            "and try again, or call us at (747) 270-7121.",
+            "and try again, or call us at (888) 999-9859.",
             status=429, code="rate_limited",
         )
 
