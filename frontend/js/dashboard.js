@@ -591,6 +591,7 @@
     if (body) body.hidden = false;
 
     setText(qs('[data-loan-balance]', card), formatCurrencyPrecise(loan.balance).replace(/^\$/, ''));
+    setText(qs('[data-loan-pay-amount]', card), formatCurrencyPrecise(loan.balance));
     setText(qs('[data-loan-principal]', card), formatCurrencyPrecise(loan.principal));
     setText(qs('[data-loan-next-due]', card), formatDate(loan.nextDueDate));
     setText(qs('[data-loan-next-amount]', card), formatCurrencyPrecise(loan.nextDueAmount));
@@ -616,9 +617,8 @@
 
     const captionEl = qs('[data-loan-caption]', card);
     if (captionEl) {
-      if (loan.nextDueDate && loan.nextDueAmount) {
-        captionEl.textContent = 'Payment of ' + formatCurrencyPrecise(loan.nextDueAmount) +
-                                ' is due ' + formatDate(loan.nextDueDate) + '.';
+      if (loan.nextDueDate) {
+        captionEl.textContent = 'Due ' + formatDate(loan.nextDueDate) + '.';
       } else {
         captionEl.textContent = 'Current balance remaining on your loan.';
       }
@@ -686,7 +686,7 @@
       text = 'Due tomorrow';
       el.classList.add('is-soon');
     } else {
-      text = 'Due in ' + days + ' days';
+      text = days + ' days left';
       if (days <= 3) el.classList.add('is-soon');
     }
     el.textContent = text;

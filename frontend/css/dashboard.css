@@ -3880,45 +3880,41 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 /* Confident, tighter-tracked balance. */
 .dash-loan-amount { letter-spacing: -.02em; }
 
-/* Next-payment hero — lead module of the loan card. */
-.dash-nextpay {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 16px; margin: 6px 0 18px; padding: 16px 18px;
-  background: linear-gradient(135deg, rgba(14,135,65,.08), rgba(14,135,65,.03));
-  border: 1px solid rgba(14,135,65,.18);
-  border-radius: 16px;
-}
-.dash-nextpay-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.dash-nextpay-label {
-  font-size: .7rem; font-weight: 700; letter-spacing: .07em;
-  text-transform: uppercase; color: var(--cif-green-dark, #0C7137);
-}
-.dash-nextpay-amount {
-  font-size: 1.65rem; font-weight: 800; line-height: 1.1;
-  color: var(--cif-navy, #1a1a2e); letter-spacing: -.01em;
-}
-.dash-nextpay-due { font-size: .85rem; color: var(--cif-muted, #555); }
-.dash-nextpay-due strong { color: var(--cif-ink, #1a1a2e); font-weight: 700; }
-.dash-nextpay-btn {
-  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
-  background: var(--cif-green, #0E8741); color: #fff;
-  font-weight: 700; font-size: .95rem; text-decoration: none;
-  padding: 12px 20px; border-radius: 12px;
-  box-shadow: 0 6px 16px rgba(14,135,65,.25);
-  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
-}
-.dash-nextpay-btn:hover {
-  background: var(--cif-green-dark, #0C7137);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(14,135,65,.32);
-}
-.dash-nextpay-btn:active { transform: translateY(0); box-shadow: 0 4px 12px rgba(14,135,65,.25); }
-@media (max-width: 480px) {
-  .dash-nextpay { flex-direction: column; align-items: stretch; }
-  .dash-nextpay-btn { justify-content: center; }
+/* "Amount due" eyebrow above the hero balance. */
+.dash-loan-eyebrow-amt {
+  margin: 0 0 2px; font-size: .72rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--cif-subtle, #888);
 }
 
-/* Two-up stat grid beneath the hero. */
+/* Countdown as a refined urgency chip (green default, amber soon, red late). */
+.dash-loan-countdown {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 2px 0 0; padding: 5px 12px; border-radius: 999px;
+  font-size: .8rem; font-weight: 700; line-height: 1;
+  background: rgba(14,135,65,.10); color: var(--cif-green-dark, #0C7137);
+}
+.dash-loan-countdown.is-soon { background: rgba(255,170,0,.16); color: #9a6b00; }
+.dash-loan-countdown.is-late { background: rgba(200,48,48,.12); color: var(--cif-danger, #c83030); }
+
+/* Prominent primary pay button — the one clear action on the loan card.
+   Full-width, solid brand green, white text (forced so a stray link-color
+   rule can't wash it out), with a confident lift on hover. */
+.dash-loan-pay-btn {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; margin: 18px 0; padding: 16px 22px;
+  background: var(--cif-green, #0E8741); color: #fff !important;
+  font-weight: 800; font-size: 1.02rem; text-decoration: none;
+  border-radius: 14px; box-shadow: 0 8px 20px rgba(14,135,65,.28);
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.dash-loan-pay-btn:hover {
+  background: var(--cif-green-dark, #0C7137);
+  transform: translateY(-1px); box-shadow: 0 12px 26px rgba(14,135,65,.34);
+}
+.dash-loan-pay-btn:active { transform: translateY(0); box-shadow: 0 6px 16px rgba(14,135,65,.26); }
+.dash-loan-pay-btn svg { stroke: #fff; }
+
+/* Two-up stat grid beneath the pay button. */
 .dash-loan-stats--pair { grid-template-columns: 1fr 1fr; }
 
 /* Progress bar: branded gradient + animated fill on load. */
