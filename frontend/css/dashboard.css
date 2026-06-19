@@ -4036,13 +4036,17 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .loan-card-pill::after { content: "\2713"; font-weight: 800; }
 .loan-card-pill.dash-pill--past-due, .loan-card-pill.dash-pill--warn { background: rgba(255,255,255,.92); color: #b42318; }
 .loan-card-pill.dash-pill--past-due::after, .loan-card-pill.dash-pill--warn::after { content: ""; }
-.loan-card-figures { display: flex; gap: 18px; margin-top: 22px; }
-.loan-card-fig { flex: 1; min-width: 0; }
+.loan-card-figures { display: flex; flex-wrap: wrap; gap: 0; margin-top: 22px; }
+.loan-card-fig { flex: 1 1 0; min-width: 120px; padding-left: 20px; }
+.loan-card-fig:first-child { padding-left: 0; }
+.loan-card-fig + .loan-card-fig { border-left: 1px solid rgba(255,255,255,.2); }
 .loan-card-flabel { margin: 0 0 4px; font-size: .82rem; color: rgba(255,255,255,.82); }
 .loan-card-balance { margin: 0; font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .loan-card-balance small { font-size: 1.3rem; font-weight: 700; vertical-align: 12px; margin-right: 2px; }
 .loan-card-due { margin: 4px 0 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
 .loan-card-rule { height: 1px; background: rgba(255,255,255,.2); margin: 20px 0 16px; }
+.loan-card-note { display: flex; align-items: center; gap: 8px; margin: 0; font-size: .85rem; color: rgba(255,255,255,.85); line-height: 1.35; }
+.loan-card-note svg { flex: 0 0 auto; }
 .loan-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; text-decoration: none; color: #fff; }
 .loan-card-method { margin: 4px 0 0; font-size: .98rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .dash-loan-empty .loan-card-empty-sub { margin: 6px 0 0; color: rgba(255,255,255,.85); font-size: .9rem; }
@@ -4188,7 +4192,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 
   /* Wider, more spacious cards on desktop. */
   .loan-card { padding: 26px 30px; border-radius: 24px; }
-  .loan-card-balance { font-size: 2.7rem; }
+  /* Scale with the viewport so the 3-up figure row fits on smaller
+     laptops yet stays bold on large monitors. */
+  .loan-card-balance { font-size: clamp(1.7rem, 1.3rem + 1.1vw, 2.6rem); }
   .app-cta-primary, .app-cta-outline { max-width: 100%; padding: 18px 24px; }
   .app-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
 }
@@ -4265,10 +4271,14 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-needloan-illus { display: block; width: 78px; height: 64px; }
 .home-needloan-body strong { display: block; font-size: 1.05rem; font-weight: 800; color: #1a1a2e; }
 .home-needloan-body small { display: block; margin-top: 3px; font-size: .86rem; color: #557; line-height: 1.4; }
-.home-needloan-cta { margin-top: 0; }
+/* Button sits at the bottom so the stretched card matches the loan card. */
+.home-needloan-cta { margin-top: auto; }
 
-/* Make-a-payment card. */
-.home-pay-figs { display: flex; gap: 22px; margin: 16px 0 4px; }
+/* Make-a-payment card (flex column so the actions pin to the bottom and
+   the figures / divider / buttons stay spaced out like the example). */
+.home-pay { display: flex; flex-direction: column; }
+.home-pay-top { flex: 0 0 auto; }
+.home-pay-figs { display: flex; gap: 22px; margin: 16px 0 0; }
 .home-pay-flabel { margin: 0 0 4px; font-size: .8rem; font-weight: 600; color: #6b7280; }
 .home-pay-amt { margin: 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; color: #0E8741; font-variant-numeric: tabular-nums; }
 .home-pay-due { margin: 0; font-size: 1.05rem; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; gap: 6px; }
@@ -4276,6 +4286,9 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-pay-countdown { display: block; margin-top: 5px; font-size: .78rem; font-weight: 700; color: #6b7280; }
 .home-pay-countdown.is-soon { color: #b45309; }
 .home-pay-countdown.is-late { color: #b42318; }
+.home-pay-foot { margin-top: auto; }
+.home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0 16px; }
+.home-pay-foot .app-cta-primary { margin-top: 0; }
 
 /* Recent-activity card. */
 .home-activity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
@@ -4303,6 +4316,13 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .app-sidebar-link { color: #475569 !important; }
 .app-sidebar-link.is-active { color: #0E8741 !important; }
 
+/* `.dashboard-page button {background:none}` (0,1,1) out-specifies the
+   primary CTA on <button> elements (the need-loan button) and washes it
+   out. Re-assert the green fill at higher specificity (no !important so
+   :hover still wins). */
+.app-page .app-cta-primary { background: #0E8741; }
+.app-page .app-cta-primary:hover { background: #0C7137; }
+
 /* Sidebar help card (desktop only). */
 .app-sidebar-help { display: none; }
 
@@ -4311,29 +4331,31 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
   .app-welcome { display: none !important; }
   .app-pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 
-  /* Dashboard grid: loan + need on row 1, pay + activity side-by-side on
-     row 2, full-width tiles on row 3 (matches the mockup). */
+  /* Dashboard grid (5-col so the rows mirror the example): row 1 is a wide
+     loan card (3/5) + need card (2/5); row 2 flips to a narrow pay card
+     (2/5) + a wide recent-activity card (3/5); tiles span full width.
+     align-items:stretch keeps each row's two cards the same height. */
   .home-grid {
-    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     grid-template-areas:
-      "loan     need"
-      "pay      activity"
-      "tiles    tiles";
+      "loan  loan  loan  need  need"
+      "pay   pay   act   act   act"
+      "tiles tiles tiles tiles tiles";
     gap: 20px;
-    align-items: start;
+    align-items: stretch;
   }
   .home-loan     { grid-area: loan; }
   .home-needloan { grid-area: need; }
   .home-pay      { grid-area: pay; }
-  .home-activity { grid-area: activity; }
+  .home-activity { grid-area: act; }
   .home-tiles    { grid-area: tiles; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 
   /* No active loan: pay card is gone — let activity fill row 2. */
   html:not(.cif-has-active-loan) .home-grid {
     grid-template-areas:
-      "loan     need"
-      "activity activity"
-      "tiles    tiles";
+      "loan  loan  loan  need  need"
+      "act   act   act   act   act"
+      "tiles tiles tiles tiles tiles";
   }
 
   /* Sidebar help card. */
