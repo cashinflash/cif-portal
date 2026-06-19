@@ -497,6 +497,76 @@ def _delete_session(session_id: str) -> None:
 
 
 # ─────────────────────────────────────────
+# Trusted-device records ("Remember me on this device")
+#
+# After a successful MFA verify, if the user opted in, we mint a random
+# device token, hand it to the browser (localStorage), and store ONLY its
+# sha256 here (namespaced in the same session table, 30-day TTL). On the
+# next login we re-verify the password as always, then — if a valid,
+# non-expired token bound to the SAME user is presented — skip the OTP
+# step. A stolen token is useless without the password; a table leak
+# exposes only hashes. The window slides forward on each trusted login.
+# ─────────────────────────────────────────
+DEVICE_TRUST_TTL = int(os.environ.get("DEVICE_TRUST_TTL_SECS", str(30 * 24 * 60 * 60)))
+
+
+def _device_key(token: str) -> str:
+    return "device#" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _issue_trusted_device(sub: str, email: str) -> Optional[str]:
+    token = secrets.token_urlsafe(32)
+    now = int(time.time())
+    try:
+        ddb.put_item(TableName=TABLE, Item={
+            "sessionId": {"S": _device_key(token)},
+            "kind": {"S": "device"},
+            "sub": {"S": sub or ""},
+            "email": {"S": (email or "").lower()},
+            "createdAt": {"N": str(now)},
+            "expiresAt": {"N": str(now + DEVICE_TRUST_TTL)},
+        })
+    except ClientError:
+        return None
+    return token
+
+
+def _check_trusted_device(token: str, *, sub: str, email: str) -> bool:
+    if not token:
+        return False
+    try:
+        resp = ddb.get_item(
+            TableName=TABLE, Key={"sessionId": {"S": _device_key(token)}},
+            ConsistentRead=True,
+        )
+    except ClientError:
+        return False
+    item = resp.get("Item")
+    if not item or item.get("kind", {}).get("S") != "device":
+        return False
+    if int(item.get("expiresAt", {}).get("N", "0")) <= int(time.time()):
+        return False
+    # Bind the token to the account that created it. Prefer the stable sub;
+    # fall back to email. Constant-time compare on the identifier.
+    rec_sub = item.get("sub", {}).get("S", "")
+    if rec_sub and sub:
+        return hmac.compare_digest(rec_sub, sub)
+    rec_email = item.get("email", {}).get("S", "")
+    return bool(rec_email) and hmac.compare_digest(rec_email, (email or "").lower())
+
+
+def _renew_trusted_device(token: str) -> None:
+    try:
+        ddb.update_item(
+            TableName=TABLE, Key={"sessionId": {"S": _device_key(token)}},
+            UpdateExpression="SET expiresAt = :e",
+            ExpressionAttributeValues={":e": {"N": str(int(time.time()) + DEVICE_TRUST_TTL)}},
+        )
+    except ClientError:
+        pass
+
+
+# ─────────────────────────────────────────
 # Senders
 # ─────────────────────────────────────────
 def _send_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -614,6 +684,21 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     sub = user.get("Attrs", {}).get("sub", "")
     vergent_cid = user.get("Attrs", {}).get("custom:vergentCustomerId")
 
+    # "Remember me": if the browser presents a valid trusted-device token for
+    # THIS user, the verified password above is our factor for the session —
+    # skip the OTP step and return Cognito tokens directly.
+    device_token = (body.get("deviceToken") or "").strip()
+    if device_token and _check_trusted_device(device_token, sub=sub, email=email):
+        _renew_trusted_device(device_token)
+        log.info("login device-trusted (MFA skipped) for %s", _mask_email(email))
+        return _resp(200, {
+            "authenticated": True,
+            "idToken": tokens.get("IdToken"),
+            "accessToken": tokens.get("AccessToken"),
+            "refreshToken": tokens.get("RefreshToken"),
+            "expiresIn": tokens.get("ExpiresIn") or 3600,
+        })
+
     # Prefer the Vergent phone (what the customer actually uses) over Cognito.
     phone_digits = None
     if vergent_cid:
@@ -720,13 +805,23 @@ def _verify_code(event: Dict[str, Any]) -> Dict[str, Any]:
         return _resp(401, {"error": "invalid_code", "attemptsRemaining": MAX_ATTEMPTS - attempts})
 
     tokens = s["tokens"]
+
+    # "Remember me on this device": mint a 30-day trusted-device token so the
+    # next login from this browser skips the OTP step (password still required).
+    trusted_device = None
+    if body.get("rememberDevice"):
+        trusted_device = _issue_trusted_device(s.get("sub", ""), s.get("email", ""))
+
     _delete_session(session_id)
-    return _resp(200, {
+    resp_body = {
         "idToken": tokens.get("IdToken"),
         "accessToken": tokens.get("AccessToken"),
         "refreshToken": tokens.get("RefreshToken"),
         "expiresIn": tokens.get("ExpiresIn") or 3600,
-    })
+    }
+    if trusted_device:
+        resp_body["trustedDevice"] = trusted_device
+    return _resp(200, resp_body)
 
 
 # ─────────────────────────────────────────

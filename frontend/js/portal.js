@@ -187,11 +187,11 @@ const PORTAL = (() => {
     // are held in DynamoDB until the user enters the email / SMS code. This means
     // the page that calls signIn() *will not* receive tokens — it receives an
     // mfaSession + a list of channels. Then call sendMfaCode() and verifyMfaCode().
-    async signIn({ email, password }) {
+    async signIn({ email, password, deviceToken }) {
       const r = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, deviceToken: deviceToken || '' }),
       });
       const data = await r.json().catch(() => ({}));
       if (r.status === 401) {
@@ -206,7 +206,15 @@ const PORTAL = (() => {
         err.code = data.error || 'AuthFailed';
         throw err;
       }
-      return data; // { mfaSession, channels:[...], deliveredTo, expiresInSec }
+      // Trusted-device fast path: backend verified the password + a valid
+      // device token, skipped MFA, and returned Cognito tokens. Persist them
+      // like verifyMfaCode does so the caller can redirect straight in.
+      if (data && data.authenticated && data.idToken) {
+        sessionStorage.setItem('cif_id_token', data.idToken);
+        sessionStorage.setItem('cif_access_token', data.accessToken);
+        if (data.refreshToken) sessionStorage.setItem('cif_refresh_token', data.refreshToken);
+      }
+      return data; // {authenticated, idToken,...} OR {mfaSession, channels, deliveredTo}
     },
 
     async sendMfaCode({ mfaSession, channel }) {
@@ -224,11 +232,11 @@ const PORTAL = (() => {
       return data;
     },
 
-    async verifyMfaCode({ mfaSession, code }) {
+    async verifyMfaCode({ mfaSession, code, rememberDevice }) {
       const r = await fetch('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mfaSession, code }),
+        body: JSON.stringify({ mfaSession, code, rememberDevice: !!rememberDevice }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -241,6 +249,10 @@ const PORTAL = (() => {
       sessionStorage.setItem('cif_id_token', data.idToken);
       sessionStorage.setItem('cif_access_token', data.accessToken);
       if (data.refreshToken) sessionStorage.setItem('cif_refresh_token', data.refreshToken);
+      // Remember this device for 30 days so MFA is skipped next time here.
+      if (data.trustedDevice) {
+        try { localStorage.setItem('cif_device_token', data.trustedDevice); } catch (e) { /* ignore */ }
+      }
       return data;
     },
   };

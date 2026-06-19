@@ -134,6 +134,10 @@
         <input type="password" name="password" required autocomplete="current-password">
       </div>
       <div id="error" class="form-error" style="display:none;"></div>
+      <label class="remember-row" style="display:flex;align-items:center;gap:9px;margin:2px 0 8px;cursor:pointer;font-size:.92rem;color:#374151;user-select:none;">
+        <input type="checkbox" id="rememberMe" checked style="width:17px;height:17px;flex:0 0 auto;accent-color:#0E8741;cursor:pointer;">
+        Remember me on this device
+      </label>
       <button type="submit" class="btn btn-primary btn-block btn-lg" id="loginBtn">Sign In</button>
     </form>
 
@@ -205,6 +209,26 @@ const pendingEmail = sessionStorage.getItem('cif_pending_email');
 if (pendingEmail) {
   document.querySelector('input[name="email"]').value = pendingEmail;
   sessionStorage.removeItem('cif_pending_email');
+}
+
+// Remember me: pre-fill the saved email and keep the box checked when we
+// have a remembered email. Cleared when the user signs in with it unchecked.
+try {
+  const _emailEl = document.querySelector('input[name="email"]');
+  const _rememberedEmail = localStorage.getItem('cif_remember_email');
+  if (_rememberedEmail && _emailEl && !_emailEl.value) _emailEl.value = _rememberedEmail;
+} catch (e) { /* localStorage disabled */ }
+
+// Persist (or clear) the Remember-me email after a completed sign-in.
+function persistRemember(remember, email) {
+  try {
+    if (remember) {
+      if (email) localStorage.setItem('cif_remember_email', email);
+    } else {
+      localStorage.removeItem('cif_remember_email');
+      localStorage.removeItem('cif_device_token');
+    }
+  } catch (e) { /* ignore */ }
 }
 
 const errBox   = document.getElementById('error');
@@ -301,10 +325,12 @@ function moveToCodeEntry(channel) {
       : 'We texted a 5-digit code to ' + target + '. Enter it below.';
   codeErr.style.display = 'none';
   codeInput.value = '';
-  // Segmented code boxes — 6 digits for email, 5 for the SMS code.
-  codeOtp = PORTAL.initOtp(codeInput, { length: channel === 'email' ? 6 : 5 });
+  // Single autocomplete="one-time-code" field so iOS/Android auto-fill the
+  // SMS/email code (the segmented multi-box version broke native autofill).
+  codeInput.maxLength = channel === 'email' ? 6 : 5;
+  codeOtp = null;
   showStep('code');
-  setTimeout(() => { if (codeOtp) { codeOtp.focus(); } }, 50);
+  setTimeout(() => { try { codeInput.focus(); } catch (e) { /* ignore */ } }, 50);
 }
 
 channelBack.addEventListener('click', () => {
@@ -355,7 +381,11 @@ codeForm.addEventListener('submit', async (e) => {
   verifyBtn.disabled = true;
   verifyBtn.textContent = 'Verifying…';
   try {
-    await PORTAL.cognito.verifyMfaCode({ mfaSession: mfaState.mfaSession, code });
+    await PORTAL.cognito.verifyMfaCode({
+      mfaSession: mfaState.mfaSession, code,
+      rememberDevice: !!mfaState.remember,
+    });
+    persistRemember(!!mfaState.remember, mfaState.email || '');
     window.location.href = '/dashboard.html';
   } catch (err) {
     if (err.code === 'session_expired' || err.code === 'too_many_attempts') {
@@ -374,7 +404,8 @@ codeForm.addEventListener('submit', async (e) => {
         ? 'Wrong code. ' + remaining + ' attempt' + (remaining === 1 ? '' : 's') + ' remaining.'
         : (err.message || 'Verification failed.');
     codeErr.style.display = 'block';
-    if (codeOtp) { codeOtp.clear(); }
+    codeInput.value = '';
+    try { codeInput.focus(); } catch (e) { /* ignore */ }
   } finally {
     verifyBtn.disabled = false;
     verifyBtn.textContent = 'Verify and continue';
@@ -387,11 +418,24 @@ credForm.addEventListener('submit', async (e) => {
   const form = e.currentTarget;
   const email    = form.email.value.trim().toLowerCase();
   const password = form.password.value;
+  const remember = (document.getElementById('rememberMe') || {}).checked !== false;
   loginBtn.disabled = true;
   loginBtn.textContent = 'Signing in…';
   try {
-    const r = await PORTAL.cognito.signIn({ email, password });
+    // Only present the trusted-device token when "Remember me" is on, so an
+    // unchecked sign-in always re-verifies (and won't reuse a stale trust).
+    let deviceToken = '';
+    try { if (remember) deviceToken = localStorage.getItem('cif_device_token') || ''; } catch (e) {}
+    const r = await PORTAL.cognito.signIn({ email, password, deviceToken });
+    // Trusted device → backend skipped MFA and returned tokens directly.
+    if (r && r.authenticated) {
+      persistRemember(remember, email);
+      window.location.href = '/dashboard.html';
+      return;
+    }
     mfaState = r;
+    mfaState.remember = remember;
+    mfaState.email = email;
     renderChannels(r.channels || [], r.deliveredTo);
     showStep('channel');
     // Always show the channel picker — never auto-advance — so customers
