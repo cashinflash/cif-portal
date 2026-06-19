@@ -4393,6 +4393,11 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
   .home-activity { grid-area: act; }
   .home-tiles    { grid-area: tiles; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 
+  /* Force each paired card to fill its row track so the two cards in a row
+     are always the exact same height (align-items:stretch alone wasn't
+     equalizing them — the taller card was overflowing the track). */
+  .home-loan, .home-needloan, .home-pay, .home-activity { height: 100%; }
+
   /* No active loan: pay card is gone — let activity fill row 2. */
   html:not(.cif-has-active-loan) .home-grid {
     grid-template-areas:
