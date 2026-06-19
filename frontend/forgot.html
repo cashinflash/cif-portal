@@ -6,6 +6,7 @@
 <style>/* app-feel: no sideways scroll */ html,body{overflow-x:hidden;max-width:100%;}</style>
 <meta name="robots" content="noindex">
 <title>Reset your password — Cash in Flash</title>
+<link rel="icon" type="image/png" href="/images/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
@@ -208,6 +209,57 @@
               <div class="forgot-success">Your password has been updated.</div>
               <a href="/login.html" class="auth-btn auth-btn--primary">Sign in with new password</a>
             </div>
+          </div>
+
+          <!-- ===== Forgot email (find your account) ===== -->
+          <div class="auth-cardbig">
+            <h2 class="auth-welcome">Forgot email</h2>
+            <p class="auth-sub">Confirm your details and we'll locate your account and recover the email you signed up with.</p>
+
+            <div id="searchBanner" class="auth-banner" style="display:none;"></div>
+
+            <form id="searchForm">
+              <div class="auth-ifield">
+                <label for="sf-first">First name</label>
+                <div class="auth-inputbox">
+                  <span class="auth-ic auth-ic--sm" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+                  <input id="sf-first" type="text" name="firstName" required autocomplete="given-name" placeholder="Enter your first name">
+                </div>
+              </div>
+              <div class="auth-ifield">
+                <label for="sf-last">Last name</label>
+                <div class="auth-inputbox">
+                  <span class="auth-ic auth-ic--sm" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+                  <input id="sf-last" type="text" name="lastName" required autocomplete="family-name" placeholder="Enter your last name">
+                </div>
+              </div>
+              <div class="auth-ifield">
+                <label for="sf-dob">Date of birth</label>
+                <div class="auth-inputbox">
+                  <span class="auth-ic auth-ic--sm" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+                  <input id="sf-dob" type="date" name="dob" required placeholder="mm/dd/yyyy">
+                </div>
+              </div>
+              <div class="auth-ifield">
+                <label for="ssn">SSN</label>
+                <div class="auth-inputbox">
+                  <span class="auth-ic auth-ic--sm" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><line x1="12" y1="15" x2="12" y2="17"/></svg></span>
+                  <input id="ssn" type="password" name="idNumber" required autocomplete="off" inputmode="numeric" maxlength="11" placeholder="XXX-XX-XXXX">
+                </div>
+              </div>
+              <div class="auth-ifield">
+                <label for="phone">Phone number <span class="opt">(optional)</span></label>
+                <div class="auth-inputbox">
+                  <span class="auth-ic auth-ic--sm" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
+                  <input id="phone" type="tel" name="phone" autocomplete="tel" inputmode="numeric" maxlength="14" placeholder="(555) 555-5555">
+                </div>
+              </div>
+              <div id="error" class="auth-error" style="display:none;"></div>
+              <button type="submit" class="auth-btn auth-btn--primary" id="searchBtn">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Search
+              </button>
+            </form>
           </div>
 
           <div class="auth-backrow">
@@ -469,6 +521,98 @@
         confirmErr.textContent = 'Network error. Please try again.';
         confirmErr.style.display = 'block';
       });
+  });
+})();
+</script>
+
+<script>
+/* Forgot email — the Find-your-account search (recovers the email, no password). */
+(function () {
+  'use strict';
+  var searchForm = document.getElementById('searchForm');
+  if (!searchForm) return;
+
+  // Restore any banner left by signup.html (missing Vergent email, mismatch, etc.)
+  var bannerMsg = sessionStorage.getItem('cif_search_banner');
+  if (bannerMsg) {
+    sessionStorage.removeItem('cif_search_banner');
+    var bEl = document.getElementById('searchBanner');
+    if (bEl) { bEl.textContent = bannerMsg; bEl.style.display = 'block'; }
+  }
+
+  function fmtSSN(el) {
+    var v = el.value.replace(/\D/g, '');
+    if (v.length > 3 && v.length <= 5) v = v.slice(0,3) + '-' + v.slice(3);
+    else if (v.length > 5) v = v.slice(0,3) + '-' + v.slice(3,5) + '-' + v.slice(5,9);
+    el.value = v;
+  }
+  function fmtPhone(el) {
+    var v = el.value.replace(/\D/g, '');
+    if (v.length > 6) v = '(' + v.slice(0,3) + ') ' + v.slice(3,6) + '-' + v.slice(6,10);
+    else if (v.length > 3) v = '(' + v.slice(0,3) + ') ' + v.slice(3);
+    el.value = v;
+  }
+  var ssnEl = document.getElementById('ssn');
+  var phoneEl = document.getElementById('phone');
+  if (ssnEl) ssnEl.addEventListener('input', function (e) { fmtSSN(e.target); });
+  if (phoneEl) phoneEl.addEventListener('input', function (e) { fmtPhone(e.target); });
+
+  var searchBtn = document.getElementById('searchBtn');
+  var searchBtnHTML = searchBtn.innerHTML;
+
+  searchForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var form = e.target;
+    var errDiv = document.getElementById('error');
+    errDiv.style.display = 'none';
+    searchBtn.disabled = true;
+    searchBtn.textContent = 'Searching…';
+
+    var payload = {
+      firstName: form.firstName.value.trim(),
+      lastName: form.lastName.value.trim(),
+      dob: form.dob.value,
+      phone: form.phone.value.replace(/\D/g, ''),
+      idNumber: form.idNumber.value.replace(/\D/g, ''),
+    };
+
+    try {
+      var result = await PORTAL.apiFetch('/api/search', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      if (result.match === 'single') {
+        if (result.hasPortalAccount) {
+          sessionStorage.setItem('cif_pending_email', result.email || '');
+          window.location.href = '/login.html';
+        } else {
+          sessionStorage.setItem('cif_signup_context', JSON.stringify({
+            vergentCustomerId: result.vergentCustomerId,
+            email: result.email,
+            firstName: payload.firstName,
+            lastName: payload.lastName,
+          }));
+          window.location.href = '/signup.html';
+        }
+      } else if (result.match === 'none') {
+        window.location.href = 'https://apply.cashinflash.com';
+      } else if (result.match === 'multiple') {
+        errDiv.textContent = 'We found more than one record matching that information. Please call us at (888) 999-9859 so we can help.';
+        errDiv.style.display = 'block';
+        searchBtn.disabled = false;
+        searchBtn.innerHTML = searchBtnHTML;
+      }
+    } catch (err) {
+      var msg = err && err.body && err.body.error;
+      if (!msg || msg === 'Internal Server Error') {
+        msg = "We couldn't look up your account right now. Please try again in a moment, or call us at (888) 999-9859.";
+      }
+      errDiv.textContent = msg;
+      errDiv.style.display = 'block';
+      searchBtn.disabled = false;
+      searchBtn.innerHTML = searchBtnHTML;
+    }
   });
 })();
 </script>

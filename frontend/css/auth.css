@@ -209,6 +209,8 @@
 
 /* ---------- Find-account / reset: big card wrapping heading + form ---------- */
 .auth-cardbig { background: #fff; border: 1px solid #e7ecf1; border-radius: 20px; padding: clamp(22px, 4vw, 40px); box-shadow: 0 2px 8px rgba(16,24,40,.04); }
+.auth-cardbig + .auth-cardbig { margin-top: 18px; }
+.auth-cardbig + .auth-cardbig .auth-welcome { font-size: clamp(1.5rem, 1.2rem + 1.1vw, 2rem); }
 .auth-cardbig .auth-welcome { font-size: clamp(1.8rem, 1.4rem + 1.4vw, 2.4rem); }
 .auth-cardbig .auth-sub { margin-bottom: 22px; }
 .auth-cardbig .auth-card { border: none; box-shadow: none; padding: 0; margin-top: 0; }
