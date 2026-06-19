@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 380" fill="none" role="img" aria-label="Smartphone showing Cash in Flash approved, beside stacks of cash and gold coins">
+  <defs>
+    <linearGradient id="cifPhone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1aa44f"/>
+      <stop offset="1" stop-color="#0c7a39"/>
+    </linearGradient>
+    <linearGradient id="cifBill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#46c172"/>
+      <stop offset="1" stop-color="#2f9c56"/>
+    </linearGradient>
+  </defs>
+
+  <!-- soft ground shadow -->
+  <ellipse cx="290" cy="332" rx="196" ry="26" fill="#0E8741" opacity=".08"/>
+
+  <!-- speed / motion lines -->
+  <g stroke="#3fc671" stroke-width="7" stroke-linecap="round">
+    <line x1="36" y1="150" x2="150" y2="150" opacity=".55"/>
+    <line x1="20" y1="188" x2="138" y2="188" opacity=".85"/>
+    <line x1="44" y1="226" x2="152" y2="226" opacity=".45"/>
+  </g>
+
+  <!-- lightning bolt + sparkles -->
+  <path d="M388 44 l-30 44 18 4 -26 40 50 -52 -20 -4 24 -34z" fill="#15C15D"/>
+  <g fill="#16a94f">
+    <path d="M430 96 l5 13 13 5 -13 5 -5 13 -5 -13 -13 -5 13 -5z"/>
+    <path d="M446 150 l3.5 9 9 3.5 -9 3.5 -3.5 9 -3.5 -9 -9 -3.5 9 -3.5z"/>
+  </g>
+
+  <!-- ===== Phone ===== -->
+  <g transform="rotate(-7 200 200)">
+    <rect x="120" y="70" width="172" height="252" rx="30" fill="url(#cifPhone)"/>
+    <rect x="120" y="70" width="172" height="252" rx="30" fill="#000" opacity=".06"/>
+    <rect x="132" y="84" width="148" height="224" rx="20" fill="#ffffff"/>
+    <!-- screen badge -->
+    <circle cx="206" cy="150" r="34" fill="#15C15D"/>
+    <path d="M212 132 l-18 26 13 0 -7 22 20 -28 -13 0 5 -20z" fill="#ffffff"/>
+    <text x="206" y="212" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700" fill="#0E8741">Cash in Flash</text>
+    <text x="206" y="246" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="800" fill="#15a04c">Approved!</text>
+  </g>
+
+  <!-- ===== Cash stack ===== -->
+  <g transform="translate(322 196)">
+    <g transform="skewY(-8)">
+      <rect x="0" y="40" width="150" height="34" rx="6" fill="#2f9c56"/>
+      <rect x="0" y="22" width="150" height="34" rx="6" fill="#3aac61"/>
+      <rect x="0" y="4" width="150" height="34" rx="6" fill="url(#cifBill)"/>
+      <circle cx="75" cy="21" r="13" fill="#ffffff" opacity=".85"/>
+      <text x="75" y="27" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="800" fill="#2f9c56">$</text>
+    </g>
+  </g>
+
+  <!-- ===== Gold coins ===== -->
+  <g transform="translate(366 250)">
+    <g>
+      <ellipse cx="40" cy="62" rx="42" ry="15" fill="#e0a500"/>
+      <ellipse cx="40" cy="54" rx="42" ry="15" fill="#f7c531"/>
+      <ellipse cx="40" cy="46" rx="42" ry="15" fill="#ffd23f"/>
+      <ellipse cx="40" cy="46" rx="30" ry="9" fill="#ffe07a"/>
+      <text x="40" y="51" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="#d99400">$</text>
+    </g>
+    <g transform="translate(58 8)">
+      <ellipse cx="40" cy="62" rx="34" ry="12" fill="#e0a500"/>
+      <ellipse cx="40" cy="55" rx="34" ry="12" fill="#f7c531"/>
+      <ellipse cx="40" cy="48" rx="34" ry="12" fill="#ffd23f"/>
+      <text x="40" y="53" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="800" fill="#d99400">$</text>
+    </g>
+  </g>
+</svg>
