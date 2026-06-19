@@ -9,6 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="/css/cif-brand.css">
+<link rel="stylesheet" href="/css/portal.css">
 <link rel="stylesheet" href="/css/auth.css">
 <style>
   /* MFA steps — scoped to the login card. */
@@ -34,12 +36,52 @@
 </head>
 <body class="auth-body login-page">
 
-  <!-- Top bar -->
-  <header class="auth-top">
-    <a href="https://cashinflash.com" class="auth-top-logo"><img src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="170" height="22"></a>
-    <a href="/login.html" class="auth-avatar" aria-label="Account">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-    </a>
+  <!-- Site header — same as cashinflash.com (logo left, hamburger right on mobile) -->
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="https://cashinflash.com" class="logo">
+        <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="160" height="21">
+      </a>
+      <nav class="main-nav"><ul class="nav-list"></ul></nav>
+      <div class="header-actions">
+        <a href="https://cashinflash.com/locations/" class="btn-store">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          Find a Store
+        </a>
+        <a href="https://cashinflash.com" class="btn-login">Home</a>
+      </div>
+      <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"><span></span><span></span><span></span></button>
+    </div>
+    <div class="mobile-menu" id="mobile-menu">
+      <div class="mobile-menu-hd">
+        <a href="https://cashinflash.com" class="logo">
+          <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="140" height="19">
+        </a>
+        <button class="mobile-close-btn" id="mobile-close-btn" aria-label="Close menu">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="mobile-menu-inner">
+        <ul class="mobile-nav-list">
+          <li class="mobile-nav-item has-sub">
+            <a href="#">Loans</a>
+            <ul class="mobile-sub">
+              <li><a href="https://cashinflash.com/loans/payday-loans/">Payday Loans</a></li>
+              <li><a href="https://cashinflash.com/loans/cash-advance/">Cash Advances</a></li>
+            </ul>
+          </li>
+          <li class="mobile-nav-item"><a href="https://cashinflash.com/services/western-union/">Western Union</a></li>
+          <li class="mobile-nav-item"><a href="https://cashinflash.com/money-tips/">Money Tips</a></li>
+        </ul>
+        <div class="mobile-menu-extra">
+          <a href="https://cashinflash.com/locations/" class="mobile-store-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            Find a Store
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="mobile-menu-overlay" id="mobile-overlay"></div>
   </header>
 
   <main class="auth-main">
@@ -160,18 +202,26 @@
     </div>
   </footer>
 
-  <!-- Bottom tab bar (mobile) -->
-  <nav class="auth-tabbar auth-mobile" aria-label="Primary">
-    <a href="/dashboard.html" class="auth-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg><span>Home</span></a>
-    <a href="/loans.html" class="auth-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>Loans</span></a>
-    <a href="/payments.html" class="auth-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a2.5 2 0 0 0-2.5-1.5c-1.5 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1 2-2.5 2a2.5 2 0 0 1-2.5-1.5M12 6.5v11"/></svg><span>Payments</span></a>
-    <a href="/profile.html" class="auth-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>Profile</span></a>
-    <a href="https://cashinflash.com" class="auth-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg><span>More</span></a>
-  </nav>
-
 <script src="/js/portal.js"></script>
 <script>
 (function(){ var y = document.getElementById('footerYear'); if (y) y.textContent = String(new Date().getFullYear()); })();
+
+// Site header (cashinflash.com) mobile menu toggle.
+(function () {
+  var btn = document.getElementById('menu-toggle');
+  var menu = document.getElementById('mobile-menu');
+  var overlay = document.getElementById('mobile-overlay');
+  var closeBtn = document.getElementById('mobile-close-btn');
+  if (!btn || !menu) return;
+  function openM() { btn.classList.add('active'); menu.classList.add('open'); if (overlay) overlay.classList.add('open'); }
+  function shut() { btn.classList.remove('active'); menu.classList.remove('open'); if (overlay) overlay.classList.remove('open'); }
+  btn.addEventListener('click', openM);
+  if (closeBtn) closeBtn.addEventListener('click', shut);
+  if (overlay) overlay.addEventListener('click', shut);
+  document.querySelectorAll('.mobile-nav-item.has-sub > a').forEach(function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); a.parentElement.classList.toggle('open'); });
+  });
+})();
 
 // Password show/hide toggles (any .auth-eye[data-eye]).
 document.querySelectorAll('.auth-eye[data-eye]').forEach(function (btn) {

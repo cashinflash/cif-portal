@@ -184,7 +184,9 @@
   background: #fff;
   border-bottom: 1px solid rgba(0,0,0,.06);
 }
-.mobile-menu-logo img { height: 30px; width: auto; display: block; }
+/* The wordmark PNG has a baked-in white background; `multiply` drops it onto
+   the light drawer (#f4f6f8) so it reads like a transparent logo. */
+.mobile-menu-logo img { height: 30px; width: auto; display: block; mix-blend-mode: multiply; }
 .mobile-menu-close { padding: 4px; }
 .mobile-nav-list { padding: 16px; display: flex; flex-direction: column; gap: 2px; }
 .mobile-nav-item a {
