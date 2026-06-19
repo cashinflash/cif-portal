@@ -72,9 +72,12 @@
 /* Password show/hide toggle. */
 .auth-eye { flex: 0 0 auto; background: none; border: none; padding: 6px; margin: 0; cursor: pointer; color: #7b8694; display: grid; place-items: center; }
 .auth-eye:hover { color: #1a1a2e; }
-/* One eye icon only — the slashed variant was removed from the markup, so
-   there's never a second eye. !important defeats portal.css's global svg rule. */
-.auth-eye svg { display: block !important; }
+/* Eye toggle: open eye when the password is hidden, slashed eye when it's
+   shown. (portal.js's own injected eye is opted out via data-no-eye.) */
+.auth-eye .eye-on { display: block; }
+.auth-eye .eye-off { display: none; }
+.auth-eye.is-on .eye-on { display: none; }
+.auth-eye.is-on .eye-off { display: block; }
 
 /* Hint line under a field (e.g. password rules). */
 .auth-hint { margin: 0 0 14px; padding: 0 2px; font-size: .82rem; color: #6b7785; line-height: 1.45; }
@@ -97,7 +100,7 @@
 .auth-inputbox input::placeholder { color: #9aa6b2; }
 
 /* Remember + forgot row. */
-.auth-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 16px; }
+.auth-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; border-top: 1px solid #eef1f4; }
 .auth-remember { display: inline-flex; align-items: center; gap: 10px; font-size: .95rem; color: #344054; cursor: pointer; user-select: none; }
 .auth-remember input { width: 20px; height: 20px; flex: 0 0 auto; accent-color: #16a34a; cursor: pointer; }
 .auth-forgot { font-size: .95rem; font-weight: 600; color: #16a34a; }
@@ -186,8 +189,6 @@
   .auth-footer { display: none; }
   /* Breathing room between the site header and the page heading on mobile. */
   .auth-wrap { padding-top: 26px; }
-  /* Divider under the password field, above the remember/forgot row (mockup). */
-  .auth-row { border-top: 1px solid #eef1f4; padding-top: 16px; }
   /* Secure strip sits below the promo on mobile; the grid gap spaces it. */
   .auth-secure.auth-mobile { margin-top: 0; }
   /* Compact the 3-up feature row so it fits narrow phones without overflow. */
