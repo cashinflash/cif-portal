@@ -147,7 +147,8 @@
 .auth-promo-title { margin: 0; font-size: clamp(1.45rem, 1.2rem + 1.6vw, 1.95rem); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; color: #0f1729; }
 .auth-promo-title .fast { color: #15a34a; display: block; }
 .auth-promo-sub { margin: 9px 0 0; font-size: .9rem; color: #5b6b7b; line-height: 1.4; }
-.auth-promo-art { flex: 0 0 auto; width: 44%; max-width: 168px; height: auto; }
+.auth-promo-art { flex: 0 0 auto; display: block; width: 44%; max-width: 172px; height: auto; }
+.auth-promo-art img { display: block; width: 100%; height: auto; border: 0; }
 
 /* Feature row (white card with 3 items + dividers). One line each (nowrap). */
 .auth-features { display: flex; background: #fff; border: 1px solid #e7f1ea; border-radius: 16px; padding: 14px 4px; margin-top: 14px; box-shadow: 0 2px 8px rgba(16,24,40,.04); }
@@ -270,13 +271,19 @@
 .auth-choice--ghost .auth-choice-arrow { color: #c2cad3; }
 
 /* ============================================================
-   Password field: hide browser-injected reveal / autofill icons
-   (Edge reveal eye, Safari autofill key) so only our one eye shows.
+   Password field: kill EVERY possible second "eye".
+   1) A reveal eye painted as a background-image by portal.css (uses
+      !important, so our plain transparent background didn't beat it).
+   2) Native browser reveal / autofill buttons (Edge eye, Safari key).
    ============================================================ */
+.auth-body input[type="password"] { background-image: none !important; }
+.auth-body .auth-field-main input,
+.auth-body .auth-inputbox input { background: transparent !important; background-image: none !important; }
 .auth-body input::-ms-reveal, .auth-body input::-ms-clear { display: none !important; }
 .auth-body input::-webkit-credentials-auto-fill-button,
-.auth-body input::-webkit-strong-password-auto-fill-button {
-  visibility: hidden !important; pointer-events: none !important;
+.auth-body input::-webkit-strong-password-auto-fill-button,
+.auth-body input::-webkit-contacts-auto-fill-button {
+  visibility: hidden !important; display: none !important; pointer-events: none !important;
   position: absolute !important; right: 0 !important; width: 0 !important; height: 0 !important; margin: 0 !important;
 }
 
