@@ -139,6 +139,8 @@
     wireSignOut();
     wireMobileMenu();
     wireNewLoanButton();
+    wireAppActions();
+    loadCards(token);
     showPaymentSuccessBanner();  // one-shot "payment posted" banner
     renderProfileFromClaims();   // instant render from JWT claims (legacy selectors safe to call when missing)
     loadProfileFromApi();         // hydrate with Vergent data (account status, phone hint, text-messaging flag)
@@ -429,9 +431,21 @@
         renderActiveLoan(card, data);
       }
     } else {
-      if (card) card.hidden = true;
+      if (card) {
+        card.hidden = false;
+        card.setAttribute('aria-busy', 'false');
+        var _sk = qs('.dash-card-skeleton', card); if (_sk) _sk.style.display = 'none';
+        var _bd = qs('.dash-loan-body', card); if (_bd) _bd.hidden = true;
+        var _emp = qs('.dash-loan-empty', card); if (_emp) _emp.hidden = false;
+      }
       if (hero) hero.hidden = false;
     }
+
+    // App layout: record state + toggle the active-only "Make a payment" CTA.
+    window.__cifActiveLoan = hasActive;
+    qsa('[data-show-when-active]').forEach(function (el) {
+      el.style.display = hasActive ? '' : 'none';
+    });
 
     // Stats grid (always visible if we got a successful response)
     renderStatsGrid(allLoans);
@@ -637,7 +651,7 @@
         pill.textContent = loan.isInRescindPeriod ? 'Rescind period' : loan.status;
       } else {
         pill.classList.add('dash-pill--ok');
-        pill.textContent = loan.status || 'Current';
+        pill.textContent = 'In good standing';
       }
     }
   }
@@ -771,6 +785,46 @@
   }
 
   // ---------- Sign out ----------
+  // ---------- App layout actions (re-loan gating, modal, More tab) ----------
+  function wireAppActions() {
+    var APPLY_URL = 'https://apply.cashinflash.com';
+    var modal = qs('#reloanModal');
+    function requestLoan() {
+      var active = window.__cifActiveLoan;
+      if (typeof active === 'undefined') active = (sessionStorage.getItem('cif_has_active_loan') === 'true');
+      if (active) { if (modal) modal.hidden = false; }
+      else { window.location.href = APPLY_URL; }
+    }
+    var rl = qs('#requestLoanBtn'); if (rl) rl.addEventListener('click', requestLoan);
+    var promo = qs('#promoRequestLoan'); if (promo) promo.addEventListener('click', requestLoan);
+    qsa('[data-close-reloan]').forEach(function (el) {
+      el.addEventListener('click', function () { if (modal) modal.hidden = true; });
+    });
+    var more = qs('#moreTab');
+    if (more) more.addEventListener('click', function () {
+      var menu = qs('#mobile-menu'), toggle = qs('#menu-toggle');
+      if (menu) menu.classList.add('open');
+      if (toggle) toggle.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    });
+  }
+
+  // ---------- Repayment method: card on file (fallback shows default) ----------
+  function loadCards(token) {
+    if (!token) return;
+    api('/api/my-cards', token).then(function (data) {
+      var cards = (data && (data.cards || data.methods)) || [];
+      var methodEl = document.querySelector('[data-loan-repay-method]');
+      var summaryEl = document.querySelector('[data-card-summary]');
+      if (cards.length) {
+        var c = cards[0];
+        var label = (c.brand || c.cardType || 'Card') + ' •• ' + (c.last4 || c.lastFour || '');
+        if (methodEl) methodEl.textContent = label;
+        if (summaryEl) summaryEl.textContent = label;
+      }
+    }).catch(function () { /* leave the on-card defaults */ });
+  }
+
   function wireSignOut() {
     function signOut() {
       sessionStorage.removeItem(TOKEN_KEY);

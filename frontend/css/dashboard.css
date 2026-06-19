@@ -3961,3 +3961,177 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   margin: 0; font-weight: 700; font-size: .95rem; color: var(--cif-muted, #555);
 }
 .dash-recent-activity-empty-sub { margin: 0; font-size: .85rem; }
+
+/* ============================================================
+   APP REDESIGN (mobile-app layout) — Home/dashboard.
+   Centered phone-width column on desktop; full-bleed on mobile.
+   ============================================================ */
+.app-page {
+  margin: 0;
+  background: #f4f6f8;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #1a1a2e;
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+.app-page.has-sidebar { padding-left: 0; }
+
+/* Top bar */
+.app-topbar {
+  position: sticky; top: 0; z-index: 900;
+  display: grid; grid-template-columns: 40px 1fr 40px; align-items: center;
+  gap: 8px; height: 60px; padding: 0 16px;
+  padding-top: env(safe-area-inset-top);
+  background: #f4f6f8;
+}
+.app-topbar-logo { justify-self: center; display: inline-flex; }
+.app-topbar-logo img { height: 22px; width: auto; display: block; }
+.app-icon-btn {
+  width: 40px; height: 40px; display: inline-flex; align-items: center;
+  justify-content: center; border: none; background: none; cursor: pointer;
+  border-radius: 10px; padding: 0;
+}
+.app-avatar-btn {
+  width: 38px; height: 38px; justify-self: end; border-radius: 50%;
+  background: #0E8741; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Main column */
+.app-main {
+  max-width: 480px; margin: 0 auto; padding: 8px 18px 24px;
+}
+
+/* Welcome */
+.app-welcome { display: flex; align-items: center; gap: 14px; margin: 10px 0 18px; }
+.app-welcome-avatar {
+  width: 52px; height: 52px; border-radius: 50%; flex: 0 0 52px;
+  background: #e3f3ea; display: inline-flex; align-items: center; justify-content: center;
+}
+.app-welcome-text p { margin: 0; font-size: .95rem; color: #6b7280; }
+.app-welcome-text h1 { margin: 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -.01em; }
+
+/* Green loan card */
+.loan-card {
+  position: relative; border-radius: 22px; padding: 22px;
+  background: linear-gradient(150deg, #1FA050 0%, #0E8741 58%, #0C7137 100%);
+  color: #fff; box-shadow: 0 12px 30px rgba(14,135,65,.22); overflow: hidden;
+}
+.loan-card-skel { display: flex; flex-direction: column; gap: 14px; }
+.loan-card-skel-line { height: 14px; border-radius: 7px; background: rgba(255,255,255,.22); }
+.loan-card-skel-line.tall { height: 34px; }
+.loan-card-skel-line.w-40 { width: 40%; } .loan-card-skel-line.w-70 { width: 70%; } .loan-card-skel-line.w-50 { width: 50%; }
+.loan-card-head { display: flex; align-items: flex-start; gap: 12px; }
+.loan-card-doc {
+  width: 44px; height: 44px; flex: 0 0 44px; border-radius: 50%;
+  background: rgba(255,255,255,.16); display: inline-flex; align-items: center; justify-content: center;
+}
+.loan-card-titles { flex: 1; min-width: 0; }
+.loan-card-eyebrow { display: block; font-size: 1.02rem; font-weight: 700; }
+.loan-card-id { display: block; font-size: .82rem; color: rgba(255,255,255,.8); font-variant-numeric: tabular-nums; }
+.loan-card-pill {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700;
+  background: rgba(255,255,255,.18); color: #fff; white-space: nowrap;
+}
+.loan-card-pill::after { content: "\2713"; font-weight: 800; }
+.loan-card-pill.dash-pill--past-due, .loan-card-pill.dash-pill--warn { background: rgba(255,255,255,.92); color: #b42318; }
+.loan-card-pill.dash-pill--past-due::after, .loan-card-pill.dash-pill--warn::after { content: ""; }
+.loan-card-figures { display: flex; gap: 18px; margin-top: 22px; }
+.loan-card-fig { flex: 1; min-width: 0; }
+.loan-card-flabel { margin: 0 0 4px; font-size: .82rem; color: rgba(255,255,255,.82); }
+.loan-card-balance { margin: 0; font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.loan-card-balance small { font-size: 1.3rem; font-weight: 700; vertical-align: 12px; margin-right: 2px; }
+.loan-card-due { margin: 4px 0 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
+.loan-card-rule { height: 1px; background: rgba(255,255,255,.2); margin: 20px 0 16px; }
+.loan-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; text-decoration: none; color: #fff; }
+.loan-card-method { margin: 4px 0 0; font-size: .98rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.dash-loan-empty .loan-card-empty-sub { margin: 6px 0 0; color: rgba(255,255,255,.85); font-size: .9rem; }
+
+/* CTAs */
+.app-cta-primary {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; margin-top: 16px; padding: 17px 22px; border: none;
+  background: #0E8741; color: #fff; font-weight: 700; font-size: 1.02rem;
+  font-family: inherit; text-decoration: none; border-radius: 16px; cursor: pointer;
+  box-shadow: 0 8px 20px rgba(14,135,65,.26); position: relative;
+}
+.app-cta-primary:hover { background: #0C7137; }
+.app-cta-primary .app-cta-chev { position: absolute; right: 20px; }
+.app-cta-outline {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; margin-top: 12px; padding: 16px 22px; cursor: pointer;
+  background: #fff; color: #0E8741; font-weight: 700; font-size: 1.02rem;
+  font-family: inherit; border: 1.5px solid #cfe6d8; border-radius: 16px; position: relative;
+}
+.app-cta-outline:hover { border-color: #0E8741; background: #f4faf6; }
+.app-cta-outline small { color: #6b7280; font-weight: 600; font-size: .82rem; }
+.app-cta-outline .app-cta-chev { position: absolute; right: 20px; color: #94a3b8; }
+
+/* Trust row */
+.app-trust {
+  display: flex; align-items: stretch; gap: 8px; margin-top: 18px; padding: 16px 8px;
+  background: #fff; border-radius: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.05);
+}
+.app-trust-item { flex: 1; display: flex; align-items: center; gap: 9px; justify-content: center; }
+.app-trust-item + .app-trust-item { border-left: 1px solid #eef1f4; }
+.app-trust-icon { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; background: #e8f5ee; display: inline-flex; align-items: center; justify-content: center; }
+.app-trust-item p { margin: 0; font-size: .8rem; line-height: 1.25; color: #6b7280; }
+.app-trust-item strong { display: block; color: #1a1a2e; font-weight: 700; }
+
+/* Action tiles */
+.app-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.app-tile {
+  display: flex; flex-direction: column; gap: 10px; padding: 16px; text-decoration: none;
+  background: #fff; border-radius: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.05); position: relative;
+  transition: box-shadow .15s ease, transform .15s ease;
+}
+.app-tile:hover { box-shadow: 0 8px 20px rgba(15,23,42,.08); transform: translateY(-1px); }
+.app-tile-icon { width: 42px; height: 42px; border-radius: 12px; background: #e8f5ee; display: inline-flex; align-items: center; justify-content: center; }
+.app-tile-text { display: flex; flex-direction: column; gap: 2px; }
+.app-tile-text strong { color: #1a1a2e; font-weight: 700; font-size: .98rem; }
+.app-tile-text small { color: #6b7280; font-size: .82rem; line-height: 1.3; }
+.app-tile-chev { position: absolute; top: 18px; right: 14px; }
+
+/* Promo */
+.app-promo {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 16px;
+  background: #eaf6ef; border: 1px solid #d3eadd; border-radius: 16px; cursor: pointer;
+  font-family: inherit; text-align: left;
+}
+.app-promo-emoji { font-size: 1.7rem; flex: 0 0 auto; }
+.app-promo-text { flex: 1; min-width: 0; }
+.app-promo-text strong { display: block; color: #1a1a2e; font-weight: 700; font-size: .98rem; }
+.app-promo-text small { color: #557; font-size: .84rem; line-height: 1.35; }
+
+/* Bottom tab bar */
+.app-tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 950;
+  display: flex; justify-content: space-around; align-items: stretch;
+  background: #fff; border-top: 1px solid #eceff3;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -2px 12px rgba(15,23,42,.05);
+}
+.app-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 4px 8px; text-decoration: none; border: none; background: none; cursor: pointer;
+  color: #9aa3af; font-family: inherit; font-size: .68rem; font-weight: 600;
+}
+.app-tab svg { width: 22px; height: 22px; }
+.app-tab.is-active { color: #0E8741; }
+
+/* Re-loan modal */
+.app-modal { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.app-modal[hidden] { display: none; }
+.app-modal-backdrop { position: absolute; inset: 0; background: rgba(15,23,42,.5); }
+.app-modal-card {
+  position: relative; width: 100%; max-width: 380px; background: #fff;
+  border-radius: 20px; padding: 28px 24px 22px; text-align: center;
+  box-shadow: 0 24px 60px rgba(15,23,42,.3);
+}
+.app-modal-icon { width: 56px; height: 56px; border-radius: 50%; background: #e8f5ee; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+.app-modal-title { margin: 0 0 8px; font-size: 1.25rem; font-weight: 800; }
+.app-modal-text { margin: 0 0 18px; color: #555; font-size: .95rem; line-height: 1.5; }
+.app-modal-cta { margin-top: 0; }
+.app-modal-dismiss { margin-top: 12px; background: none; border: none; color: #6b7280; font-weight: 600; font-size: .92rem; font-family: inherit; cursor: pointer; }
+
+/* Hide the dashboard sidebar/footer chrome on the app layout. */
+.app-page .dash-sidebar, .app-page .site-header, .app-page .dash-footer { display: none; }
