@@ -4277,6 +4277,9 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-needloan-illus { display: block; width: 92px; height: 76px; }
 /* The customer-provided PNG: contain so a square asset isn't distorted. */
 .home-needloan-illus-img { width: 100px; height: 82px; object-fit: contain; }
+/* The display:block above out-specifies the UA [hidden] rule, so the SVG
+   fallback showed alongside the PNG (doubling the card height). Re-hide it. */
+.home-needloan-illus[hidden] { display: none; }
 .home-needloan-body strong { display: block; font-size: 1.12rem; font-weight: 800; color: #1a1a2e; }
 .home-needloan-body small { display: block; margin-top: 4px; font-size: .88rem; color: #557; line-height: 1.4; }
 /* Content is vertically centered (justify-content) so the taller card
