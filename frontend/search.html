@@ -194,6 +194,18 @@
     </div>
   </footer>
 
+  <!-- "Account not found" modal -->
+  <div class="auth-modal" id="notFoundModal" hidden>
+    <div class="auth-modal-backdrop" data-modal-close></div>
+    <div class="auth-modal-card" role="dialog" aria-modal="true" aria-labelledby="nfmTitle">
+      <span class="auth-modal-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+      <h2 class="auth-modal-title" id="nfmTitle">We couldn't find your account</h2>
+      <p class="auth-modal-text">We couldn't find an account matching those details. Apply for a loan to get started — it only takes a few minutes.</p>
+      <a href="https://apply.cashinflash.com" class="auth-btn auth-btn--primary">Apply Now</a>
+      <button type="button" class="auth-modal-dismiss" data-modal-close>Go back</button>
+    </div>
+  </div>
+
 <script src="/js/portal.js"></script>
 <script src="/js/site-header.js"></script>
 <script>
@@ -276,7 +288,9 @@ document.getElementById('searchForm').addEventListener('submit', async (e) => {
         window.location.href = '/signup.html';
       }
     } else if (result.match === 'none') {
-      window.location.href = 'https://apply.cashinflash.com';
+      document.getElementById('notFoundModal').hidden = false;
+      searchBtn.disabled = false;
+      searchBtn.innerHTML = searchBtnHTML;
     } else if (result.match === 'multiple') {
       errDiv.textContent = 'We found more than one record matching that information. Please call us at (888) 999-9859 so we can help.';
       errDiv.style.display = 'block';
@@ -293,6 +307,13 @@ document.getElementById('searchForm').addEventListener('submit', async (e) => {
     searchBtn.disabled = false;
     searchBtn.innerHTML = searchBtnHTML;
   }
+});
+
+// "Account not found" modal — dismiss via backdrop or "Go back".
+document.querySelectorAll('#notFoundModal [data-modal-close]').forEach(function (el) {
+  el.addEventListener('click', function () {
+    document.getElementById('notFoundModal').hidden = true;
+  });
 });
 </script>
 

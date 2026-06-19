@@ -270,3 +270,18 @@
   visibility: hidden !important; display: none !important; pointer-events: none !important;
   position: absolute !important; right: 0 !important; width: 0 !important; height: 0 !important; margin: 0 !important;
 }
+
+/* ============================================================
+   Modal (e.g. "account not found" on the find-account flow)
+   ============================================================ */
+.auth-modal { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.auth-modal[hidden] { display: none; }
+.auth-modal-backdrop { position: absolute; inset: 0; background: rgba(16,24,40,.55); }
+.auth-modal-card { position: relative; background: #fff; border-radius: 18px; max-width: 400px; width: 100%; padding: 30px 26px 26px; text-align: center; box-shadow: 0 20px 60px rgba(16,24,40,.28); }
+.auth-modal-icon { width: 56px; height: 56px; border-radius: 50%; background: #e9f7ef; color: #16a34a; display: grid; place-items: center; margin: 0 auto 16px; }
+.auth-modal-icon svg { width: 28px; height: 28px; }
+.auth-modal-title { margin: 0; font-size: 1.3rem; font-weight: 800; letter-spacing: -.01em; color: #1a1a2e; }
+.auth-modal-text { margin: 8px 0 20px; font-size: .95rem; color: #5b6776; line-height: 1.5; }
+.auth-modal-card .auth-btn { margin: 0; }
+.auth-modal-dismiss { margin-top: 12px; background: none; border: none; font-family: inherit; font-size: .92rem; font-weight: 600; color: #6b7785; cursor: pointer; }
+.auth-modal-dismiss:hover { color: #1a1a2e; }
