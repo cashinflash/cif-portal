@@ -3,175 +3,203 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <style>/* app-feel: no sideways scroll */ html,body{overflow-x:hidden;max-width:100%;}</style>
+<style>/* app-feel: no sideways scroll */ html,body{overflow-x:hidden;max-width:100%;}</style>
 <meta name="robots" content="noindex">
 <title>Reset your password — Cash in Flash</title>
-<link rel="stylesheet" href="/css/cif-brand.css">
-<link rel="stylesheet" href="/css/portal.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="/css/auth.css">
 <style>
-  .forgot-steps { margin-top: 8px; }
-  .forgot-note { color: #6b7280; font-size: .88rem; margin-top: 10px; }
-  .forgot-success {
-    display: flex; align-items: center; gap: 8px;
-    color: #0a6e35; background: rgba(14,135,65,.08);
-    padding: 12px 14px; border-radius: 10px; font-weight: 600;
-    font-size: .92rem; margin: 12px 0;
-  }
-  /* Optical-center the checkmark — a box-centered check reads slightly
-     high because its visual weight sits low-right. */
+  .forgot-success { display: flex; align-items: center; gap: 8px; color: #0a6e35; background: rgba(22,163,74,.08); padding: 12px 14px; border-radius: 10px; font-weight: 600; font-size: .92rem; margin: 0 0 16px; }
   .forgot-success > svg { flex: 0 0 auto; position: relative; top: 1px; }
-  /* Live password-requirement checklist — each row turns green as the
-     rule is satisfied, the pattern used by most banks / large-scale
-     sign-up flows. Self-contained (no dependency on portal.css). */
-  .pw-rules { list-style: none; margin: 4px 0 18px; padding: 0; display: grid; gap: 7px; }
-  .pw-rules li {
-    display: flex; align-items: center; gap: 9px;
-    font-size: .82rem; color: #64748b; transition: color .15s ease;
-  }
-  .pw-rules li .ck {
-    width: 16px; height: 16px; flex: 0 0 16px; border-radius: 50%;
-    border: 1.5px solid #cbd5e1; display: inline-flex; align-items: center;
-    justify-content: center; color: #fff; transition: background .15s ease, border-color .15s ease;
-  }
+  .otp-label { display: block; font-size: .92rem; font-weight: 700; color: #1a1a2e; margin: 4px 0 8px; }
+  .otp { display: flex; gap: 8px; margin-bottom: 18px; }
+  .otp input { flex: 1 1 0; min-width: 0; height: 62px; text-align: center; font-size: 2rem; font-weight: 700; font-family: inherit; color: #0f172a; background: #fff; border: 1.5px solid #d4dae3; border-radius: 12px; transition: border-color .15s ease, box-shadow .15s ease; -moz-appearance: textfield; }
+  @media (max-width: 400px) { .otp input { height: 56px; font-size: 1.65rem; border-radius: 10px; } }
+  .otp input::-webkit-outer-spin-button, .otp input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .otp input.filled { border-color: #16a34a; }
+  .otp input:focus { outline: none; border-color: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.15); }
+  .pw-rules { list-style: none; margin: 14px 0 6px; padding: 0; display: grid; gap: 7px; }
+  .pw-rules li { display: flex; align-items: center; gap: 9px; font-size: .82rem; color: #64748b; transition: color .15s ease; }
+  .pw-rules li .ck { width: 16px; height: 16px; flex: 0 0 16px; border-radius: 50%; border: 1.5px solid #cbd5e1; display: inline-flex; align-items: center; justify-content: center; color: #fff; transition: background .15s ease, border-color .15s ease; }
   .pw-rules li .ck svg { opacity: 0; transition: opacity .15s ease; }
   .pw-rules li.met { color: #0a6e35; }
-  .pw-rules li.met .ck { background: #0E8741; border-color: #0E8741; }
+  .pw-rules li.met .ck { background: #16a34a; border-color: #16a34a; }
   .pw-rules li.met .ck svg { opacity: 1; }
-  /* Resend control as a text link, not a default browser button.
-     (.link-button lives in portal.css which is S3-only; defined inline
-     so this page is self-sufficient.) */
-  .link-button {
-    background: none; border: none; padding: 0;
-    color: #0E8741; font-weight: 600; font-size: inherit;
-    font-family: inherit; cursor: pointer; text-decoration: underline;
-  }
+  .link-button { background: none; border: none; padding: 0; color: #16a34a; font-weight: 600; font-size: inherit; font-family: inherit; cursor: pointer; text-decoration: underline; }
   .link-button:hover { color: #0a6e35; }
   .link-button:disabled { color: #9ca3af; cursor: default; text-decoration: none; }
   .forgot-help { color: #64748b; font-size: .85rem; line-height: 1.5; margin: 18px 0 0; text-align: center; }
-  /* Segmented verification-code input — one box per digit. */
-  .otp { display: flex; gap: 8px; }
-  .otp input {
-    flex: 1 1 0; min-width: 0; height: 62px;
-    text-align: center; font-size: 2rem; font-weight: 700;
-    font-family: inherit; color: #0f172a; background: #fff;
-    border: 1.5px solid #d4dae3; border-radius: 12px;
-    transition: border-color .15s ease, box-shadow .15s ease;
-    -moz-appearance: textfield;
-  }
-  @media (max-width: 400px) { .otp input { height: 56px; font-size: 1.65rem; border-radius: 10px; } }
-  .otp input::-webkit-outer-spin-button,
-  .otp input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  .otp input.filled { border-color: #0E8741; }
-  .otp input:focus {
-    outline: none; border-color: #0E8741;
-    box-shadow: 0 0 0 3px rgba(14,135,65,.15);
-  }
 </style>
 </head>
-<body>
+<body class="auth-body reset-page">
 
-<header class="site-header">
-  <div class="header-inner">
-    <a href="https://cashinflash.com" class="logo">
-      <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="160" height="21">
+  <!-- Top bar -->
+  <header class="auth-top">
+    <a href="https://cashinflash.com" class="auth-top-logo"><img src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="170" height="22"></a>
+    <a href="/login.html" class="auth-avatar" aria-label="Account">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
     </a>
-    <nav class="main-nav"><ul class="nav-list"></ul></nav>
-    <div class="header-actions">
-      <a href="/login.html" class="btn-login">Back to sign in</a>
-    </div>
-  </div>
-</header>
+  </header>
 
-<main class="gate">
-  <span class="gate-blob gate-blob-1"></span>
-  <span class="gate-blob gate-blob-2"></span>
-  <div class="gate-inner">
-    <div class="gate-card">
-      <h1 class="page-title">Reset your password.</h1>
-      <p class="page-sub" id="gateSub">Enter the email associated with your account and we'll send a 6-digit verification code.</p>
+  <main class="auth-main">
+    <div class="auth-wrap">
+      <div class="auth-grid">
 
-      <!-- Step 1: request code -->
-      <form id="requestForm" class="forgot-steps">
-        <div class="form-field">
-          <label>Email</label>
-          <input type="email" name="email" id="emailInput" required autocomplete="email">
-        </div>
-        <div id="requestErr" class="form-error" style="display:none;"></div>
-        <button type="submit" class="btn btn-primary btn-block btn-lg" id="requestBtn">Send reset code</button>
-      </form>
+        <!-- ===== Left: reset form ===== -->
+        <div class="auth-left">
+          <div class="auth-cardbig">
+            <h1 class="auth-welcome">Reset your password</h1>
+            <p class="auth-sub" id="gateSub">Create a new password for your online account.</p>
 
-      <!-- Step 2: enter code + new password -->
-      <form id="confirmForm" class="forgot-steps" style="display:none;">
-        <div id="confirmSuccess" class="forgot-success" style="display:none;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          Verification code sent to your email.
-        </div>
-        <div class="form-field">
-          <label>Verification code</label>
-          <div class="otp" id="otpWrap">
-            <input type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
-            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 2">
-            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 3">
-            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 4">
-            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 5">
-            <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+            <!-- Step 1: request code -->
+            <form id="requestForm">
+              <div class="auth-card">
+                <div class="auth-field">
+                  <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+                  <div class="auth-field-main">
+                    <label for="emailInput">Email</label>
+                    <input type="email" name="email" id="emailInput" required autocomplete="email" placeholder="Enter your email address">
+                  </div>
+                </div>
+              </div>
+              <div id="requestErr" class="auth-error" style="display:none;"></div>
+              <button type="submit" class="auth-btn auth-btn--primary" id="requestBtn">Send reset code</button>
+            </form>
+
+            <!-- Step 2: enter code + new password -->
+            <form id="confirmForm" style="display:none;">
+              <div id="confirmSuccess" class="forgot-success" style="display:none;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                Verification code sent to your email.
+              </div>
+
+              <span class="otp-label">Verification code</span>
+              <div class="otp" id="otpWrap">
+                <input type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
+                <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 2">
+                <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 3">
+                <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 4">
+                <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 5">
+                <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+              </div>
+              <input type="hidden" id="codeInput">
+
+              <div class="auth-card">
+                <div class="auth-field">
+                  <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+                  <div class="auth-field-main">
+                    <label for="newPwInput">New password</label>
+                    <input type="password" name="newPassword" id="newPwInput" minlength="10" required autocomplete="new-password" placeholder="Enter your new password">
+                  </div>
+                  <button type="button" class="auth-eye" data-eye="newPwInput" aria-label="Show password">
+                    <svg class="eye-on" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg class="eye-off" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  </button>
+                </div>
+                <div class="auth-field">
+                  <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+                  <div class="auth-field-main">
+                    <label for="newPwConfirm">Confirm new password</label>
+                    <input type="password" id="newPwConfirm" minlength="10" required autocomplete="new-password" placeholder="Confirm your new password">
+                  </div>
+                  <button type="button" class="auth-eye" data-eye="newPwConfirm" aria-label="Show password">
+                    <svg class="eye-on" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg class="eye-off" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <p class="auth-hint" id="pwMatchHint" style="display:none;color:#b42318;">Passwords don't match.</p>
+              <ul class="pw-rules" id="pwRules">
+                <li data-rule="len"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>At least 10 characters</li>
+                <li data-rule="upper"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One uppercase letter</li>
+                <li data-rule="lower"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One lowercase letter</li>
+                <li data-rule="num"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One number</li>
+                <li data-rule="sym"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One symbol (e.g. ! @ # $)</li>
+              </ul>
+
+              <div id="confirmErr" class="auth-error" style="display:none;"></div>
+              <button type="submit" class="auth-btn auth-btn--primary" id="confirmBtn">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Reset password
+              </button>
+              <p class="forgot-help" style="margin-bottom:0;">Didn't receive the code? <button type="button" class="link-button" id="resendBtn">Resend code</button></p>
+            </form>
+
+            <!-- Step 3: done -->
+            <div id="doneStep" style="display:none;">
+              <div class="forgot-success">Your password has been updated.</div>
+              <a href="/login.html" class="auth-btn auth-btn--primary">Sign in with new password</a>
+            </div>
           </div>
-          <input type="hidden" id="codeInput">
-        </div>
-        <div class="form-field">
-          <label>New password</label>
-          <input type="password" name="newPassword" id="newPwInput" minlength="10" required autocomplete="new-password">
-        </div>
-        <ul class="pw-rules" id="pwRules">
-          <li data-rule="len"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>At least 10 characters</li>
-          <li data-rule="upper"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One uppercase letter</li>
-          <li data-rule="lower"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One lowercase letter</li>
-          <li data-rule="num"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One number</li>
-          <li data-rule="sym"><span class="ck"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>One symbol (e.g. ! @ # $)</li>
-        </ul>
-        <div class="form-field">
-          <label>Confirm new password</label>
-          <input type="password" id="newPwConfirm" minlength="10" required autocomplete="new-password">
-          <p class="pw-match-hint" id="pwMatchHint" style="display:none;color:#b42318;font-size:.82rem;margin:6px 0 0;">Passwords don't match.</p>
-        </div>
-        <div id="confirmErr" class="form-error" style="display:none;"></div>
-        <button type="submit" class="btn btn-primary btn-block btn-lg" id="confirmBtn">Set new password</button>
-        <p class="forgot-help" style="margin-bottom:0;">Didn't receive the code?</p>
-        <p class="forgot-note" style="text-align:center;margin-top:4px;"><button type="button" class="link-button" id="resendBtn">Resend code</button></p>
-      </form>
 
-      <!-- Step 3: done -->
-      <div id="doneStep" style="display:none;">
-        <div class="forgot-success">Your password has been updated.</div>
-        <a href="/login.html" class="btn btn-primary btn-block btn-lg">Sign in with new password</a>
+          <div class="auth-backrow">
+            <a href="/login.html" class="auth-back">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+              Back to sign in
+            </a>
+          </div>
+        </div>
+
+        <!-- ===== Right: promo (desktop only) ===== -->
+        <aside class="auth-promo auth-desktop">
+          <h2 class="auth-promo-title"><span class="fast">Fast cash.</span>Simple process.</h2>
+          <p class="auth-promo-sub">Apply in minutes and get the funds you need — fast, simple, and stress-free.</p>
+          <img class="auth-promo-art" src="/images/fast-cash-promo.svg" alt="" width="440" height="320" loading="lazy">
+          <div class="auth-features">
+            <div class="auth-feature">
+              <span class="auth-feature-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+              <span class="auth-feature-tx"><strong>Approved</strong><span>in minutes</span></span>
+            </div>
+            <div class="auth-feature">
+              <span class="auth-feature-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
+              <span class="auth-feature-tx"><strong>Money</strong><span>same day</span></span>
+            </div>
+            <div class="auth-feature">
+              <span class="auth-feature-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg></span>
+              <span class="auth-feature-tx"><strong>Good credit</strong><span>not needed</span></span>
+            </div>
+          </div>
+        </aside>
+
+      </div>
+
+      <div class="auth-secure auth-secure--center">
+        <span class="auth-secure-line">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-3.5 7-9V5l-7-3-7 3v8c0 5.5 7 9 7 9z"/><polyline points="9 11.5 11.2 13.7 15 9.8"/></svg>
+          Secure. Private. Always.
+        </span>
+        <p class="auth-secure-sub">Your data is protected with bank-level security.</p>
       </div>
     </div>
+  </main>
 
-    <div class="secure-strip">
-      <span class="secure">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-        Secure area
-      </span>
-      <span class="legal-links">
-        <a href="https://cashinflash.com/terms">Terms &amp; Privacy</a>
-        <a href="https://cashinflash.com/contact">Contact</a>
-      </span>
+  <!-- Footer (desktop) -->
+  <footer class="auth-footer">
+    <div class="auth-footer-inner">
+      <p class="auth-footer-copy">&copy; <span id="footerYear">2026</span> Cash in Flash. All rights reserved.</p>
+      <nav class="auth-footer-links" aria-label="Footer">
+        <a href="https://cashinflash.com/privacy-policy/">Privacy Policy</a>
+        <a href="https://cashinflash.com/terms-conditions/">Terms of Service</a>
+        <a href="https://cashinflash.com/contact/">Help Center</a>
+      </nav>
     </div>
-  </div>
-</main>
+  </footer>
 
 <script src="/js/portal.js"></script>
 <script>
 (function () {
   'use strict';
+  var y = document.getElementById('footerYear'); if (y) y.textContent = String(new Date().getFullYear());
+
   var requestForm = document.getElementById('requestForm');
   var confirmForm = document.getElementById('confirmForm');
   var doneStep    = document.getElementById('doneStep');
   var requestBtn  = document.getElementById('requestBtn');
   var confirmBtn  = document.getElementById('confirmBtn');
+  var confirmBtnHTML = confirmBtn.innerHTML;
   var resendBtn   = document.getElementById('resendBtn');
   var emailInput  = document.getElementById('emailInput');
   var codeInput   = document.getElementById('codeInput');
@@ -183,9 +211,20 @@
   var success     = document.getElementById('confirmSuccess');
   var gateSub     = document.getElementById('gateSub');
 
+  // Password show/hide toggles.
+  document.querySelectorAll('.auth-eye[data-eye]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var input = document.getElementById(btn.getAttribute('data-eye'));
+      if (!input) return;
+      var showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      btn.classList.toggle('is-on', !showing);
+      btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    });
+  });
+
   // Calls our own reset endpoints. The code is delivered through Resend
-  // (fast + branded), NOT Cognito's slow default email. Returns the parsed
-  // body with the HTTP status attached as _status.
+  // (fast + branded), NOT Cognito's slow default email.
   function post(path, body) {
     return fetch(path, {
       method: 'POST',
@@ -214,8 +253,7 @@
   var resetSession = '';
 
   // Segmented verification-code input: six single-digit boxes that write
-  // to the hidden #codeInput the rest of the flow already reads. Handles
-  // typing, backspace, arrow keys, and pasting a full code.
+  // to the hidden #codeInput the rest of the flow reads.
   (function initOtp() {
     var wrap = document.getElementById('otpWrap');
     var hidden = document.getElementById('codeInput');
@@ -253,29 +291,20 @@
     window.__otpClear = function () { boxes.forEach(function (b) { b.value = ''; }); sync(); boxes[0].focus(); };
   })();
 
-  // Live password-requirement checklist — rows turn green as each rule
-  // is satisfied as the customer types.
+  // Live password-requirement checklist.
   var pwRules = document.getElementById('pwRules');
   if (pwRules && newPwInput) {
     newPwInput.addEventListener('input', function () {
       var v = newPwInput.value;
-      var met = {
-        len:   v.length >= 10,
-        upper: /[A-Z]/.test(v),
-        lower: /[a-z]/.test(v),
-        num:   /[0-9]/.test(v),
-        sym:   /[^A-Za-z0-9]/.test(v)
-      };
+      var met = { len: v.length >= 10, upper: /[A-Z]/.test(v), lower: /[a-z]/.test(v), num: /[0-9]/.test(v), sym: /[^A-Za-z0-9]/.test(v) };
       var items = pwRules.querySelectorAll('li');
       for (var i = 0; i < items.length; i++) {
         var rule = items[i].getAttribute('data-rule');
-        if (met[rule]) { items[i].classList.add('met'); }
-        else { items[i].classList.remove('met'); }
+        if (met[rule]) { items[i].classList.add('met'); } else { items[i].classList.remove('met'); }
       }
     });
   }
 
-  // Live confirm-password match feedback.
   function checkPwMatch() {
     if (!newPwConfirm || !pwMatchHint) return;
     pwMatchHint.style.display = (newPwConfirm.value && newPwInput.value !== newPwConfirm.value) ? 'block' : 'none';
@@ -299,13 +328,11 @@
           requestErr.style.display = 'block';
           return;
         }
-        // Intentionally identical whether or not the email is a real
-        // account — no "we can't find that email" enumeration oracle.
         pendingEmail = email;
         resetSession = data.resetSession;
         gateSub.textContent = 'If an account exists for ' + (data.masked || 'that email') +
           ", we've sent a 6-digit verification code. Enter it below with your new password.";
-        success.style.display = 'block';
+        success.style.display = 'flex';
         requestForm.style.display = 'none';
         confirmForm.style.display = 'block';
         setTimeout(function () { if (window.__otpFocus) { window.__otpFocus(); } }, 50);
@@ -358,7 +385,7 @@
       })
       .finally(function () {
         confirmBtn.disabled = false;
-        confirmBtn.textContent = 'Set new password';
+        confirmBtn.innerHTML = confirmBtnHTML;
       });
   });
 

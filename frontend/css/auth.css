@@ -196,3 +196,17 @@
 @media (min-width: 900px) {
   .auth-tabbar { display: none; }
 }
+
+/* ---------- Find-account / reset: big card wrapping heading + form ---------- */
+.auth-cardbig { background: #fff; border: 1px solid #e7ecf1; border-radius: 20px; padding: clamp(22px, 4vw, 40px); box-shadow: 0 2px 8px rgba(16,24,40,.04); }
+.auth-cardbig .auth-welcome { font-size: clamp(1.8rem, 1.4rem + 1.4vw, 2.4rem); }
+.auth-cardbig .auth-sub { margin-bottom: 22px; }
+.auth-cardbig .auth-card { border: none; box-shadow: none; padding: 0; margin-top: 0; }
+
+/* Centered secure strip placed below the grid (stays centered on desktop too). */
+.auth-secure.auth-secure--center { text-align: center; margin-top: 26px; }
+
+/* Back-to-sign-in link (reset). */
+.auth-backrow { margin: 18px 0 0; text-align: center; }
+.auth-back { display: inline-flex; align-items: center; gap: 8px; color: #16a34a; font-weight: 700; font-size: 1rem; }
+.auth-back:hover { text-decoration: underline; }
