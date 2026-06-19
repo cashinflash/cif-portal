@@ -46,8 +46,15 @@
       sessionStorage.removeItem('cif_refresh_token');
       window.location.replace(LOGIN_URL);
     }
-    var so = document.getElementById('signOutBtn');
-    if (so) so.addEventListener('click', signOut);
+    // Wire every sign-out control this page might render: the legacy header
+    // button (#signOutBtn), and the new app-shell's sidebar button
+    // (#signOutBtnSidebar). The mobile drawer button (#signOutBtnMobile) is
+    // wired below where the drawer is set up. sidebar.js also wires these,
+    // so the handlers are idempotent (same signOut()).
+    ['signOutBtn', 'signOutBtnSidebar'].forEach(function (id) {
+      var b = document.getElementById(id);
+      if (b) b.addEventListener('click', signOut);
+    });
 
     // Mobile menu — these pages ship the hamburger button but NOT a drawer,
     // so the toggle was a dead control on phones. Inject a consistent drawer

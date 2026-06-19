@@ -4416,3 +4416,92 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
   .app-sidebar-help small { display: block; margin-top: 3px; font-size: .8rem; color: #557; line-height: 1.4; }
   .app-sidebar-help-link { display: inline-block; margin-top: 10px; font-size: .82rem; font-weight: 700; text-decoration: none; }
 }
+
+/* ============================================================
+   APP REDESIGN — Payments page (reuses the home app-shell:
+   .app-sidebar/.app-topbar/.app-tabbar/.app-main/.app-blob,
+   the green .loan-card, .app-surface white cards, and the
+   .app-cta-primary button). Only the payments-specific layout
+   lives here. Mobile-first; the >=900px block widens it.
+   ============================================================ */
+
+/* Vertical stack of payment sections inside .app-main. */
+.pay-stack { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 16px; }
+
+/* Mobile page title (the desktop .app-pagehead shows >=900px). */
+.app-pagehead-mobile { margin: 4px 0 4px; }
+.app-pagetitle-mobile { margin: 0; font-size: 1.55rem; font-weight: 800; letter-spacing: -.01em; color: #1a1a2e; }
+.app-pagesub-mobile { margin: 5px 0 0; font-size: .92rem; color: #6b7280; }
+
+/* The green active-loan card on payments reuses .loan-card; the empty
+   state gets a matching on-card button. */
+.pay-summary .pay-summary-empty { padding: 4px 0 2px; }
+.pay-empty-cta {
+  display: inline-block; margin-top: 14px; padding: 10px 16px;
+  background: rgba(255,255,255,.92); color: #0E8741; border-radius: 10px;
+  font-weight: 700; font-size: .9rem; text-decoration: none;
+}
+.pay-empty-cta:hover { background: #fff; }
+
+/* Two-column row: Payment method | Payment breakdown.
+   Single column on mobile; two columns from 760px up. */
+.pay-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+
+.pay-card-head { margin-bottom: 14px; }
+.pay-card-head .home-card-sub { margin-top: 4px; }
+
+/* "Add a debit card" — dashed affordance in the brand blue family. */
+.pay-addcard-btn {
+  margin-top: 12px; width: 100%; display: inline-flex; align-items: center;
+  justify-content: center; gap: 8px; padding: 13px 18px;
+  border: 1.5px dashed #6cb1e2; border-radius: 12px; background: #f3f9fd;
+  color: #0E8741; font-weight: 700; font-size: .95rem; cursor: pointer;
+  font-family: inherit;
+}
+.pay-addcard-btn:hover { background: #ecf5fb; border-color: #4a9bd6; }
+
+.pay-nocards-hint { margin: 8px 0 0; color: #475569; font-size: .9rem; line-height: 1.5; }
+
+/* Amount + CVV live-charge fields: compact, de-emphasized, side by side. */
+.pay-fieldrow { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.pay-field-amount { flex: 1 1 160px; min-width: 0; }
+.pay-field-cvv { flex: 0 0 110px; }
+.pay-field-cvv .pay-input--narrow { max-width: 100%; }
+
+.pay-cardadded-note {
+  margin: 14px 0 0; padding: 10px 12px; border-radius: 8px;
+  background: #e8f5ee; color: #1a6b3c; border: 1px solid #bfe6cf;
+  font-size: .9rem; font-weight: 600;
+}
+.pay-method-card .pay-error { margin: 14px 0 0; }
+
+/* Payment breakdown list. */
+.pay-breakdown { margin: 0; }
+.pay-breakdown-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 9px 0; }
+.pay-breakdown-row dt { margin: 0; color: #475569; font-size: .95rem; }
+.pay-breakdown-row dd { margin: 0; color: #1a1a2e; font-weight: 700; font-size: .98rem; font-variant-numeric: tabular-nums; }
+.pay-breakdown-rule { height: 1px; background: #eef1f4; margin: 6px 0; }
+.pay-breakdown-total dt { color: #1a1a2e; font-weight: 700; font-size: 1rem; }
+.pay-breakdown-total dd { color: #0E8741; font-weight: 800; font-size: 1.45rem; letter-spacing: -.01em; }
+
+/* Pay-now button: full-width green CTA with a padlock. */
+.pay-now-btn { width: 100%; }
+
+/* "Your payment is secure and encrypted." */
+.pay-secure-line {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin: 12px 0 0; color: #6b7280; font-size: .85rem; font-weight: 600;
+}
+.pay-secure-line svg { color: #0E8741; flex: 0 0 auto; }
+
+/* Two-up cards once there's room. */
+@media (min-width: 760px) {
+  .pay-grid { grid-template-columns: 1fr 1fr; align-items: start; }
+}
+
+/* Desktop: a touch more breathing room, matching the home cards. */
+@media (min-width: 900px) {
+  .pay-stack { gap: 20px; max-width: 920px; }
+  .pay-now-btn { max-width: 100%; }
+}
+

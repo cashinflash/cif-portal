@@ -111,13 +111,25 @@
       setText(qs('[data-pay-balance]', card), money(loan.balance).replace(/^\$/, ''));
       const caption = qs('[data-pay-caption]', card);
       if (caption) {
-        const parts = [];
-        if (loan.nextDueDate) parts.push('Due ' + formatDate(loan.nextDueDate));
-        if (loan.nextDueAmount) parts.push('Amount due ' + money(loan.nextDueAmount));
-        caption.textContent = parts.join(' · ');
+        // In the redesigned card this value sits under the "Due date" label,
+        // so show just the date (the amount is already the big "Amount due").
+        caption.textContent = loan.nextDueDate ? formatDate(loan.nextDueDate) : '—';
       }
       const pill = qs('[data-pay-loan-status]', card);
       if (pill) pill.textContent = loan.status || 'Current';
+      // Payment breakdown (defensive — every element is optional). Total is
+      // the balance; principal/fee are shown only when the API surfaces them,
+      // otherwise they stay as an em-dash placeholder (do NOT overwrite with
+      // a wrong value).
+      const totalEl = qs('[data-pay-total]');
+      if (totalEl) totalEl.textContent = money(loan.balance);
+      const principal = (loan.principal != null ? loan.principal
+        : (loan.principalBalance != null ? loan.principalBalance : null));
+      if (principal != null) setText(qs('[data-pay-principal]'), money(principal));
+      const fee = (loan.fees != null ? loan.fees
+        : (loan.fee != null ? loan.fee
+        : (loan.loanFee != null ? loan.loanFee : null)));
+      if (fee != null) setText(qs('[data-pay-fee]'), money(fee));
       if (body) body.hidden = false;
       // Pre-fill amount with next-due or balance.
       const amountInput = qs('#payAmount');
@@ -210,7 +222,13 @@
     const hasCard = !!state.selectedMethodId;
     if (btn && !state.submitting) {
       btn.disabled = !hasCard;
-      btn.textContent = 'Pay now';
+      // Show the amount in the button label when we know it (from the amount
+      // field, falling back to the loan balance). Falls back to plain
+      // "Pay now" if neither is a positive number.
+      var amtRaw = qs('#payAmount') && qs('#payAmount').value;
+      var amt = parseFloat(String(amtRaw || '').replace(/[^\d.]/g, ''));
+      if ((!amt || isNaN(amt) || amt <= 0) && state.loan) amt = Number(state.loan.balance);
+      btn.textContent = (amt && !isNaN(amt) && amt > 0) ? ('Pay now ' + money(amt)) : 'Pay now';
     }
     document.querySelectorAll('.pay-method').forEach(function (el) {
       const radio = el.querySelector('input[type="radio"]');
@@ -592,6 +610,8 @@
     if (amtInput) amtInput.addEventListener('blur', function () {
       const v = parseFloat(String(this.value || '').replace(/[^\d.]/g, ''));
       if (!isNaN(v) && v > 0) this.value = v.toFixed(2);
+      // Keep the Pay-now button label ($amount) in sync with the field.
+      applyMethodSelection();
     });
 
     // Load loan + methods in parallel.
