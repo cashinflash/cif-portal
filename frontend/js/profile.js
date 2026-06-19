@@ -97,9 +97,7 @@
 
   // ---------- Init ----------
   document.addEventListener('DOMContentLoaded', function () {
-    var first = (claims.given_name || '').trim();
-    setText(qs('#userChip'), first ? ('Hi, ' + first) : (claims.email || 'Account'));
-    setText(qs('#sidebarUserName'), first ? ('Hi, ' + first) : (claims.email || 'Account'));
+    // The app shell (sidebar.js) fills #sidebarUserName + .dash-first-name.
     var year = qs('#footerYear');
     if (year) year.textContent = String(new Date().getFullYear());
 
@@ -109,7 +107,8 @@
   });
 
   function wireRows() {
-    qsa('.profile-row[data-edit]').forEach(function (row) {
+    // Hub tiles (and any legacy rows) carrying data-edit open their modal.
+    qsa('[data-edit]').forEach(function (row) {
       var which = row.getAttribute('data-edit');
       row.addEventListener('click', function () { openModal(which); });
       row.addEventListener('keydown', function (ev) {
@@ -121,8 +120,10 @@
   function wireModal() {
     var modal = qs('#profileModal');
     if (!modal) return;
-    qsa('[data-modal-action="close"]', modal).forEach(function (el) {
-      el.addEventListener('click', closeModal);
+    // Delegate so dynamically-rendered Cancel/Close buttons work too.
+    modal.addEventListener('click', function (ev) {
+      var t = ev.target.closest ? ev.target.closest('[data-modal-action="close"]') : null;
+      if (t) { ev.preventDefault(); closeModal(); }
     });
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape' && _modalCurrent) closeModal();
@@ -140,48 +141,9 @@
   }
 
   function renderProfile(p) {
-    // Identity card
-    var first = (p.firstName || claims.given_name || '').trim();
-    var last  = (p.lastName  || claims.family_name || '').trim();
-    var fullName = (first + ' ' + last).trim() || (p.vergentEmail || claims.email || 'Welcome');
-    setText(qs('#profileFullName'), fullName);
-
-    var initials = ((first[0] || '') + (last[0] || '')).toUpperCase();
-    if (!initials) {
-      var em = (p.vergentEmail || claims.email || '');
-      initials = em ? em[0].toUpperCase() : '—';
-    }
-    setText(qs('#profileInitials'), initials);
-
-    if (p.statusName) {
-      var pill = qs('#profileStatusPill');
-      var txt = qs('#profileStatusText');
-      var ok = String(p.statusName).toLowerCase() === 'good';
-      txt.textContent = ok ? 'Account in good standing' : ('Account: ' + p.statusName);
-      pill.hidden = false;
-      pill.classList.toggle('profile-identity-status--bad', !ok);
-    }
-
-    // Email
-    var email = p.vergentEmail || p.email || '—';
-    setText(qs('#profileEmailValue'), email);
-
-    // Phone
-    var phone = p.vergentPhone || p.phone || '';
-    setText(qs('#profilePhoneValue'), phone ? fmtPhone(phone) : '—');
-
-    // Address
-    var addr = p.vergentAddress || null;
-    var addrEl = qs('#profileAddressValue');
-    if (addr && addr.addr1) {
-      var cityState = [addr.city, addr.state].filter(Boolean).join(', ');
-      var line2 = (cityState + (addr.zip ? ' ' + addr.zip : '')).trim();
-      addrEl.innerHTML = escape(addr.addr1) +
-        (addr.addr2 ? ', ' + escape(addr.addr2) : '') +
-        '<br>' + escape(line2);
-    } else {
-      addrEl.textContent = '—';
-    }
+    // The settings hub doesn't display these inline — the edit modals read
+    // _profile directly for their "current value" displays. Just cache it.
+    _profile = p || {};
   }
 
   // ---------- Modal flow ----------
@@ -208,6 +170,17 @@
       title.textContent = 'Change password';
       body.innerHTML = renderPasswordForm();
       bindPasswordForm();
+    } else if (which === 'personal') {
+      title.textContent = 'Personal info';
+      body.innerHTML = renderPersonalView();
+      bindPersonalView();
+    } else if (which === 'contact') {
+      title.textContent = 'Contact details';
+      body.innerHTML = renderContactView();
+      bindContactView();
+    } else if (which === 'notifications') {
+      title.textContent = 'Notifications';
+      body.innerHTML = renderNotificationsView();
     } else {
       return;
     }
@@ -236,6 +209,71 @@
       _pendingEmail = null;
       _pendingEmailRequestId = null;
     }, 180);
+  }
+
+  // ---------- Personal info (read-only identity + address edit entry) ----------
+  function renderPersonalView() {
+    var p = _profile || {};
+    var first = (p.firstName || claims.given_name || '').trim();
+    var last = (p.lastName || claims.family_name || '').trim();
+    var name = (first + ' ' + last).trim() || '—';
+    var dob = p.dob || p.dateOfBirth || p.vergentDob || '';
+    var a = p.vergentAddress || {};
+    var addr = a.addr1
+      ? (escape(a.addr1) + (a.addr2 ? ', ' + escape(a.addr2) : '') + '<br>' +
+         escape([a.city, a.state].filter(Boolean).join(', ')) + (a.zip ? ' ' + escape(a.zip) : ''))
+      : '—';
+    return [
+      '<p class="profile-modal-intro">Your name and date of birth are verified when you sign up — call us at (888) 999-9859 to change them. You can update your home address below.</p>',
+      '<div class="profile-modal-current"><div class="profile-modal-current-label">Full name</div><div class="profile-modal-current-value">' + escape(name) + '</div></div>',
+      (dob ? '<div class="profile-modal-current"><div class="profile-modal-current-label">Date of birth</div><div class="profile-modal-current-value">' + escape(dob) + '</div></div>' : ''),
+      '<div class="profile-modal-current"><div class="profile-modal-current-label">Home address</div><div class="profile-modal-current-value">' + addr + '</div></div>',
+      '<div class="profile-modal-actions"><button type="button" class="btn-text" data-modal-action="close">Close</button><button type="button" class="btn-apply" id="profilePersonalEditAddr">Update home address</button></div>',
+    ].join('');
+  }
+  function bindPersonalView() {
+    var b = qs('#profilePersonalEditAddr');
+    if (b) b.addEventListener('click', function () { openModal('address'); });
+  }
+
+  // ---------- Contact details (email + phone entry points) ----------
+  function renderContactView() {
+    var p = _profile || {};
+    var email = p.vergentEmail || p.email || '—';
+    var phone = (p.vergentPhone || p.phone || '');
+    return [
+      '<p class="profile-modal-intro">Manage the email and phone number we use for account notices and secure sign-in codes.</p>',
+      '<div class="profile-contact-item">',
+      '  <div class="profile-modal-current-label">Email address</div>',
+      '  <div class="profile-contact-row"><span class="profile-modal-current-value">' + escape(email) + '</span>',
+      '    <button type="button" class="btn-text" id="profileContactEditEmail">Update</button></div>',
+      '</div>',
+      '<div class="profile-contact-item">',
+      '  <div class="profile-modal-current-label">Mobile phone</div>',
+      '  <div class="profile-contact-row"><span class="profile-modal-current-value">' + escape(phone ? fmtPhone(phone) : '—') + '</span>',
+      '    <button type="button" class="btn-text" id="profileContactEditPhone">Update</button></div>',
+      '</div>',
+      '<div class="profile-modal-actions"><button type="button" class="btn-text" data-modal-action="close">Close</button></div>',
+    ].join('');
+  }
+  function bindContactView() {
+    var e = qs('#profileContactEditEmail');
+    var ph = qs('#profileContactEditPhone');
+    if (e) e.addEventListener('click', function () { openModal('email'); });
+    if (ph) ph.addEventListener('click', function () { openModal('phone'); });
+  }
+
+  // ---------- Notifications (informational; preferences coming soon) ----------
+  function renderNotificationsView() {
+    return [
+      '<p class="profile-modal-intro">Choose how we reach you. Today we send important account and payment updates by email and text so you never miss a due date. Custom preferences are coming soon.</p>',
+      '<ul class="profile-notif-list">',
+      '  <li><span>Payment reminders</span><span class="profile-row-badge profile-row-badge--ok">On</span></li>',
+      '  <li><span>Account &amp; security alerts</span><span class="profile-row-badge profile-row-badge--ok">On</span></li>',
+      '  <li><span>Loan offers &amp; news</span><span class="profile-row-badge profile-row-badge--ok">On</span></li>',
+      '</ul>',
+      '<div class="profile-modal-actions"><button type="button" class="btn-apply" data-modal-action="close">Got it</button></div>',
+    ].join('');
   }
 
   // ---------- Email modal (two steps: candidate → code) ----------

@@ -4726,3 +4726,68 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
      evenly and the value figures fit). */
   .loans-active .loan-card-figval { font-size: clamp(1.3rem, 1.05rem + .8vw, 1.7rem); }
 }
+
+/* ============================================================
+   PROFILE PAGE (app shell) — settings hub of tappable tiles +
+   a security-reassurance banner. No green loan card here.
+   ============================================================ */
+.profile-stack { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 16px; }
+
+/* Tile grid: single column on mobile, two columns on desktop. */
+.profile-hub { display: grid; grid-template-columns: 1fr; gap: 14px; margin: 0; }
+
+/* Each tile is a white card: round icon chip + title/sub + chevron.
+   `.dashboard-page` prefix beats the bare `button { border:none; background:none }`
+   reset so <button> tiles match <a> tiles exactly. */
+.dashboard-page .profile-tile {
+  display: flex; align-items: center; gap: 16px; width: 100%;
+  padding: 18px 20px; background: #fff;
+  border: 1px solid #e8edf2; border-radius: 16px;
+  text-align: left; text-decoration: none; cursor: pointer;
+  font-family: inherit; color: inherit;
+  box-shadow: 0 1px 2px rgba(16,24,40,.04);
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .05s ease;
+}
+.dashboard-page .profile-tile:hover { border-color: #cfe9da; box-shadow: 0 8px 22px rgba(16,24,40,.08); }
+.dashboard-page .profile-tile:active { transform: translateY(1px); }
+.dashboard-page .profile-tile:focus-visible { outline: 2px solid #15C15D; outline-offset: 2px; }
+
+.profile-tile-icon {
+  flex: 0 0 auto; width: 46px; height: 46px; border-radius: 50%;
+  background: #e9f7ef; color: #0E8741; display: grid; place-items: center;
+}
+.profile-tile-icon svg { width: 23px; height: 23px; }
+.profile-tile-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.profile-tile-title { font-size: 1.02rem; font-weight: 700; color: #1a1a2e; letter-spacing: -.01em; }
+.profile-tile-sub { font-size: .86rem; color: #6b7785; line-height: 1.35; }
+.profile-tile-chev { flex: 0 0 auto; color: #c2cad3; }
+.profile-tile-chev svg { display: block; }
+
+/* Security reassurance banner (pale-green, full width). */
+.profile-secure-banner {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 20px; margin: 2px 0 0;
+  background: #f1f9f4; border: 1px solid #dceee4; border-radius: 14px;
+}
+.profile-secure-icon { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; background: #e1f2e8; color: #0E8741; display: grid; place-items: center; }
+.profile-secure-text { flex: 1 1 auto; min-width: 0; }
+.profile-secure-title { margin: 0; font-size: .95rem; font-weight: 700; color: #16361f; }
+.profile-secure-sub { margin: 2px 0 0; font-size: .84rem; color: #5b7165; line-height: 1.35; }
+.profile-secure-lock { flex: 0 0 auto; color: #0E8741; }
+
+/* Contact-details modal: value + inline "Update" link per row. */
+.profile-contact-item { margin-bottom: 14px; }
+.profile-contact-item .profile-modal-current-label { margin-bottom: 4px; }
+.profile-contact-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* Notifications modal: simple labelled list with status badges. */
+.profile-notif-list { list-style: none; margin: 4px 0 2px; padding: 0; }
+.profile-notif-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid #eef1f4; font-size: .92rem; font-weight: 600; color: #1a1a2e; }
+.profile-notif-list li:last-child { border-bottom: none; }
+
+@media (min-width: 900px) {
+  .profile-stack { max-width: 1040px; }
+  .profile-hub { grid-template-columns: 1fr 1fr; gap: 16px; }
+  .profile-tile--wide { grid-column: 1 / -1; }
+}
