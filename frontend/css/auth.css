@@ -49,11 +49,13 @@
 .auth-sub { margin: 12px 0 0; font-size: clamp(.95rem, .9rem + .3vw, 1.06rem); color: #5b6776; line-height: 1.5; }
 
 /* Form card (login / reset): one card, icon + label-over-input rows. */
-.auth-card {
-  margin: 26px 0 0; background: #fff;
-  border: 1px solid #e7ecf1; border-radius: 18px;
-  padding: 6px 22px; box-shadow: 0 2px 6px rgba(16,24,40,.04);
-}
+/* On mobile .auth-card is a transparent wrapper: the fields live in their own
+   white card and the action buttons sit below it (outside the card). On
+   desktop the wrapper becomes the white card so buttons sit inside it. */
+.auth-card { margin: 26px 0 0; }
+.auth-fields { background: #fff; border: 1px solid #e7ecf1; border-radius: 18px; padding: 6px 20px; box-shadow: 0 2px 6px rgba(16,24,40,.04); }
+.auth-actions { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.auth-actions .auth-btn { margin: 0; }
 .auth-field { display: flex; align-items: center; gap: 16px; padding: 18px 0; }
 .auth-field + .auth-field { border-top: 1px solid #eef1f4; }
 .auth-field-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -121,9 +123,9 @@
 
 /* ---------- Secure strip ---------- */
 .auth-secure { margin: 22px 0 0; text-align: center; }
-.auth-secure-line { display: inline-flex; align-items: center; gap: 8px; font-size: .95rem; font-weight: 600; color: #344054; }
+.auth-secure-line { display: inline-flex; align-items: center; gap: 8px; font-size: 1rem; font-weight: 700; color: #1a2b1f; }
 .auth-secure-line svg { color: #16a34a; }
-.auth-secure-sub { margin: 5px 0 0; font-size: .88rem; color: #7b8694; }
+.auth-secure-sub { margin: 3px 0 0; font-size: .9rem; color: #7b8694; }
 
 /* Inline error / banner. */
 .auth-error { margin: 4px 0 0; padding: 12px 14px; border-radius: 10px; background: #fde7e7; border: 1px solid #f4c4c4; color: #8a1c1c; font-size: .9rem; line-height: 1.45; }
@@ -191,9 +193,11 @@
   .auth-top .auth-avatar { position: static; transform: none; }
   .auth-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.06fr); gap: clamp(36px, 6vw, 96px); padding-top: 18px; }
   .auth-left { max-width: 560px; }
-  .auth-card { padding: 6px 26px; }
-  /* Login/reset desktop card holds the action buttons too. */
-  .auth-secure { text-align: left; }
+  /* Desktop: the wrapper becomes the white card; buttons sit inside it with
+     comfortable bottom padding. Secure strip stays centered (matches mockup). */
+  .auth-card { background: #fff; border: 1px solid #e7ecf1; border-radius: 18px; padding: 8px 26px 24px; box-shadow: 0 2px 6px rgba(16,24,40,.04); }
+  .auth-fields { background: none; border: none; padding: 0; box-shadow: none; }
+  .auth-actions { margin-top: 6px; }
   .auth-promo {
     align-self: stretch; display: flex; flex-direction: column;
     background: linear-gradient(160deg, #f1faf4 0%, #e9f6ee 100%);
@@ -264,3 +268,65 @@
 .auth-choice-arrow { flex: 0 0 auto; }
 .auth-choice--primary .auth-choice-arrow { color: rgba(255,255,255,.9); }
 .auth-choice--ghost .auth-choice-arrow { color: #c2cad3; }
+
+/* ============================================================
+   Password field: hide browser-injected reveal / autofill icons
+   (Edge reveal eye, Safari autofill key) so only our one eye shows.
+   ============================================================ */
+.auth-body input::-ms-reveal, .auth-body input::-ms-clear { display: none !important; }
+.auth-body input::-webkit-credentials-auto-fill-button,
+.auth-body input::-webkit-strong-password-auto-fill-button {
+  visibility: hidden !important; pointer-events: none !important;
+  position: absolute !important; right: 0 !important; width: 0 !important; height: 0 !important; margin: 0 !important;
+}
+
+/* ============================================================
+   Site header + mobile drawer — match cashinflash.com and stay
+   prominent. Scoped under .auth-body to override portal.css.
+   ============================================================ */
+.auth-body .site-header { background: #fff; border-bottom: 1px solid #e9e9e9; }
+.auth-body .header-inner { display: flex; align-items: center; justify-content: space-between; max-width: 1180px; margin: 0 auto; padding: 16px clamp(18px, 5vw, 64px); }
+.auth-body .site-header .logo { display: inline-flex; }
+.auth-body .site-header .logo img { display: block; height: 30px; width: auto; }
+.auth-body .main-nav { display: none; }
+.auth-body .header-actions { display: none; }
+.auth-body .menu-toggle { display: inline-flex; flex-direction: column; justify-content: center; gap: 6px; width: 34px; height: 30px; padding: 0; background: none; border: none; cursor: pointer; }
+.auth-body .menu-toggle span { display: block; height: 2.6px; width: 28px; background: #16331e; border-radius: 3px; }
+
+/* Drawer (full-screen, slides from the right) */
+.auth-body .mobile-menu {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 60;
+  background: #15351f; transform: translateX(100%); transition: transform .25s ease;
+  display: flex; flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.auth-body .mobile-menu.open { transform: translateX(0); }
+.auth-body .mobile-menu-hd { display: flex; align-items: center; justify-content: space-between; background: #fff; padding: 16px clamp(18px, 5vw, 24px); }
+.auth-body .mobile-menu-hd .logo img { display: block; height: 30px; width: auto; }
+.auth-body .mobile-close-btn { background: none; border: none; cursor: pointer; padding: 4px; line-height: 0; }
+.auth-body .mobile-close-btn svg { stroke: #15331f; }
+.auth-body .mobile-menu-inner { flex: 1 1 auto; display: flex; flex-direction: column; padding: 6px clamp(20px, 6vw, 28px) clamp(22px, 6vw, 30px); }
+.auth-body .mobile-nav-list { list-style: none; margin: 0; padding: 0; }
+.auth-body .mobile-nav-item { border-bottom: 1px solid rgba(255,255,255,.13); }
+.auth-body .mobile-nav-item > a { display: block; padding: 20px 2px; color: #fff; font-size: 1.18rem; font-weight: 700; }
+.auth-body .mobile-sub { list-style: none; margin: -6px 0 10px; padding: 0 0 4px 6px; }
+.auth-body .mobile-sub a { display: block; padding: 7px 0; color: rgba(255,255,255,.82); font-size: 1rem; font-weight: 500; }
+.auth-body .mobile-menu-extra { margin-top: auto; display: flex; flex-direction: column; gap: 18px; padding-top: 26px; }
+.auth-body .mobile-store-link { display: inline-flex; align-items: center; gap: 9px; color: #fff; font-weight: 700; font-size: 1.05rem; }
+.auth-body .mobile-store-link svg { stroke: #fff; }
+.auth-body .mobile-menu-cta { display: flex; gap: 12px; }
+.auth-body .mobile-menu-cta a { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; padding: 15px 12px; border-radius: 999px; font-weight: 700; font-size: 1.04rem; }
+.auth-body .mm-apply { background: #16a34a; color: #fff; }
+.auth-body .mm-apply:hover { background: #128a3e; }
+.auth-body .mm-login { border: 1.6px solid rgba(255,255,255,.55); color: #fff; }
+.auth-body .mm-login:hover { background: rgba(255,255,255,.1); }
+.auth-body .mobile-menu-overlay { display: none !important; }
+
+@media (min-width: 900px) {
+  .auth-body .menu-toggle { display: none; }
+  .auth-body .mobile-menu { display: none; }
+  .auth-body .header-actions { display: inline-flex; align-items: center; gap: 16px; }
+  .auth-body .header-actions .btn-store { display: inline-flex; align-items: center; gap: 7px; color: #15331f; font-weight: 600; font-size: .95rem; }
+  .auth-body .header-actions .btn-store svg { stroke: #16a34a; }
+  .auth-body .header-actions .btn-login { display: inline-flex; align-items: center; padding: 9px 24px; border: 1.6px solid #15331f; border-radius: 999px; font-weight: 700; color: #15331f; }
+  .auth-body .header-actions .btn-login:hover { background: #15331f; color: #fff; }
+}

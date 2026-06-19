@@ -78,6 +78,10 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
             Find a Store
           </a>
+          <div class="mobile-menu-cta">
+            <a href="https://apply.cashinflash.com" class="mm-apply">Apply Now</a>
+            <a href="/login.html" class="mm-login">Log in</a>
+          </div>
         </div>
       </div>
     </div>
@@ -94,64 +98,67 @@
           <p class="auth-sub">Log in to manage payments, loans, and your account.</p>
 
           <div class="auth-card">
-            <!-- Step 1: credentials -->
-            <form id="loginForm" data-step="credentials">
-              <div class="auth-field">
-                <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
-                <div class="auth-field-main">
-                  <label for="lf-email">Email or mobile number</label>
-                  <input id="lf-email" type="text" name="email" required autocomplete="username" placeholder="Enter your email or mobile number">
+            <div class="auth-fields">
+              <!-- Step 1: credentials -->
+              <form id="loginForm" data-step="credentials">
+                <div class="auth-field">
+                  <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+                  <div class="auth-field-main">
+                    <label for="lf-email">Email or mobile number</label>
+                    <input id="lf-email" type="text" name="email" required autocomplete="username" placeholder="Enter your email or mobile number">
+                  </div>
+                </div>
+                <div class="auth-field">
+                  <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+                  <div class="auth-field-main">
+                    <label for="lf-pass">Password</label>
+                    <input id="lf-pass" type="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
+                  </div>
+                  <button type="button" class="auth-eye" data-eye="lf-pass" aria-label="Show password">
+                    <svg class="eye-on" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+                <div id="error" class="auth-error" style="display:none;"></div>
+                <div class="auth-row">
+                  <label class="auth-remember"><input type="checkbox" id="rememberMe" checked> Remember me</label>
+                  <a class="auth-forgot" href="/forgot.html">Forgot password?</a>
+                </div>
+              </form>
+
+              <!-- Step 2: channel picker -->
+              <div id="mfaChannelStep" style="display:none;">
+                <p class="mfa-intro" id="mfaChannelIntro">Where should we send your code?</p>
+                <div id="mfaChannelOptions" class="mfa-channel-list"></div>
+                <div id="mfaChannelError" class="auth-error" style="display:none;margin-top:12px;"></div>
+                <button type="button" class="auth-btn auth-btn--ghost mfa-back" id="mfaChannelBack">Back</button>
+              </div>
+
+              <!-- Step 3: code entry -->
+              <div id="mfaCodeStep" style="display:none;">
+                <p class="mfa-intro" id="mfaCodeIntro">Enter the verification code we sent.</p>
+                <form id="mfaCodeForm">
+                  <input type="text" name="code" id="mfaCodeInput" class="mfa-code-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required placeholder="••••••">
+                  <div id="mfaCodeError" class="auth-error" style="display:none;margin-top:12px;"></div>
+                  <button type="submit" class="auth-btn auth-btn--primary" id="mfaVerifyBtn">Verify and continue</button>
+                </form>
+                <div class="mfa-resend-row">
+                  <button type="button" class="link-button" id="mfaResendBtn">Resend code</button>
+                  <button type="button" class="link-button" id="mfaChangeChannelBtn">Use a different method</button>
                 </div>
               </div>
-              <div class="auth-field">
-                <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-                <div class="auth-field-main">
-                  <label for="lf-pass">Password</label>
-                  <input id="lf-pass" type="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
-                </div>
-                <button type="button" class="auth-eye" data-eye="lf-pass" aria-label="Show password">
-                  <svg class="eye-on" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                </button>
-              </div>
-              <div id="error" class="auth-error" style="display:none;"></div>
-              <div class="auth-row">
-                <label class="auth-remember"><input type="checkbox" id="rememberMe" checked> Remember me</label>
-                <a class="auth-forgot" href="/forgot.html">Forgot password?</a>
-              </div>
-              <button type="submit" class="auth-btn auth-btn--primary" id="loginBtn">
+            </div>
+
+            <!-- Buttons: outside the fields card on mobile, inside on desktop.
+                 #forgotRow id reused so showStep() hides them during MFA. -->
+            <div class="auth-actions" id="forgotRow">
+              <button type="submit" form="loginForm" class="auth-btn auth-btn--primary" id="loginBtn">
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                 Log in
               </button>
-            </form>
-
-            <!-- Create account (hidden during MFA via #forgotRow toggle) -->
-            <div id="forgotRow">
               <a href="/search.html" class="auth-btn auth-btn--ghost">
                 <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
                 Create account
               </a>
-            </div>
-
-            <!-- Step 2: channel picker -->
-            <div id="mfaChannelStep" style="display:none;">
-              <p class="mfa-intro" id="mfaChannelIntro">Where should we send your code?</p>
-              <div id="mfaChannelOptions" class="mfa-channel-list"></div>
-              <div id="mfaChannelError" class="auth-error" style="display:none;margin-top:12px;"></div>
-              <button type="button" class="auth-btn auth-btn--ghost mfa-back" id="mfaChannelBack">Back</button>
-            </div>
-
-            <!-- Step 3: code entry -->
-            <div id="mfaCodeStep" style="display:none;">
-              <p class="mfa-intro" id="mfaCodeIntro">Enter the verification code we sent.</p>
-              <form id="mfaCodeForm">
-                <input type="text" name="code" id="mfaCodeInput" class="mfa-code-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required placeholder="••••••">
-                <div id="mfaCodeError" class="auth-error" style="display:none;margin-top:12px;"></div>
-                <button type="submit" class="auth-btn auth-btn--primary" id="mfaVerifyBtn">Verify and continue</button>
-              </form>
-              <div class="mfa-resend-row">
-                <button type="button" class="link-button" id="mfaResendBtn">Resend code</button>
-                <button type="button" class="link-button" id="mfaChangeChannelBtn">Use a different method</button>
-              </div>
             </div>
           </div>
 
