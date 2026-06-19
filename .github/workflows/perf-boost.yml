@@ -1,0 +1,75 @@
+name: Perf boost (Lambda memory + keep-warm)
+
+# One-shot, re-runnable. Speeds up the Vergent-backed pages:
+#  1) Bumps Lambda memory 256 -> 1024 MB (faster CPU => faster cold starts
+#     and JSON processing).
+#  2) Creates an EventBridge schedule that "pings" the user-facing Lambdas
+#     every 4 minutes with {"warmup": true} so a warm container is always
+#     ready (no cold start when the customer surfs in). The handlers return
+#     immediately on a warmup event (no Vergent calls).
+# Run from the Actions tab (workflow_dispatch).
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  boost:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Bump memory to 1024 MB
+        run: |
+          set -e
+          for FN in cif-portal-loans-dev cif-portal-payments-dev cif-portal-auth-mfa-dev cif-portal-search-dev cif-portal-pre-signup-dev; do
+            if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
+              aws lambda update-function-configuration --function-name "$FN" --memory-size 1024 --no-cli-pager >/dev/null
+              aws lambda wait function-updated --function-name "$FN"
+              echo "memory 1024 MB -> $FN"
+            else
+              echo "skip $FN (not found)"
+            fi
+          done
+
+      - name: Keep-warm schedule (every 4 min)
+        run: |
+          set -e
+          RULE=cif-portal-keepwarm
+          RULE_ARN=$(aws events put-rule --name "$RULE" \
+            --schedule-expression "rate(4 minutes)" --state ENABLED \
+            --query RuleArn --output text)
+          echo "rule: $RULE_ARN"
+
+          TARGETS="[]"
+          IDX=0
+          for FN in cif-portal-loans-dev cif-portal-payments-dev cif-portal-auth-mfa-dev; do
+            ARN=$(aws lambda get-function --function-name "$FN" --query 'Configuration.FunctionArn' --output text 2>/dev/null) || { echo "skip $FN"; continue; }
+            # Grant EventBridge permission to invoke (idempotent).
+            aws lambda add-permission --function-name "$FN" \
+              --statement-id "${RULE}-invoke" --action lambda:InvokeFunction \
+              --principal events.amazonaws.com --source-arn "$RULE_ARN" \
+              --no-cli-pager 2>/dev/null || echo "  (permission already present for $FN)"
+            TARGETS=$(echo "$TARGETS" | jq --arg id "warm-$IDX" --arg arn "$ARN" \
+              '. + [{"Id":$id,"Arn":$arn,"Input":"{\"warmup\":true}"}]')
+            IDX=$((IDX+1))
+          done
+          echo "$TARGETS" > /tmp/targets.json
+          cat /tmp/targets.json
+          aws events put-targets --rule "$RULE" --targets file:///tmp/targets.json --no-cli-pager
+          echo "keep-warm targets set ($IDX Lambdas)"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Perf boost applied"
+            echo "- **Memory 1024 MB**: loans, payments, auth-mfa, search, pre-signup"
+            echo "- **Keep-warm**: EventBridge \`rate(4 minutes)\` pings loans / payments / auth-mfa with \`{warmup:true}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

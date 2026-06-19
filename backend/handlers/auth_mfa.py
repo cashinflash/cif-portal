@@ -1233,6 +1233,9 @@ def _signup_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
+    # Keep-warm ping (EventBridge schedule) — return immediately.
+    if isinstance(event, dict) and event.get("warmup"):
+        return {"statusCode": 200, "body": "warm"}
     try:
         http = (event.get("requestContext") or {}).get("http") or {}
         method = (http.get("method") or "").upper()

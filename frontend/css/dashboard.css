@@ -4590,6 +4590,9 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 
 /* Vertical stack of loan sections inside .app-main. */
 .loans-stack { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 18px; }
+/* `display:flex` overrides the bare `hidden` attribute, so the list view (and
+   the detail view) wouldn't hide when toggled. Restore real hiding. */
+.loans-stack[hidden], .loans-detail[hidden], #loansDetailView[hidden] { display: none !important; }
 
 /* ----- Active loan green card (reuses .loan-card) ----- */
 /* The figure values (funded / balance) read like the home balance figure

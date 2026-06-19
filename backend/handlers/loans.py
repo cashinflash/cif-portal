@@ -3500,6 +3500,10 @@ def _shape_vergent_customer_row(rec: Dict[str, Any]) -> Dict[str, Any]:
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
+    # Keep-warm ping (EventBridge schedule) — return immediately so the
+    # container stays warm without touching Vergent.
+    if isinstance(event, dict) and event.get("warmup"):
+        return {"statusCode": 200, "body": "warm"}
     try:
         http = (event.get("requestContext") or {}).get("http") or {}
         method = (http.get("method") or event.get("httpMethod") or "GET").upper()

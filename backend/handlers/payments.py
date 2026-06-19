@@ -2536,6 +2536,9 @@ def _get_repay_rgapi_creds() -> Optional[Dict[str, Any]]:
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
+    # Keep-warm ping (EventBridge schedule) — return immediately, no Vergent.
+    if isinstance(event, dict) and event.get("warmup"):
+        return {"statusCode": 200, "body": "warm"}
     # Unconditional one-line breadcrumb at request entry so a
     # CloudWatch tail always shows that the handler reached the
     # body even if downstream code raises. Prior debugging hit a
