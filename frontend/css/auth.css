@@ -173,7 +173,7 @@
   .auth-desktop { display: block; }
   .auth-top { justify-content: space-between; }
   .auth-top .auth-avatar { position: static; transform: none; }
-  .auth-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.06fr); gap: clamp(36px, 6vw, 96px); padding-top: 18px; }
+  .auth-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.06fr); gap: clamp(28px, 3vw, 52px); padding-top: 18px; }
   .auth-left { max-width: 560px; }
   /* Desktop: the wrapper becomes the white card; buttons sit inside it with
      comfortable bottom padding. Secure strip stays centered (matches mockup). */
