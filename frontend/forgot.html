@@ -9,9 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="/css/cif-brand.css">
-<link rel="stylesheet" href="/css/portal.css">
 <link rel="stylesheet" href="/css/auth.css">
+<link rel="stylesheet" href="/css/site-header.css">
 <style>
   .forgot-success { display: flex; align-items: center; gap: 8px; color: #0a6e35; background: rgba(22,163,74,.08); padding: 12px 14px; border-radius: 10px; font-weight: 600; font-size: .92rem; margin: 0 0 16px; }
   .forgot-success > svg { flex: 0 0 auto; position: relative; top: 1px; }
@@ -37,41 +36,71 @@
 </head>
 <body class="auth-body reset-page">
 
-  <!-- Site header — same as cashinflash.com (logo left, hamburger right on mobile) -->
-  <header class="site-header">
-    <div class="header-inner">
-      <a href="https://cashinflash.com" class="logo">
-        <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="160" height="21">
+  <!-- Site header — identical to cashinflash.com -->
+  <header class="site-header" id="site-header">
+    <div class="header-inner container">
+      <a href="https://cashinflash.com/" class="logo">
+        <img src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="250" height="32" fetchpriority="high">
       </a>
-      <nav class="main-nav"><ul class="nav-list"></ul></nav>
+
+      <nav class="main-nav" id="main-nav">
+        <ul class="nav-list">
+          <li class="nav-item has-dropdown">
+            <a href="https://cashinflash.com/loans/">Loans</a>
+            <div class="dropdown-menu mega-menu">
+              <div class="mega-cols">
+                <div class="mega-col">
+                  <p class="mega-col-label">LOANS</p>
+                  <a href="https://cashinflash.com/loans/payday-loans.html">Payday Loans</a>
+                  <a href="https://cashinflash.com/loans/cash-advance.html">Cash Advance</a>
+                </div>
+                <div class="mega-col mega-col-brand">
+                  <img src="/images/white_logo_350.png" alt="Cash in Flash" width="160" height="30">
+                  <p>Get Fast Cash Today: Secure Payday Loans with Quick Approval and Same-Day Deposits. Apply Online in Minutes!</p>
+                  <p class="mega-col-label">MONEY, FIGURED OUT</p>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="nav-item"><a href="https://cashinflash.com/services/western-union.html">Western Union</a></li>
+          <li class="nav-item"><a href="https://cashinflash.com/money-tips/">Money Tips</a></li>
+        </ul>
+      </nav>
+
       <div class="header-actions">
         <a href="https://cashinflash.com/locations/" class="btn-store">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
           Find a Store
         </a>
-        <a href="https://cashinflash.com" class="btn-login">Home</a>
+        <a href="https://apply.cashinflash.com/" class="btn-apply">Apply Now</a>
+        <a href="/login.html" class="btn-login">Log in</a>
       </div>
-      <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"><span></span><span></span><span></span></button>
+
+      <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
     </div>
+
+    <!-- Mobile Menu -->
     <div class="mobile-menu" id="mobile-menu">
-      <div class="mobile-menu-hd">
-        <a href="https://cashinflash.com" class="logo">
-          <img src="https://cashinflash.com/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="140" height="19">
-        </a>
-        <button class="mobile-close-btn" id="mobile-close-btn" aria-label="Close menu">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
       <div class="mobile-menu-inner">
+        <div class="mobile-menu-header">
+          <a href="https://cashinflash.com/" class="mobile-menu-logo">
+            <img src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="180" height="23">
+          </a>
+          <button class="mobile-menu-close" id="mobile-menu-close" aria-label="Close menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+          </button>
+        </div>
         <ul class="mobile-nav-list">
           <li class="mobile-nav-item has-sub">
-            <a href="#">Loans</a>
+            <a href="https://cashinflash.com/loans/">Loans</a>
             <ul class="mobile-sub">
-              <li><a href="https://cashinflash.com/loans/payday-loans/">Payday Loans</a></li>
-              <li><a href="https://cashinflash.com/loans/cash-advance/">Cash Advances</a></li>
+              <li><a href="https://cashinflash.com/loans/payday-loans.html">Payday Loans</a></li>
+              <li><a href="https://cashinflash.com/loans/cash-advance.html">Cash Advance</a></li>
             </ul>
           </li>
-          <li class="mobile-nav-item"><a href="https://cashinflash.com/services/western-union/">Western Union</a></li>
+          <li class="mobile-nav-item"><a href="https://cashinflash.com/services/western-union.html">Western Union</a></li>
           <li class="mobile-nav-item"><a href="https://cashinflash.com/money-tips/">Money Tips</a></li>
         </ul>
         <div class="mobile-menu-extra">
@@ -79,9 +108,9 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
             Find a Store
           </a>
-          <div class="mobile-menu-cta">
-            <a href="https://apply.cashinflash.com" class="mm-apply">Apply Now</a>
-            <a href="/login.html" class="mm-login">Log in</a>
+          <div class="mobile-btn-row">
+            <a href="https://apply.cashinflash.com/" class="btn-apply">Apply Now</a>
+            <a href="/login.html" class="btn-login">Log in</a>
           </div>
         </div>
       </div>
@@ -220,27 +249,11 @@
   </footer>
 
 <script src="/js/portal.js"></script>
+<script src="/js/site-header.js"></script>
 <script>
 (function () {
   'use strict';
   var y = document.getElementById('footerYear'); if (y) y.textContent = String(new Date().getFullYear());
-
-  // Site header (cashinflash.com) mobile menu toggle.
-  (function () {
-    var btn = document.getElementById('menu-toggle');
-    var menu = document.getElementById('mobile-menu');
-    var overlay = document.getElementById('mobile-overlay');
-    var closeBtn = document.getElementById('mobile-close-btn');
-    if (!btn || !menu) return;
-    function openM() { btn.classList.add('active'); menu.classList.add('open'); if (overlay) overlay.classList.add('open'); }
-    function shut() { btn.classList.remove('active'); menu.classList.remove('open'); if (overlay) overlay.classList.remove('open'); }
-    btn.addEventListener('click', openM);
-    if (closeBtn) closeBtn.addEventListener('click', shut);
-    if (overlay) overlay.addEventListener('click', shut);
-    document.querySelectorAll('.mobile-nav-item.has-sub > a').forEach(function (a) {
-      a.addEventListener('click', function (e) { e.preventDefault(); a.parentElement.classList.toggle('open'); });
-    });
-  })();
 
   var requestForm = document.getElementById('requestForm');
   var confirmForm = document.getElementById('confirmForm');
