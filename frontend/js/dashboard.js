@@ -809,6 +809,7 @@
       else { window.location.href = APPLY_URL; }
     }
     var rl = qs('#requestLoanBtn'); if (rl) rl.addEventListener('click', requestLoan);
+    var rlm = qs('#requestLoanBtnMobile'); if (rlm) rlm.addEventListener('click', requestLoan);
     var promo = qs('#promoRequestLoan'); if (promo) promo.addEventListener('click', requestLoan);
     qsa('[data-close-reloan]').forEach(function (el) {
       el.addEventListener('click', function () { if (modal) modal.hidden = true; });
@@ -843,13 +844,15 @@
     if (!token) return;
     api('/api/my-cards', token).then(function (data) {
       var cards = (data && (data.cards || data.methods)) || [];
-      var methodEl = document.querySelector('[data-loan-repay-method]');
-      var summaryEl = document.querySelector('[data-card-summary]');
+      // The repayment label appears in several places (desktop loan figure,
+      // mobile loan foot, mobile "Saved debit card" tile) — set them all.
+      var methodEls = document.querySelectorAll('[data-loan-repay-method]');
+      var summaryEls = document.querySelectorAll('[data-card-summary]');
       if (cards.length) {
         var c = cards[0];
         var label = (c.brand || c.cardType || 'Card') + ' •• ' + (c.last4 || c.lastFour || '');
-        if (methodEl) methodEl.textContent = label;
-        if (summaryEl) summaryEl.textContent = label;
+        methodEls.forEach(function (el) { el.textContent = label; });
+        summaryEls.forEach(function (el) { el.textContent = label; });
       }
     }).catch(function () { /* leave the on-card defaults */ });
   }

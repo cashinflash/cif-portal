@@ -4328,6 +4328,20 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .app-footer-links a { font-size: .82rem; font-weight: 600; color: #475569 !important; text-decoration: none; }
 .app-footer-links a:hover { color: #0E8741 !important; }
 
+/* ===== Mobile app layout (shown < 900px) vs desktop grid cards =====
+   u-desktop elements are hidden on phones; u-mobile elements are hidden on
+   desktop (see the min-width:900px block). Splitting by media query keeps
+   each element's natural display (flex/grid/block) outside its hidden range. */
+@media (max-width: 899px) { .u-desktop { display: none !important; } }
+
+.home-mobile { display: flex; flex-direction: column; gap: 14px; }
+.home-mobile-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.home-mobile-tiles .app-tile { flex-direction: row; align-items: center; gap: 11px; padding: 14px; }
+.home-mobile-tiles .app-tile-icon { border-radius: 50%; flex: 0 0 42px; }
+.home-mobile-tiles .app-tile-text { flex: 1; min-width: 0; }
+.home-mobile-tiles .app-tile-chev { position: static; margin-left: auto; flex: 0 0 auto; }
+.app-promo-chev { margin-left: auto; flex: 0 0 auto; }
+
 /* Anchors inside the app layout opt out of `.dashboard-page a {color:inherit}`. */
 .app-cta-primary, .app-cta-primary:link, .app-cta-primary:visited { color: #fff !important; }
 .app-cta-outline, .app-cta-outline:link, .app-cta-outline:visited { color: #0E8741 !important; }
@@ -4346,6 +4360,8 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .app-sidebar-help { display: none; }
 
 @media (min-width: 900px) {
+  /* Hide the mobile app-layout blocks; the desktop grid cards take over. */
+  .u-mobile { display: none !important; }
   /* Swap the mobile welcome for the desktop page header. */
   .app-welcome { display: none !important; }
   .app-pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
