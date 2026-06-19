@@ -113,7 +113,7 @@
     const greetEl = qs('#dashGreeting');
     if (greetEl) {
       const h = new Date().getHours();
-      greetEl.textContent = h < 12 ? 'Good morning' : (h < 18 ? 'Good afternoon' : 'Good evening');
+      greetEl.textContent = h < 12 ? 'Good morning,' : (h < 18 ? 'Good afternoon,' : 'Good evening,');
     }
 
     // Avatar initials (top right of greeting + sidebar fallback)
