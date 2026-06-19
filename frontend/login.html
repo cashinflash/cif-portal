@@ -133,8 +133,8 @@
                 <div class="auth-field">
                   <span class="auth-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
                   <div class="auth-field-main">
-                    <label for="lf-email">Email or mobile number</label>
-                    <input id="lf-email" type="text" name="email" required autocomplete="username" placeholder="Enter your email or mobile number">
+                    <label for="lf-email">Email</label>
+                    <input id="lf-email" type="text" name="email" required autocomplete="username" placeholder="Enter your email">
                   </div>
                 </div>
                 <div class="auth-field">
@@ -191,7 +191,7 @@
             </div>
           </div>
 
-          <div class="auth-secure">
+          <div class="auth-secure auth-desktop">
             <span class="auth-secure-line">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-3.5 7-9V5l-7-3-7 3v8c0 5.5 7 9 7 9z"/><polyline points="9 11.5 11.2 13.7 15 9.8"/></svg>
               Secure. Private. Always.
@@ -207,6 +207,15 @@
             <img src="/images/fast-cash-promo-mobile.png" alt="Fast cash. Simple process. Approved in minutes, money same day, good credit not needed." loading="lazy">
           </picture>
         </aside>
+
+        <!-- On mobile the secure strip sits below the promo banner. -->
+        <div class="auth-secure auth-mobile">
+          <span class="auth-secure-line">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-3.5 7-9V5l-7-3-7 3v8c0 5.5 7 9 7 9z"/><polyline points="9 11.5 11.2 13.7 15 9.8"/></svg>
+            Secure. Private. Always.
+          </span>
+          <p class="auth-secure-sub">Your data is protected with bank-level security.</p>
+        </div>
 
       </div>
     </div>

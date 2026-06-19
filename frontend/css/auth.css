@@ -186,6 +186,10 @@
   .auth-footer { display: none; }
   /* Breathing room between the site header and the page heading on mobile. */
   .auth-wrap { padding-top: 26px; }
+  /* Divider under the password field, above the remember/forgot row (mockup). */
+  .auth-row { border-top: 1px solid #eef1f4; padding-top: 16px; }
+  /* Secure strip sits below the promo on mobile; the grid gap spaces it. */
+  .auth-secure.auth-mobile { margin-top: 0; }
   /* Compact the 3-up feature row so it fits narrow phones without overflow. */
   .auth-features { padding: 12px 2px; margin-top: 12px; }
   .auth-feature { gap: 6px; padding: 2px 5px; }
