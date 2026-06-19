@@ -178,6 +178,16 @@
     });
   }
 
+  // Mirror the green active-loan card's "Repayment method" line to the
+  // selected card (fallback: first method), formatted like the Home page.
+  // Leaves the "Card on file" fallback when there are no saved methods.
+  function updateRepayLabel() {
+    var el = document.querySelector('[data-pay-repay-method]');
+    if (!el || !state.methods || !state.methods.length) return;
+    var sel = state.methods.filter(function (m) { return m.methodId === state.selectedMethodId; })[0] || state.methods[0];
+    if (sel) el.textContent = (sel.brand || 'Card') + ' •• ' + (sel.last4 || '');
+  }
+
   function renderMethods() {
     const list = qs('#paySavedMethods');
     const noCards = qs('#payNoCardsHint');
@@ -198,22 +208,25 @@
     });
     if (!selectedExists) state.selectedMethodId = state.methods[0].methodId;
 
-    state.methods.forEach(function (m) {
+    state.methods.forEach(function (m, idx) {
       const label = document.createElement('label');
       label.className = 'pay-method' + (m.methodId === state.selectedMethodId ? ' is-selected' : '');
       label.innerHTML =
         '<input type="radio" name="payMethod" value="' + escapeHtml(m.methodId) + '"' +
           (m.methodId === state.selectedMethodId ? ' checked' : '') + '>' +
+        '<span class="pay-method-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>' +
         '<div class="pay-method-body">' +
           '<div class="pay-method-brand">' + escapeHtml(m.brand) + ' •••• ' + escapeHtml(m.last4) + '</div>' +
           '<div class="pay-method-meta">Expires ' +
             String(m.expMonth).padStart(2, '0') + '/' + String(m.expYear).slice(-2) +
             (m.nameOnCard ? ' · ' + escapeHtml(m.nameOnCard) : '') +
           '</div>' +
-        '</div>';
+        '</div>' +
+        (idx === 0 ? '<span class="pay-method-default">Default</span>' : '');
       list.appendChild(label);
     });
 
+    updateRepayLabel();
     applyMethodSelection();
   }
 
@@ -234,6 +247,7 @@
       const radio = el.querySelector('input[type="radio"]');
       el.classList.toggle('is-selected', !!radio && radio.checked);
     });
+    updateRepayLabel();
   }
 
   function onMethodChange(e) {

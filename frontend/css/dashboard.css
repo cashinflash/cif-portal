@@ -2409,6 +2409,11 @@ button.dash-doc-download:disabled {
   color: #6b7280;
   margin-top: 2px;
 }
+.pay-method-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(14,135,65,.10); color: #0E8741; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.pay-method-default { margin-left: auto; align-self: center; background: rgba(14,135,65,.12); color: #0a6e35; font-size: .7rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+.pay-card-head--row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pay-method-edit { color: #0E8741; font-weight: 700; font-size: .9rem; text-decoration: none; white-space: nowrap; }
+.pay-method-edit:hover { text-decoration: underline; }
 .pay-method-remove {
   background: transparent;
   border: 1px solid #d1d5db;
@@ -4496,12 +4501,28 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 
 /* Two-up cards once there's room. */
 @media (min-width: 760px) {
-  .pay-grid { grid-template-columns: 1fr 1fr; align-items: start; }
+  .pay-grid { grid-template-columns: 1fr 1fr; align-items: stretch; }
+  .pay-method-card, .pay-breakdown-card { height: 100%; }
 }
 
 /* Desktop: a touch more breathing room, matching the home cards. */
 @media (min-width: 900px) {
   .pay-stack { gap: 20px; max-width: 920px; }
   .pay-now-btn { max-width: 100%; }
+}
+
+/* "Need extra cash?" cross-sell banner — clickable card (Home + Payments). */
+.app-loan-banner { display: flex; align-items: center; gap: 16px; margin-top: 6px; padding: 16px 20px; background: #eef6f0; border: 1px solid #d7e8dd; border-radius: 16px; text-decoration: none; transition: background .15s, border-color .15s; }
+.app-loan-banner:hover { background: #e7f2ea; border-color: #c2ddcb; }
+.app-loan-banner-art { width: 72px; height: 72px; flex: 0 0 auto; object-fit: contain; }
+.app-loan-banner-text { flex: 1 1 auto; min-width: 0; }
+.app-loan-banner-title { margin: 0; font-size: 1.05rem; font-weight: 800; color: #1a1a2e; letter-spacing: -.01em; }
+.app-loan-banner-sub { margin: 3px 0 0; font-size: .9rem; color: #5b6470; line-height: 1.45; }
+.app-loan-banner-chev { flex: 0 0 auto; color: #15C15D; display: flex; align-items: center; }
+@media (max-width: 480px) {
+  .app-loan-banner { gap: 12px; padding: 14px 16px; }
+  .app-loan-banner-art { width: 56px; height: 56px; }
+  .app-loan-banner-title { font-size: 1rem; }
+  .app-loan-banner-sub { font-size: .85rem; }
 }
 

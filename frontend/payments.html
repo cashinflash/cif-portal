@@ -125,7 +125,7 @@
             </div>
             <div class="loan-card-fig">
               <p class="loan-card-flabel">Repayment method</p>
-              <p class="loan-card-method"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span>Card on file</span></p>
+              <p class="loan-card-method"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span data-pay-repay-method>Card on file</span></p>
             </div>
           </div>
           <div class="loan-card-rule"></div>
@@ -149,9 +149,12 @@
 
             <!-- LEFT: Payment method (saved card + amount + CVV) -->
             <div class="app-surface pay-method-card">
-              <div class="pay-card-head">
-                <h2 class="home-card-title">Payment method</h2>
-                <p class="home-card-sub">Choose a saved debit card, or add a new one.</p>
+              <div class="pay-card-head pay-card-head--row">
+                <div>
+                  <h2 class="home-card-title">Payment method</h2>
+                  <p class="home-card-sub">Choose a saved debit card, or add a new one.</p>
+                </div>
+                <a class="pay-method-edit" href="/profile.html">Edit</a>
               </div>
 
               <div id="paySavedMethods"></div>
@@ -368,6 +371,15 @@
           <button type="button" class="btn-apply" id="payAgainBtn">Make another payment</button>
         </div>
       </section>
+
+      <a class="app-loan-banner" href="/request-loan.html" aria-label="Need extra cash? Request up to $255">
+        <img class="app-loan-banner-art" src="/images/needloan-cash.png" alt="" width="72" height="72" loading="lazy">
+        <div class="app-loan-banner-text">
+          <p class="app-loan-banner-title">Need extra cash?</p>
+          <p class="app-loan-banner-sub">Request up to $255 and get funds fast. It's quick, easy, and secure.</p>
+        </div>
+        <span class="app-loan-banner-chev" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span>
+      </a>
 
       <p class="pay-help-line">
         Need help? Call us at <a href="tel:+18889999859">(888) 999-9859</a> or visit any Cash in Flash location.
