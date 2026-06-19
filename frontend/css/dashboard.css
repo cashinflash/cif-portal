@@ -181,12 +181,9 @@
   align-items: center;
   justify-content: space-between;
   padding: 18px 22px;
-  background: #fff;
-  border-bottom: 1px solid rgba(0,0,0,.06);
 }
-/* The wordmark PNG has a baked-in white background; `multiply` drops it onto
-   the light drawer (#f4f6f8) so it reads like a transparent logo. */
-.mobile-menu-logo img { height: 30px; width: auto; display: block; mix-blend-mode: multiply; }
+/* The wordmark PNG is transparent — show it directly on the drawer. */
+.mobile-menu-logo img { height: 28px; width: auto; display: block; }
 .mobile-menu-close { padding: 4px; }
 .mobile-nav-list { padding: 16px; display: flex; flex-direction: column; gap: 2px; }
 .mobile-nav-item a {
