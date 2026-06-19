@@ -4060,6 +4060,11 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
    with dividers in the min-width:900px block. */
 .loan-card-figures { display: flex; flex-wrap: wrap; gap: 16px 22px; margin-top: 22px; }
 .loan-card-fig { flex: 1 1 40%; min-width: 0; }
+/* Mobile: vertical divider between the balance + due columns (mirrors desktop). */
+@media (max-width: 899px) {
+  .loan-card-figures { column-gap: 0; }
+  .loan-card-fig + .loan-card-fig { border-left: 1px solid rgba(255,255,255,.22); padding-left: 18px; }
+}
 .loan-card-flabel { margin: 0 0 4px; font-size: .82rem; color: rgba(255,255,255,.82); }
 .loan-card-balance { margin: 0; font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .loan-card-balance small { font-size: 1.3rem; font-weight: 700; vertical-align: 12px; margin-right: 2px; }
@@ -4096,7 +4101,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 
 /* Trust row */
 .app-trust {
-  display: flex; align-items: stretch; gap: 4px; margin-top: 18px; padding: 18px 10px;
+  display: flex; align-items: stretch; gap: 4px; margin-top: 8px; padding: 18px 10px;
   background: #fff; border-radius: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.05);
 }
 .app-trust-item { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 0 4px; }
@@ -4126,8 +4131,8 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   font-family: inherit; text-align: left;
 }
 .app-promo-emoji { font-size: 1.7rem; flex: 0 0 auto; }
-.app-promo-art { width: 56px; height: 56px; object-fit: contain; display: block; }
-.app-promo-iconbox { flex: 0 0 auto; background: #fff; border-radius: 14px; padding: 8px 10px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.app-promo-art { width: 58px; height: 58px; object-fit: contain; display: block; }
+.app-promo-iconbox { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; }
 .app-promo-text { flex: 1; min-width: 0; }
 .app-promo-text strong { display: block; color: #1a1a2e; font-weight: 700; font-size: .98rem; }
 .app-promo-text small { color: #557; font-size: .84rem; line-height: 1.35; }
@@ -4361,8 +4366,9 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    each element's natural display (flex/grid/block) outside its hidden range. */
 @media (max-width: 899px) { .u-desktop { display: none !important; } }
 
-.home-mobile { display: flex; flex-direction: column; gap: 14px; }
+.home-mobile { display: flex; flex-direction: column; gap: 10px; }
 .home-mobile > .app-cta-primary:first-child { margin-top: 0; }
+.home-mobile > .app-cta-outline { margin-top: 0; }
 .home-mobile-tiles { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .home-mobile-tiles .app-tile { flex-direction: row; align-items: center; gap: 11px; padding: 14px; }
 .home-mobile-tiles .app-tile-icon { border-radius: 50%; flex: 0 0 42px; }
