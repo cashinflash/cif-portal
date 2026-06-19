@@ -716,7 +716,7 @@
       text = 'Due tomorrow';
       el.classList.add('is-soon');
     } else {
-      text = days + ' days left';
+      text = 'Due in ' + days + ' days';
       if (days <= 3) el.classList.add('is-soon');
     }
     el.textContent = text;

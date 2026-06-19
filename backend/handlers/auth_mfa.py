@@ -688,16 +688,18 @@ def _login(event: Dict[str, Any]) -> Dict[str, Any]:
     # THIS user, the verified password above is our factor for the session —
     # skip the OTP step and return Cognito tokens directly.
     device_token = (body.get("deviceToken") or "").strip()
-    if device_token and _check_trusted_device(device_token, sub=sub, email=email):
-        _renew_trusted_device(device_token)
-        log.info("login device-trusted (MFA skipped) for %s", _mask_email(email))
-        return _resp(200, {
-            "authenticated": True,
-            "idToken": tokens.get("IdToken"),
-            "accessToken": tokens.get("AccessToken"),
-            "refreshToken": tokens.get("RefreshToken"),
-            "expiresIn": tokens.get("ExpiresIn") or 3600,
-        })
+    if device_token:
+        if _check_trusted_device(device_token, sub=sub, email=email):
+            _renew_trusted_device(device_token)
+            log.info("login device-trusted (MFA skipped) for %s", _mask_email(email))
+            return _resp(200, {
+                "authenticated": True,
+                "idToken": tokens.get("IdToken"),
+                "accessToken": tokens.get("AccessToken"),
+                "refreshToken": tokens.get("RefreshToken"),
+                "expiresIn": tokens.get("ExpiresIn") or 3600,
+            })
+        log.info("login device-token present but invalid for %s -> MFA", _mask_email(email))
 
     # Prefer the Vergent phone (what the customer actually uses) over Cognito.
     phone_digits = None

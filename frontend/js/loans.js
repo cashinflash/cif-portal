@@ -147,7 +147,7 @@
       empty.className = 'dash-loanlist-empty';
       empty.innerHTML =
         '<p style="margin-bottom:16px;">You don’t have any loans on file yet.</p>' +
-        '<a href="/request-loan.html" class="btn-apply" data-action="new-loan">Request a loan</a>';
+        '<a href="/request-loan.html" class="btn-apply" data-action="new-loan">Apply for a Loan</a>';
       body.appendChild(empty);
       if (count) count.hidden = true;
       return;
