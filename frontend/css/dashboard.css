@@ -4620,17 +4620,20 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .loan-card-figval--date { font-size: 1.05rem; font-weight: 700; }
 .loan-card-figsub { margin: 4px 0 0; font-size: .92rem; font-weight: 700; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; }
 
-/* Mobile: figures stack 2x2 (flex-wrap with a ~46% basis), divider between
-   the two columns. The base .loan-card-fig + .loan-card-fig border-left
-   (<=899px) draws a divider before every fig after the first; remove it on
-   the items that start a new row (every odd item) so only the in-row gap
-   gets the rule. */
+/* Mobile: top row = Loan Amount | Current Balance | Due Date as three equal
+   columns with hairline dividers; Repayment Method drops to its own
+   full-width row beneath a horizontal rule (mirrors the Profile card). */
 @media (max-width: 899px) {
-  .loans-active .loan-card-figures { gap: 18px 0; }
-  .loans-active .loan-card-fig { flex: 1 1 44%; padding-left: 0; }
-  .loans-active .loan-card-fig + .loan-card-fig { border-left: 1px solid rgba(255,255,255,.22); padding-left: 18px; }
-  .loans-active .loan-card-fig:nth-child(2n+1) { border-left: none; padding-left: 0; }
-  .loans-active .loan-card-figval { font-size: 1.6rem; }
+  .loans-active .loan-card-figures { gap: 0; }
+  .loans-active .loan-card-fig { flex: 1 1 0; min-width: 0; padding-left: 14px; }
+  .loans-active .loan-card-fig:nth-child(1) { padding-left: 0; }
+  .loans-active .loan-card-fig:nth-child(2),
+  .loans-active .loan-card-fig:nth-child(3) { border-left: 1px solid rgba(255,255,255,.22); }
+  .loans-active .loan-card-fig:nth-child(4) {
+    flex: 1 1 100%; padding-left: 0; border-left: none;
+    margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.22);
+  }
+  .loans-active .loan-card-figval { font-size: 1.35rem; }
 }
 
 /* Empty-state CTA on the active card matches the payments empty CTA. */
