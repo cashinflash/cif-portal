@@ -4283,11 +4283,11 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    reads as filled, not bottom-pinned with a dead gap. */
 .home-needloan-cta { margin-top: 0; }
 
-/* Make-a-payment card: flex column with the divider as its own middle
-   child. justify-content:space-between spreads top / line / actions so the
-   line sits in the middle with even spacing (no dead band) when the card
-   stretches to match the activity card; on mobile it's just natural flow. */
-.home-pay { display: flex; flex-direction: column; justify-content: space-between; gap: 16px; }
+/* Make-a-payment card: natural compact flow — figures, a divider with even
+   margins, then the buttons (no justify spreading). The activity card is
+   capped at 3 rows so this card defines the row height and stays compact,
+   exactly like the example. */
+.home-pay { display: flex; flex-direction: column; }
 .home-pay-top { flex: 0 0 auto; }
 .home-pay-figs { display: flex; gap: 22px; margin-top: 16px; }
 .home-pay-actions { display: flex; flex-direction: column; gap: 12px; }
@@ -4299,7 +4299,7 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-pay-countdown { display: block; margin-top: 5px; font-size: .78rem; font-weight: 700; color: #6b7280; }
 .home-pay-countdown.is-soon { color: #b45309; }
 .home-pay-countdown.is-late { color: #b42318; }
-.home-pay-rule { height: 1px; background: #eef1f4; margin: 0; }
+.home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0; }
 
 /* Recent-activity card. */
 .home-activity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }

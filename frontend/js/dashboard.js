@@ -523,12 +523,13 @@
       return;
     }
 
-    // Newest first by loanDate / originationDate. Show top 4.
+    // Newest first by loanDate / originationDate. Show top 3 (matches the
+    // example; keeps the card the same compact height as the pay card).
     const sorted = allLoans.slice().sort(function (a, b) {
       const da = new Date(a.loanDate || a.originationDate || 0).getTime();
       const db = new Date(b.loanDate || b.originationDate || 0).getTime();
       return db - da;
-    }).slice(0, 4);
+    }).slice(0, 3);
 
     sorted.forEach(function (loan) {
       const row = document.createElement('a');
