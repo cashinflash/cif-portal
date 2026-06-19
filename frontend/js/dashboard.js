@@ -143,6 +143,7 @@
     wireMobileMenu();
     wireNewLoanButton();
     wireAppActions();
+    wireImageFallbacks();
     loadCards(token);
     showPaymentSuccessBanner();  // one-shot "payment posted" banner
     renderProfileFromClaims();   // instant render from JWT claims (legacy selectors safe to call when missing)
@@ -817,6 +818,22 @@
       if (menu) menu.classList.add('open');
       if (toggle) toggle.classList.add('active');
       document.body.style.overflow = 'hidden';
+    });
+  }
+
+  // ---------- Customer-provided images with inline-SVG fallback ----------
+  // Each <img data-fallback> is followed by a hidden <svg> recreation. If the
+  // customer hasn't committed their PNG yet (404), swap to the SVG so the card
+  // never shows a broken image. CSP-safe (no inline onerror attribute).
+  function wireImageFallbacks() {
+    qsa('img[data-fallback]').forEach(function (img) {
+      function fail() {
+        img.hidden = true;
+        var svg = img.nextElementSibling;
+        if (svg) svg.hidden = false;
+      }
+      img.addEventListener('error', fail);
+      if (img.complete && img.naturalWidth === 0) fail();  // already failed (cached 404)
     });
   }
 
