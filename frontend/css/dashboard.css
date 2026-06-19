@@ -4559,3 +4559,21 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
   .app-loan-banner-sub { font-size: .85rem; }
 }
 
+/* Redesigned mobile menu drawer (card style). */
+.mobile-menu { background: #f4f6f8; }
+.mobile-menu-header { display: flex; align-items: center; justify-content: center; position: relative; padding: 18px 20px; }
+.mobile-menu-header .mobile-menu-close { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: none; border: none; }
+.mobile-menu-user { display: flex; align-items: center; gap: 14px; padding: 6px 22px 22px; }
+.mobile-menu-avatar { width: 62px; height: 62px; flex: 0 0 62px; border-radius: 50%; background: #e8f5ee; display: inline-flex; align-items: center; justify-content: center; }
+.mobile-menu-user-text p { margin: 0; font-size: .95rem; color: #6b7280; }
+.mobile-menu-user-text strong { display: block; font-size: 1.55rem; font-weight: 800; color: #1a1a2e; line-height: 1.12; letter-spacing: -.01em; }
+.mobile-menu-cards { display: flex; flex-direction: column; gap: 12px; padding: 2px 20px 8px; }
+.mobile-menu-card { display: flex; align-items: center; gap: 16px; padding: 16px 18px; background: #fff; border: 1px solid #eef1f4; border-radius: 16px; box-shadow: 0 1px 3px rgba(15,23,42,.05); text-decoration: none; }
+.mobile-menu-card:active { background: #f7faf8; }
+.mobile-menu-card-icon { width: 46px; height: 46px; flex: 0 0 46px; border-radius: 50%; background: #e8f5ee; display: inline-flex; align-items: center; justify-content: center; }
+.mobile-menu-card-label { flex: 1; min-width: 0; font-size: 1.08rem; font-weight: 700; color: #1a1a2e; }
+.mobile-menu-card-chev { flex: 0 0 auto; }
+.mobile-menu-extra { padding: 18px 20px calc(24px + env(safe-area-inset-bottom, 0px)); margin-top: auto; }
+.mobile-menu-signout { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 17px; background: #fff; border: 1.5px solid #f3b4b4; border-radius: 16px; color: #d8453c; font-weight: 700; font-size: 1.06rem; font-family: inherit; cursor: pointer; }
+.mobile-menu-signout:active { background: #fef2f2; }
+

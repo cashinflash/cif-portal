@@ -899,7 +899,7 @@
     });
     if (close) close.addEventListener('click', shut);
     if (overlay) overlay.addEventListener('click', shut);
-    qsa('.mobile-nav-item a', menu).forEach(function (a) {
+    qsa('.mobile-menu-card, .mobile-nav-item a', menu).forEach(function (a) {
       a.addEventListener('click', shut);
     });
     window.addEventListener('keydown', function (e) {

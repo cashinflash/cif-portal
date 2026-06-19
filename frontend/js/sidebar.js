@@ -40,6 +40,10 @@
     if (nameEl) nameEl.textContent = label;
     var chip = document.getElementById('userChip');
     if (chip) chip.textContent = label;
+    // Redesigned mobile drawer shows the bare first name after "Welcome back,".
+    document.querySelectorAll('.dash-first-name').forEach(function (el) {
+      el.textContent = first || 'there';
+    });
 
     // Sign-out wiring for any sign-out button on the page.
     var ids = ['signOutBtn', 'signOutBtnMobile', 'signOutBtnSidebar'];
