@@ -456,6 +456,9 @@
 
     // Recent activity feed (replaces the legacy My-loans list)
     renderRecentActivity(allLoans);
+    // Mirror the rendered activity into the mobile card.
+    var _amob = qs('#dashRecentActivityMobile'); var _adesk = qs('#dashRecentActivity');
+    if (_amob && _adesk) _amob.innerHTML = _adesk.innerHTML;
 
     // Legacy My-loans list (no longer in markup but the function is
     // safe to call — it's a no-op when the target element is gone)

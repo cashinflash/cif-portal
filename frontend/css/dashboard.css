@@ -4126,12 +4126,13 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 
 /* Promo */
 .app-promo {
-  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 16px;
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 18px;
   background: #eaf6ef; border: 1px solid #d3eadd; border-radius: 16px; cursor: pointer;
   font-family: inherit; text-align: left;
 }
+.dashboard-page .app-promo { background: #edf7f1; border: 1px solid #d3e9dd; }
 .app-promo-emoji { font-size: 1.7rem; flex: 0 0 auto; }
-.app-promo-art { width: 58px; height: 58px; object-fit: contain; display: block; }
+.app-promo-art { width: 66px; height: 66px; object-fit: contain; display: block; }
 .app-promo-iconbox { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; }
 .app-promo-text { flex: 1; min-width: 0; }
 .app-promo-text strong { display: block; color: #1a1a2e; font-weight: 700; font-size: .98rem; }
@@ -4303,9 +4304,9 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 }
 .home-needloan-top { display: flex; align-items: center; gap: 16px; }
 .home-needloan-illus-wrap { flex: 0 0 auto; line-height: 0; }
-.home-needloan-illus { display: block; width: 92px; height: 76px; }
+.home-needloan-illus { display: block; width: 116px; height: 116px; }
 /* The customer-provided PNG: contain so a square asset isn't distorted. */
-.home-needloan-illus-img { width: 100px; height: 82px; object-fit: contain; }
+.home-needloan-illus-img { width: 120px; height: 120px; object-fit: contain; }
 /* The display:block above out-specifies the UA [hidden] rule, so the SVG
    fallback showed alongside the PNG (doubling the card height). Re-hide it. */
 .home-needloan-illus[hidden] { display: none; }
@@ -4321,7 +4322,8 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    exactly like the example. */
 .home-pay { display: flex; flex-direction: column; }
 .home-pay-top { flex: 0 0 auto; }
-.home-pay-figs { display: flex; gap: 22px; margin-top: 16px; }
+.home-pay-figs { display: flex; gap: 0; margin-top: 16px; }
+.home-pay-figs > div + div { border-left: 1px solid #e5e9ee; padding-left: 20px; margin-left: 20px; }
 .home-pay-actions { display: flex; flex-direction: column; gap: 12px; }
 .home-pay-actions .app-cta-primary, .home-pay-actions .app-cta-outline { margin-top: 0; }
 .home-pay-flabel { margin: 0 0 4px; font-size: .8rem; font-weight: 600; color: #6b7280; }
