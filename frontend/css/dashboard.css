@@ -4323,14 +4323,14 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-pay { display: flex; flex-direction: column; }
 .home-pay-top { flex: 0 0 auto; }
 .home-pay-figs { display: flex; gap: 0; margin-top: 16px; }
-.home-pay-figs > div + div { border-left: 1px solid #e5e9ee; padding-left: 20px; margin-left: 20px; text-align: center; }
+.home-pay-figs > div + div { border-left: 1px solid #e5e9ee; padding-left: 20px; margin-left: 20px; }
 .home-pay-actions { display: flex; flex-direction: column; gap: 12px; }
 .home-pay-actions .app-cta-primary, .home-pay-actions .app-cta-outline { margin-top: 0; }
 .home-pay-flabel { margin: 0 0 4px; font-size: .8rem; font-weight: 600; color: #6b7280; }
 .home-pay-amt { margin: 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; color: #0E8741; font-variant-numeric: tabular-nums; }
-.home-pay-due { margin: 0; font-size: 1.05rem; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.home-pay-due { margin: 0; font-size: 1.05rem; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; gap: 6px; }
 .home-pay-due svg { color: #0E8741; }
-.home-pay-countdown { display: block; margin-top: 5px; font-size: .78rem; font-weight: 700; color: #6b7280; }
+.home-pay-countdown { display: block; margin-top: 5px; padding-left: 21px; font-size: .78rem; font-weight: 700; color: #6b7280; }
 .home-pay-countdown.is-soon { color: #b45309; }
 .home-pay-countdown.is-late { color: #b42318; }
 .home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0; }
