@@ -63,6 +63,10 @@
 }
 .auth-field-main input::placeholder { color: #9aa6b2; font-weight: 400; }
 
+/* Small right-aligned link inside a field row (e.g. "Forgot email?"). */
+.auth-field-link { flex: 0 0 auto; align-self: center; font-size: .85rem; font-weight: 600; color: #16a34a; white-space: nowrap; }
+.auth-field-link:hover { text-decoration: underline; }
+
 /* Field icon chip (pale-green circle, green glyph). */
 .auth-ic { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 50%; background: #e9f7ef; color: #0E8741; display: grid; place-items: center; }
 .auth-ic svg { width: 22px; height: 22px; }
