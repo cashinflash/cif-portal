@@ -4030,7 +4030,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 
 /* Green loan card */
 .loan-card {
-  position: relative; border-radius: 22px; padding: 22px;
+  position: relative; border-radius: 22px; padding: 22px 22px 14px;
   background: linear-gradient(150deg, #1FA050 0%, #0E8741 58%, #0C7137 100%);
   color: #fff; box-shadow: 0 12px 30px rgba(14,135,65,.22); overflow: hidden;
 }
@@ -4046,13 +4046,13 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 }
 .loan-card-titles { flex: 1; min-width: 0; }
 .loan-card-eyebrow { display: block; font-size: 1.02rem; font-weight: 700; }
-.loan-card-id { display: block; font-size: .82rem; color: rgba(255,255,255,.8); font-variant-numeric: tabular-nums; }
+.loan-card-id { display: block; font-size: .78rem; color: rgba(255,255,255,.8); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .loan-card-pill {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
   padding: 6px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700;
-  background: rgba(255,255,255,.18); color: #fff; white-space: nowrap;
+  background: #d6f3e1; color: #0b6e38; white-space: nowrap;
 }
-.loan-card-pill::after { content: "\2713"; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: rgba(255,255,255,.28); font-size: .62rem; font-weight: 800; }
+.loan-card-pill::after { content: "\2713"; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: #16a34a; color: #fff; font-size: .62rem; font-weight: 800; }
 .loan-card-pill.dash-pill--past-due, .loan-card-pill.dash-pill--warn { background: rgba(255,255,255,.92); color: #b42318; }
 .loan-card-pill.dash-pill--past-due::after, .loan-card-pill.dash-pill--warn::after { content: ""; }
 /* Mobile: balance + due wrap two-up, repayment drops below — no vertical
@@ -4063,7 +4063,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .loan-card-flabel { margin: 0 0 4px; font-size: .82rem; color: rgba(255,255,255,.82); }
 .loan-card-balance { margin: 0; font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .loan-card-balance small { font-size: 1.3rem; font-weight: 700; vertical-align: 12px; margin-right: 2px; }
-.loan-card-due { margin: 0; min-height: 2.4rem; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
+.loan-card-due { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
 .loan-card-rule { height: 1px; background: rgba(255,255,255,.2); margin: 20px 0 16px; }
 .loan-card-note { display: flex; align-items: center; gap: 8px; margin: 0; font-size: .85rem; color: rgba(255,255,255,.85); line-height: 1.35; }
 .loan-card-note svg { flex: 0 0 auto; }
@@ -4090,6 +4090,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .app-cta-outline:hover { border-color: #0E8741; background: #f4faf6; }
 .app-cta-outline small { color: #6b7280; font-weight: 600; font-size: .82rem; }
 .app-cta-outline .app-cta-chev { position: absolute; right: 20px; color: #94a3b8; }
+/* `.dashboard-page button { border:none }` (L53) outranks `.app-cta-outline`; restore the outline with higher specificity. */
+.dashboard-page .app-cta-outline { border: 2px solid #15C15D; }
+.dashboard-page .app-cta-outline:hover { border-color: #0E8741; }
 
 /* Trust row */
 .app-trust {
@@ -4123,7 +4126,8 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   font-family: inherit; text-align: left;
 }
 .app-promo-emoji { font-size: 1.7rem; flex: 0 0 auto; }
-.app-promo-art { width: 52px; height: 52px; flex: 0 0 auto; object-fit: contain; }
+.app-promo-art { width: 56px; height: 56px; object-fit: contain; display: block; }
+.app-promo-iconbox { flex: 0 0 auto; background: #fff; border-radius: 14px; padding: 8px 10px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
 .app-promo-text { flex: 1; min-width: 0; }
 .app-promo-text strong { display: block; color: #1a1a2e; font-weight: 700; font-size: .98rem; }
 .app-promo-text small { color: #557; font-size: .84rem; line-height: 1.35; }
@@ -4281,7 +4285,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .home-card-link:hover { text-decoration: underline; }
 
 /* Grid container (mobile: single column, source order). */
-.home-grid { display: grid; gap: 12px; }
+.home-grid { display: grid; gap: 8px; }
 
 /* Hide the pay card until we know there's an active loan (no flash). */
 html:not(.cif-has-active-loan) .home-pay { display: none; }
