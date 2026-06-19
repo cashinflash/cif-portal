@@ -142,8 +142,13 @@ jobs:
         # portal.js, portal-page.js, favicon.png, logo.png) live only in
         # S3, not in git. --delete would wipe them. If we ever want to
         # actually remove a file, delete it from S3 by hand.
+        #
+        # Cache-Control: no-cache => browsers STORE the file but revalidate
+        # before using it, so a deploy (which also invalidates CloudFront) is
+        # picked up immediately instead of customers being stuck on a stale
+        # CSS/JS/HTML until they hard-refresh. Revalidation is a cheap 304.
         run: |
-          aws s3 sync frontend "s3://${{ env.S3_BUCKET }}"
+          aws s3 sync frontend "s3://${{ env.S3_BUCKET }}" --cache-control "no-cache"
 
       - name: Invalidate CloudFront
         if: steps.changes.outputs.frontend == 'true'

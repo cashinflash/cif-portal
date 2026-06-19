@@ -322,12 +322,13 @@ function moveToCodeEntry(channel) {
   codeIntro.textContent =
     channel === 'email'
       ? 'We sent a 6-digit code to ' + target + '. Enter it below.'
-      : 'We texted a 5-digit code to ' + target + '. Enter it below.';
+      : 'We texted a 6-digit code to ' + target + '. Enter it below.';
   codeErr.style.display = 'none';
   codeInput.value = '';
-  // Single autocomplete="one-time-code" field so iOS/Android auto-fill the
-  // SMS/email code (the segmented multi-box version broke native autofill).
-  codeInput.maxLength = channel === 'email' ? 6 : 5;
+  // Single autocomplete="one-time-code" field, full 6 digits for BOTH channels
+  // (email + Telnyx SMS are both 6-digit). Capping SMS at 5 truncated the
+  // auto-filled code and broke native autofill.
+  codeInput.maxLength = 6;
   codeOtp = null;
   showStep('code');
   setTimeout(() => { try { codeInput.focus(); } catch (e) { /* ignore */ } }, 50);
