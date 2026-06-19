@@ -111,25 +111,32 @@
             <span class="loan-card-doc" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#0E8741" stroke-width="2" stroke-linejoin="round"/><path d="M14 2v6h6" stroke="#0E8741" stroke-width="2" stroke-linejoin="round"/><line x1="8" y1="13" x2="13" y2="13" stroke="#0E8741" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="16.5" x2="11" y2="16.5" stroke="#0E8741" stroke-width="2" stroke-linecap="round"/><circle cx="17.6" cy="17.6" r="5" fill="#0E8741" stroke="#fff" stroke-width="1.4"/><path d="M15.4 17.7l1.5 1.5 2.5-2.7" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             <div class="loan-card-titles">
               <span class="loan-card-eyebrow" id="paySummaryHeading">Active loan</span>
-              <span class="loan-card-id" data-pay-loan-id>Loan #&mdash;</span>
+              <span class="loan-card-id" data-pay-loan-id>#&mdash;</span>
             </div>
             <span class="loan-card-pill" data-pay-loan-status>In good standing</span>
           </div>
           <div class="loan-card-figures">
             <div class="loan-card-fig">
-              <p class="loan-card-flabel">Amount due</p>
+              <p class="loan-card-flabel">Current balance</p>
               <p class="loan-card-balance"><small>$</small><span data-pay-balance>0.00</span></p>
             </div>
             <div class="loan-card-fig">
               <p class="loan-card-flabel">Due date</p>
               <p class="loan-card-due"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span data-pay-caption>&mdash;</span></p>
             </div>
-            <div class="loan-card-fig">
+            <div class="loan-card-fig u-desktop">
               <p class="loan-card-flabel">Repayment method</p>
               <p class="loan-card-method"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span data-pay-repay-method>Card on file</span></p>
             </div>
           </div>
           <div class="loan-card-rule"></div>
+          <a href="#payFormCard" class="loan-card-foot u-mobile">
+            <div>
+              <p class="loan-card-flabel">Repayment method</p>
+              <p class="loan-card-method"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span data-pay-repay-method>Card on file</span></p>
+            </div>
+            <svg class="loan-card-chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </a>
           <p class="loan-card-note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>Pay on time to keep your loan in good standing.</p>
         </div>
         <div class="pay-summary-empty" hidden>

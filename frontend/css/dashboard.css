@@ -4095,6 +4095,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .app-cta-outline:hover { border-color: #0E8741; background: #f4faf6; }
 .app-cta-outline small { color: #6b7280; font-weight: 600; font-size: .82rem; }
 .app-cta-outline .app-cta-chev { position: absolute; right: 20px; color: #94a3b8; }
+.app-cta-icon { width: 28px; height: 28px; object-fit: contain; flex: 0 0 auto; }
 /* `.dashboard-page button { border:none }` (L53) outranks `.app-cta-outline`; restore the outline with higher specificity. */
 .dashboard-page .app-cta-outline { border: 2px solid #15C15D; }
 .dashboard-page .app-cta-outline:hover { border-color: #0E8741; }

@@ -116,7 +116,7 @@
       var hasActiveLoan = !!(loan && Number(loan.balance) > 0);
       var bannerActive = document.querySelector('.app-loan-banner');
       if (bannerActive) bannerActive.style.display = hasActiveLoan ? 'none' : '';
-      setText(qs('[data-pay-loan-id]', card), 'Loan #' + (loan.publicId || loan.id || '—'));
+      setText(qs('[data-pay-loan-id]', card), '#' + (loan.publicId || loan.id || '—'));
       setText(qs('[data-pay-balance]', card), money(loan.balance).replace(/^\$/, ''));
       const caption = qs('[data-pay-caption]', card);
       if (caption) {
@@ -125,7 +125,13 @@
         caption.textContent = loan.nextDueDate ? formatDate(loan.nextDueDate) : '—';
       }
       const pill = qs('[data-pay-loan-status]', card);
-      if (pill) pill.textContent = loan.status || 'Current';
+      if (pill) {
+        // Match the Home card: "In good standing" for a current loan, red past-due otherwise.
+        var st = (loan.status || '').toLowerCase();
+        var isPast = st.indexOf('past') !== -1 || st.indexOf('late') !== -1 || st.indexOf('delinq') !== -1;
+        pill.textContent = isPast ? (loan.status || 'Past due') : 'In good standing';
+        pill.classList.toggle('dash-pill--past-due', isPast);
+      }
       // Payment breakdown (defensive — every element is optional). Total is
       // the balance; principal/fee are shown only when the API surfaces them,
       // otherwise they stay as an em-dash placeholder (do NOT overwrite with
@@ -191,10 +197,13 @@
   // selected card (fallback: first method), formatted like the Home page.
   // Leaves the "Card on file" fallback when there are no saved methods.
   function updateRepayLabel() {
-    var el = document.querySelector('[data-pay-repay-method]');
-    if (!el || !state.methods || !state.methods.length) return;
+    var els = document.querySelectorAll('[data-pay-repay-method]');
+    if (!els.length || !state.methods || !state.methods.length) return;
     var sel = state.methods.filter(function (m) { return m.methodId === state.selectedMethodId; })[0] || state.methods[0];
-    if (sel) el.textContent = (sel.brand || 'Card') + ' •• ' + (sel.last4 || '');
+    if (sel) {
+      var label = (sel.brand || 'Card') + ' •• ' + (sel.last4 || '');
+      els.forEach(function (el) { el.textContent = label; });
+    }
   }
 
   function renderMethods() {
