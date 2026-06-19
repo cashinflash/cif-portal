@@ -10,10 +10,21 @@
   var TOKEN_KEY = 'cif_id_token';
   var ACTIVE_ENDPOINT = API_BASE + '/my-loans/active';
   var DOCS_ENDPOINT = API_BASE + '/my-loans/documents';
+  var CARDS_ENDPOINT = API_BASE + '/my-cards';
   var LOGIN_URL = '/start.html';
+
+  // How many past loans to show in the list view before "View all".
+  var PAST_LOANS_PREVIEW = 5;
+
+  // List view shows a preview slice of past loans by default; the
+  // "View all loans" link (?view=all) flips this true.
+  var SHOW_ALL_PAST = false;
 
   // ---------- Helpers ----------
   function qs(sel, root) { return (root || document).querySelector(sel); }
+  function qsa(sel, root) {
+    return Array.prototype.slice.call((root || document).querySelectorAll(sel));
+  }
 
   function decodeJwt(t) {
     try {
@@ -86,18 +97,29 @@
 
   // ---------- Init ----------
   document.addEventListener('DOMContentLoaded', function () {
+    // Greeting / first-name chips. The app-shell uses .dash-first-name spans
+    // (desktop page-head chip + mobile drawer); portal-page.js fills #userChip
+    // and the footer year, but the loans page has neither a #userChip nor a
+    // legacy header — so fill the app-shell name spans here too.
     var first = (claims.given_name || '').trim();
-    setText(qs('#userChip'), first ? ('Hi, ' + first) : (claims.email || 'Account'));
-    setText(qs('#sidebarUserName'), first ? ('Hi, ' + first) : (claims.email || 'Account'));
+    var nameText = first || (claims.email || 'there');
+    qsa('.dash-first-name').forEach(function (el) { el.textContent = nameText; });
+    setText(qs('#sidebarUserName'), nameText);
     var year = qs('#footerYear');
     if (year) year.textContent = String(new Date().getFullYear());
 
     initDocModal();
+    wireSignOut();
+    loadRepaymentMethod();
 
     var params = new URLSearchParams(window.location.search);
     var loanIdParam = params.get('id');
     var esignParam = params.get('esign');
     var actionParam = params.get('action');
+    var viewParam = params.get('view');
+    // "View all loans" link sets ?view=all; the list view renders the full
+    // history instead of the preview slice.
+    SHOW_ALL_PAST = (viewParam === 'all');
 
     // Backwards-compat: older dashboard banner deep-linked here
     // with ?esign=<guid>&action=sign. Redirect such links straight
@@ -118,12 +140,10 @@
 
   // ---------- LIST VIEW ----------
   function showList() {
-    qs('#loansListView').hidden = false;
-    qs('#loansDetailView').hidden = true;
-    setText(qs('#loansTitle'), 'Your loan history');
-    setText(qs('#loansSubtitle'), 'Every loan you’ve had with Cash in Flash, in one place.');
-    var heroPill = qs('#loanDetailPillHero');
-    if (heroPill) heroPill.hidden = true;
+    var stack = qs('.loans-stack');
+    if (stack) stack.hidden = false;
+    var detail = qs('#loansDetailView');
+    if (detail) detail.hidden = true;
 
     api(ACTIVE_ENDPOINT, token)
       .then(function (data) {
@@ -136,91 +156,261 @@
       });
   }
 
+  // Split + render: the active (outstanding) loan fills the green card; the
+  // rest become "past loans" (desktop table + mobile cards). Both lists are
+  // built from the same /api/my-loans/active payload, so no extra fetch.
   function renderList(loans) {
-    var body = qs('#loansListBody');
-    var count = qs('#loansCount');
-    if (!body) return;
-    body.innerHTML = '';
+    loans = loans || [];
 
-    if (!loans || !loans.length) {
-      var empty = document.createElement('div');
-      empty.className = 'dash-loanlist-empty';
-      empty.innerHTML =
-        '<p style="margin-bottom:16px;">You don’t have any loans on file yet.</p>' +
-        '<a href="/request-loan.html" class="btn-apply" data-action="new-loan">Apply for a Loan</a>';
-      body.appendChild(empty);
-      if (count) count.hidden = true;
+    // Active = the outstanding loan (there's at most one in production).
+    var active = null;
+    var past = [];
+    loans.forEach(function (loan) {
+      if (loan && loan.isOutstanding && !active) active = loan;
+      else past.push(loan);
+    });
+
+    renderActiveLoan(active);
+    renderPastLoans(past);
+  }
+
+  function renderActiveLoan(loan) {
+    var card = qs('#activeLoanCard');
+    if (!card) return;
+    card.setAttribute('aria-busy', 'false');
+    var skel = qs('.loan-card-skel', card);
+    var body = qs('.loans-active-body', card);
+    var empty = qs('.loans-active-empty', card);
+    if (skel) skel.style.display = 'none';
+
+    if (!loan) {
+      if (body) body.hidden = true;
+      if (empty) empty.hidden = false;
       return;
     }
+    if (empty) empty.hidden = true;
+    if (body) body.hidden = false;
 
-    if (count) {
-      count.textContent = loans.length + (loans.length === 1 ? ' loan' : ' loans');
-      count.hidden = false;
+    setText(qs('[data-loan-public-id]', card), loan.publicId || loan.id || '—');
+    setText(qs('[data-loan-funded]', card), fmtCurrency(loan.principal));
+    setText(qs('[data-loan-balance]', card), fmtCurrency(loan.balance));
+    setText(qs('[data-loan-next-due]', card), loan.nextDueDate ? fmtDate(loan.nextDueDate) : '—');
+    // Next-payment amount: prefer the scheduled installment, else the balance.
+    var nextAmt = (loan.nextDueAmount != null && !isNaN(Number(loan.nextDueAmount)))
+      ? loan.nextDueAmount : loan.balance;
+    setText(qs('[data-loan-next-amount]', card), fmtCurrency(nextAmt));
+
+    var pill = qs('[data-loan-status]', card);
+    if (pill) {
+      pill.className = 'loan-card-pill ' + statusPillClass(loan);
+      pill.textContent = statusPillText(loan);
     }
+  }
 
-    // Newest first.
-    var sorted = loans.slice().sort(function (a, b) {
+  function renderPastLoans(past) {
+    // Newest first by funded/origination date.
+    var sorted = (past || []).slice().sort(function (a, b) {
       var da = new Date(a.loanDate || a.originationDate || 0).getTime();
       var db = new Date(b.loanDate || b.originationDate || 0).getTime();
       return db - da;
     });
+    var shown = SHOW_ALL_PAST ? sorted : sorted.slice(0, PAST_LOANS_PREVIEW);
 
-    sorted.forEach(function (loan) {
-      var row = document.createElement('a');
-      row.className = 'dash-loanlist-row dash-loanlist-row--link';
-      row.href = '/loans.html?id=' + encodeURIComponent(loan.id);
-      row.setAttribute('aria-label',
-        'View loan #' + (loan.publicId || loan.id || '')
-      );
+    // Hide the "View all" link if there's nothing more to show.
+    var viewAll = qs('.loans-viewall');
+    if (viewAll) viewAll.hidden = SHOW_ALL_PAST || sorted.length <= PAST_LOANS_PREVIEW;
 
-      var main = document.createElement('div');
-      main.className = 'dash-loanlist-main';
+    renderPastTable(shown);
+    renderPastCards(shown);
+  }
 
-      var top = document.createElement('div');
-      top.className = 'dash-loanlist-top';
+  // Reusable doc icon (green outline) for both table rows and mobile cards.
+  function docIconSvg() {
+    return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0E8741" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+  }
 
-      var idEl = document.createElement('strong');
-      idEl.textContent = 'Loan #' + (loan.publicId || loan.id || '—');
-      top.appendChild(idEl);
+  function pastStatusText(loan) {
+    var s = (loan.status || '').toLowerCase();
+    if (s.indexOf('paid') !== -1) return 'Paid';
+    if (s.indexOf('complete') !== -1) return 'Completed';
+    return loan.status || 'Paid';
+  }
 
+  // ----- Desktop: past-loans table -----
+  function renderPastTable(loans) {
+    var tbody = qs('#loansTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!loans.length) {
+      var tr = document.createElement('tr');
+      tr.className = 'loans-table-empty';
+      var td = document.createElement('td');
+      td.colSpan = 6;
+      td.textContent = SHOW_ALL_PAST
+        ? 'No past loans yet.'
+        : 'No past loans yet — your completed loans will appear here.';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    loans.forEach(function (loan) {
+      var pid = loan.publicId || loan.id || '—';
+      var funded = loan.loanDate || loan.originationDate;
+      var paid = loan.paidOffDate || loan.dateClosed || loan.closedDate || loan.payoffDate;
+      var tr = document.createElement('tr');
+      tr.className = 'loans-table-row';
+
+      var tdLoan = document.createElement('td');
+      tdLoan.className = 'loans-table-loan';
+      tdLoan.innerHTML = '<span class="loans-table-icon" aria-hidden="true">' + docIconSvg() + '</span>' +
+        '<span class="loans-table-loanid">Loan #' + escapeHtml(String(pid)) + '</span>';
+      tr.appendChild(tdLoan);
+
+      var tdAmt = document.createElement('td');
+      tdAmt.className = 'loans-table-amt';
+      tdAmt.textContent = fmtCurrency(loan.principal);
+      tr.appendChild(tdAmt);
+
+      var tdFunded = document.createElement('td');
+      tdFunded.textContent = funded ? fmtDate(funded) : '—';
+      tr.appendChild(tdFunded);
+
+      var tdPaid = document.createElement('td');
+      tdPaid.textContent = paid ? fmtDate(paid) : '—';
+      tr.appendChild(tdPaid);
+
+      var tdStatus = document.createElement('td');
       var pill = document.createElement('span');
-      pill.className = 'dash-pill ' + statusPillClass(loan);
-      pill.textContent = statusPillText(loan);
-      top.appendChild(pill);
+      pill.className = 'loans-status-pill';
+      pill.textContent = pastStatusText(loan);
+      tdStatus.appendChild(pill);
+      tr.appendChild(tdStatus);
 
-      var small = document.createElement('small');
-      var dateStr = loan.loanDate || loan.originationDate;
-      small.textContent = 'Originated ' + (dateStr ? fmtDate(dateStr) : '—');
+      var tdAct = document.createElement('td');
+      tdAct.className = 'loans-table-actions';
+      var link = document.createElement('a');
+      link.className = 'loans-table-view';
+      link.href = '/loans.html?id=' + encodeURIComponent(loan.id);
+      link.innerHTML = 'View details &rarr;';
+      tdAct.appendChild(link);
+      tr.appendChild(tdAct);
 
-      main.appendChild(top);
-      main.appendChild(small);
-
-      var right = document.createElement('div');
-      right.className = 'dash-loanlist-amount';
-      var label = document.createElement('small');
-      label.textContent = loan.isOutstanding ? 'Balance' : 'Borrowed';
-      var amt = document.createElement('strong');
-      amt.textContent = fmtCurrency(loan.isOutstanding ? loan.balance : loan.principal);
-      right.appendChild(label);
-      right.appendChild(amt);
-
-      var arrow = document.createElement('span');
-      arrow.className = 'dash-loanlist-chevron';
-      arrow.setAttribute('aria-hidden', 'true');
-      arrow.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
-
-      row.appendChild(main);
-      row.appendChild(right);
-      row.appendChild(arrow);
-      body.appendChild(row);
+      tbody.appendChild(tr);
     });
   }
 
+  // ----- Mobile: past-loans cards -----
+  function renderPastCards(loans) {
+    var root = qs('#loansCards');
+    if (!root) return;
+    root.innerHTML = '';
+
+    if (!loans.length) {
+      var empty = document.createElement('p');
+      empty.className = 'loans-cards-empty';
+      empty.textContent = 'No past loans yet — your completed loans will appear here.';
+      root.appendChild(empty);
+      return;
+    }
+
+    loans.forEach(function (loan) {
+      var pid = loan.publicId || loan.id || '—';
+      var funded = loan.loanDate || loan.originationDate;
+      var paid = loan.paidOffDate || loan.dateClosed || loan.closedDate || loan.payoffDate;
+
+      var row = document.createElement('a');
+      row.className = 'loans-card';
+      row.href = '/loans.html?id=' + encodeURIComponent(loan.id);
+      row.setAttribute('aria-label', 'View loan #' + pid);
+
+      row.innerHTML =
+        '<span class="loans-card-icon" aria-hidden="true">' + docIconSvg() + '</span>' +
+        '<div class="loans-card-main">' +
+          '<strong class="loans-card-id">Loan #' + escapeHtml(String(pid)) + '</strong>' +
+          '<span class="loans-card-amt">' + escapeHtml(fmtCurrency(loan.principal)) + '</span>' +
+          '<span class="loans-card-meta">' +
+            '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' +
+            'Funded ' + escapeHtml(funded ? fmtDate(funded) : '—') +
+          '</span>' +
+        '</div>' +
+        '<div class="loans-card-right">' +
+          '<span class="loans-status-pill">' + escapeHtml(pastStatusText(loan)) + '</span>' +
+          '<span class="loans-card-paid">Paid ' + escapeHtml(paid ? fmtDate(paid) : '—') + '</span>' +
+        '</div>' +
+        '<svg class="loans-card-chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c2cad3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
+
+      root.appendChild(row);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function renderListError() {
-    var body = qs('#loansListBody');
-    if (!body) return;
-    body.innerHTML =
-      '<p class="dash-loanlist-empty">We couldn’t load your loans right now. Please refresh, or call us at <a href="tel:+18889999859">(888) 999-9859</a>.</p>';
+    // Surface the failure in the active card AND clear the past-loan
+    // skeletons so the page doesn't sit on shimmer forever.
+    var card = qs('#activeLoanCard');
+    if (card) {
+      card.setAttribute('aria-busy', 'false');
+      var skel = qs('.loan-card-skel', card);
+      var body = qs('.loans-active-body', card);
+      var empty = qs('.loans-active-empty', card);
+      if (skel) skel.style.display = 'none';
+      if (body) body.hidden = true;
+      if (empty) {
+        empty.hidden = false;
+        empty.innerHTML =
+          '<p class="loan-card-eyebrow">Couldn\'t load your loans</p>' +
+          '<p class="loan-card-empty-sub">Please refresh, or call us at (888) 999-9859.</p>';
+      }
+    }
+    var tbody = qs('#loansTableBody');
+    if (tbody) {
+      tbody.innerHTML = '<tr class="loans-table-empty"><td colspan="6">' +
+        'We couldn\'t load your loans right now. Please refresh, or call us at ' +
+        '<a href="tel:+18889999859">(888) 999-9859</a>.</td></tr>';
+    }
+    var cards = qs('#loansCards');
+    if (cards) {
+      cards.innerHTML = '<p class="loans-cards-empty">We couldn\'t load your loans right now. ' +
+        'Please refresh, or call us at <a href="tel:+18889999859">(888) 999-9859</a>.</p>';
+    }
+  }
+
+  // ---------- Repayment method (card on file) ----------
+  // Mirrors dashboard.js loadCards: the active-loan card's "Repayment method"
+  // figure shows the saved Vergent card ("Visa •• 0295"). Leaves the on-card
+  // default ("Card on file") if there's no saved card or the call fails.
+  function loadRepaymentMethod() {
+    api(CARDS_ENDPOINT, token).then(function (data) {
+      var cards = (data && (data.cards || data.methods)) || [];
+      if (!cards.length) return;
+      var c = cards[0];
+      var label = (c.brand || c.cardType || 'Card') + ' •• ' + (c.last4 || c.lastFour || '');
+      qsa('[data-loan-repay-method]').forEach(function (el) { el.textContent = label; });
+    }).catch(function () { /* keep the on-card default */ });
+  }
+
+  // ---------- Sign out ----------
+  // sidebar.js + portal-page.js also wire these (idempotent), but wire here
+  // too so the controls always work regardless of script load order.
+  function wireSignOut() {
+    function signOut() {
+      sessionStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem('cif_access_token');
+      sessionStorage.removeItem('cif_refresh_token');
+      window.location.replace(LOGIN_URL + '?reason=session_expired');
+    }
+    ['signOutBtnSidebar', 'signOutBtnMobile'].forEach(function (id) {
+      var b = qs('#' + id);
+      if (b) b.addEventListener('click', signOut);
+    });
   }
 
   function statusPillClass(loan) {
@@ -245,12 +435,21 @@
   }
 
   // ---------- DETAIL VIEW ----------
+  // Reached via /loans.html?id=<loanId> (the "View details" links on past
+  // loans). Hides the list stack + cross-sell banner and shows the summary +
+  // documents for the one loan. The app-shell page-head stays as-is.
   function showDetail(loanId) {
-    qs('#loansListView').hidden = true;
-    qs('#loansDetailView').hidden = false;
-    setText(qs('#loansEyebrow'), 'Loan detail');
-    setText(qs('#loansTitle'), 'Loan #' + loanId);
-    setText(qs('#loansSubtitle'), 'Full loan details, payments, and documents.');
+    var stack = qs('.loans-stack');
+    if (stack) stack.hidden = true;
+    var banner = qs('.loans-banner');
+    if (banner) banner.style.display = 'none';
+    var detail = qs('#loansDetailView');
+    if (detail) detail.hidden = false;
+    // Update the desktop + mobile page titles to reflect the single loan.
+    setText(qs('.app-pagetitle'), 'Loan #' + loanId);
+    setText(qs('.app-pagesub'), 'Full loan details, payments, and documents.');
+    setText(qs('.app-pagetitle-mobile'), 'Loan #' + loanId);
+    setText(qs('.app-pagesub-mobile'), 'Full loan details, payments, and documents.');
 
     api(ACTIVE_ENDPOINT, token)
       .then(function (data) {
@@ -280,7 +479,9 @@
   }
 
   function renderDetail(loan) {
-    setText(qs('#loansTitle'), 'Loan #' + (loan.publicId || loan.id));
+    var titleStr = 'Loan #' + (loan.publicId || loan.id);
+    setText(qs('.app-pagetitle'), titleStr);
+    setText(qs('.app-pagetitle-mobile'), titleStr);
 
     var pill = qs('#loanDetailPillHero');
     if (pill) {

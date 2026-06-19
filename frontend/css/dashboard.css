@@ -4577,3 +4577,128 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .mobile-menu-signout { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 17px; background: #fff; border: 1.5px solid #f3b4b4; border-radius: 16px; color: #d8453c; font-weight: 700; font-size: 1.06rem; font-family: inherit; cursor: pointer; }
 .mobile-menu-signout:active { background: #fef2f2; }
 
+
+/* ============================================================
+   APP REDESIGN — My Loans page. Reuses the home app-shell
+   (.app-sidebar/.app-topbar/.app-tabbar/.app-main/.app-blob),
+   the green .loan-card for the active loan, .app-surface, the
+   .app-loan-banner cross-sell, and the dash-* detail view.
+   Only the loans-specific layout (active-loan 4-up figures,
+   past-loans table + mobile cards, banner button) lives here.
+   Mobile-first; the >=760px / >=900px blocks widen it.
+   ============================================================ */
+
+/* Vertical stack of loan sections inside .app-main. */
+.loans-stack { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 18px; }
+
+/* ----- Active loan green card (reuses .loan-card) ----- */
+/* The figure values (funded / balance) read like the home balance figure
+   but a touch smaller so the 4-up row fits. Date sits on its own line with
+   the amount beneath it. */
+.loan-card-figval { margin: 0; font-size: 1.5rem; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.loan-card-figval--date { font-size: 1.05rem; font-weight: 700; }
+.loan-card-figsub { margin: 4px 0 0; font-size: .92rem; font-weight: 700; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; }
+
+/* Mobile: figures stack 2x2 (flex-wrap with a ~46% basis), divider between
+   the two columns. The base .loan-card-fig + .loan-card-fig border-left
+   (<=899px) draws a divider before every fig after the first; remove it on
+   the items that start a new row (every odd item) so only the in-row gap
+   gets the rule. */
+@media (max-width: 899px) {
+  .loans-active .loan-card-figures { gap: 18px 0; }
+  .loans-active .loan-card-fig { flex: 1 1 44%; padding-left: 0; }
+  .loans-active .loan-card-fig + .loan-card-fig { border-left: 1px solid rgba(255,255,255,.22); padding-left: 18px; }
+  .loans-active .loan-card-fig:nth-child(2n+1) { border-left: none; padding-left: 0; }
+  .loans-active .loan-card-figval { font-size: 1.6rem; }
+}
+
+/* Empty-state CTA on the active card matches the payments empty CTA. */
+.loans-active-empty { padding: 4px 0 2px; }
+
+/* ----- Past loans section ----- */
+.loans-past { position: relative; z-index: 1; }
+.loans-past-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.loans-past-title { margin: 0; font-size: 1.15rem; font-weight: 800; letter-spacing: -.01em; color: #1a1a2e; }
+.loans-viewall { color: #0E8741 !important; }
+
+/* Soft green status pill, shared by table rows + mobile cards. Matches the
+   home-activity status pill family (light green wash, no leading dot). */
+.loans-status-pill {
+  display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px;
+  background: rgba(14,135,65,.10); color: #0C7137; font-size: .76rem; font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ----- Desktop: past-loans table ----- */
+.loans-table-wrap { padding: 6px 8px; overflow: hidden; }
+.loans-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.loans-table thead th {
+  text-align: left; padding: 12px 14px; font-size: .74rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; color: #8a93a0; white-space: nowrap;
+  border-bottom: 1px solid #eef1f4;
+}
+.loans-table-actions-col { text-align: right; }
+.loans-table tbody td { padding: 16px 14px; border-bottom: 1px solid #f1f4f7; color: #475569; vertical-align: middle; }
+.loans-table tbody tr:last-child td { border-bottom: none; }
+.loans-table-row:hover td { background: #f9fbfa; }
+.loans-table-loan { white-space: nowrap; }
+.loans-table-icon { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: #e8f5ee; margin-right: 12px; vertical-align: middle; }
+.loans-table-loanid { font-weight: 700; color: #1a1a2e; font-variant-numeric: tabular-nums; vertical-align: middle; }
+.loans-table-amt { font-weight: 700; color: #1a1a2e; font-variant-numeric: tabular-nums; }
+.loans-table-actions { text-align: right; }
+.loans-table-view { color: #0E8741 !important; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.loans-table-view:hover { text-decoration: underline; }
+.loans-table-empty td { text-align: center; color: #6b7280; padding: 26px 14px !important; }
+.loans-table-empty a { color: #0E8741; font-weight: 700; }
+
+/* ----- Mobile: past-loans cards ----- */
+.loans-cards { display: flex; flex-direction: column; gap: 12px; }
+.loans-card {
+  display: flex; align-items: center; gap: 14px; padding: 16px;
+  background: #fff; border: 1px solid #eef1f4; border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(15,23,42,.05); text-decoration: none;
+}
+.loans-card:active { background: #f7faf8; }
+.loans-card-icon { flex: 0 0 46px; width: 46px; height: 46px; border-radius: 50%; background: #e8f5ee; display: inline-flex; align-items: center; justify-content: center; }
+.loans-card-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.loans-card-id { font-size: 1rem; font-weight: 700; color: #1a1a2e; font-variant-numeric: tabular-nums; }
+.loans-card-amt { font-size: 1.12rem; font-weight: 800; color: #0E8741; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.loans-card-meta { display: flex; align-items: center; gap: 5px; font-size: .8rem; color: #6b7280; }
+.loans-card-meta svg { color: #0E8741; flex: 0 0 auto; }
+.loans-card-right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
+.loans-card-paid { font-size: .76rem; color: #8a93a0; white-space: nowrap; }
+.loans-card-chev { flex: 0 0 auto; margin-left: -2px; }
+.loans-cards-empty { margin: 0; padding: 22px 16px; text-align: center; color: #6b7280; font-size: .92rem; background: #fff; border: 1px solid #eef1f4; border-radius: 16px; }
+.loans-cards-empty a { color: #0E8741; font-weight: 700; }
+
+/* ----- Need-another-loan banner: filled CTA button (>=760px) vs the
+   lighter chevron style (<760px). The base .app-loan-banner styling is
+   shared; here we add the desktop button + the title override. ----- */
+.loans-banner .loans-banner-cta { display: none; }
+.loans-banner-chev { display: flex; }
+@media (min-width: 760px) {
+  .loans-banner { padding: 18px 22px; }
+  .loans-banner .loans-banner-chev { display: none; }
+  .loans-banner .loans-banner-cta {
+    flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 20px; background: #0E8741; color: #fff !important;
+    border-radius: 14px; font-weight: 700; font-size: .98rem; white-space: nowrap;
+    box-shadow: 0 6px 16px rgba(14,135,65,.24);
+  }
+  .loans-banner:hover .loans-banner-cta { background: #0C7137; }
+}
+
+/* ----- Detail view (single loan, ?id=) ----- */
+.loans-detail { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 16px; }
+.loans-detail .dash-back-link { align-self: flex-start; }
+.loans-detail-card .dash-card-head { margin-bottom: 14px; }
+
+/* ----- Desktop widening ----- */
+@media (min-width: 900px) {
+  .loans-stack { gap: 20px; max-width: 1040px; }
+  .loans-detail { max-width: 1040px; }
+  /* Active-loan 4-up figure row (the base >=900px .loan-card-figures rule
+     already sets nowrap + dividers; this just confirms the 4 columns size
+     evenly and the value figures fit). */
+  .loans-active .loan-card-figval { font-size: clamp(1.3rem, 1.05rem + .8vw, 1.7rem); }
+}
