@@ -4182,3 +4182,137 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .app-cta-primary, .app-cta-outline { max-width: 100%; padding: 18px 24px; }
   .app-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
 }
+
+/* ============================================================
+   APP REDESIGN — Home dashboard grid, surfaces, blobs.
+   Mobile (< 900px): single column, .app-welcome greeting.
+   Desktop (>= 900px): multi-card grid, .app-pagehead header.
+   ============================================================ */
+
+/* Page-background floating blobs — same language as .dash-hero-blob. */
+.app-main { position: relative; }
+.app-page { overflow-x: hidden; }
+.app-blob {
+  position: absolute; z-index: 0; pointer-events: none;
+  background: rgba(14,135,65,.07);
+  animation: floatBlob 9s ease-in-out infinite;
+}
+.app-blob-1 {
+  width: 340px; height: 340px; top: -30px; right: -70px;
+  border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  animation-delay: -2s;
+}
+.app-blob-2 {
+  width: 300px; height: 280px; bottom: 60px; left: -90px;
+  border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+  background: rgba(14,135,65,.05); animation-delay: -5s;
+}
+
+/* Content sits above the blobs. */
+.app-pagehead, .app-welcome, .home-grid { position: relative; z-index: 1; }
+
+/* White card surface used by the pay / activity cards. */
+.app-surface {
+  background: #fff; border: 1px solid #eef1f4; border-radius: 18px;
+  padding: 20px; box-shadow: 0 1px 3px rgba(15,23,42,.05);
+}
+
+/* Desktop page header (hidden on mobile — .app-welcome shows there). */
+.app-pagehead { display: none; }
+.app-pagetitle { margin: 0; font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; color: #1a1a2e; }
+.app-pagesub { margin: 6px 0 0; font-size: .95rem; color: #6b7280; }
+.app-deskuser-chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 7px 16px 7px 7px; background: #fff; border: 1px solid #eef1f4;
+  border-radius: 999px; box-shadow: 0 1px 3px rgba(15,23,42,.05);
+  font-weight: 700; font-size: .9rem; color: #1a1a2e; white-space: nowrap;
+}
+.app-deskuser-av {
+  width: 32px; height: 32px; flex: 0 0 32px; border-radius: 50%;
+  background: #0E8741; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Card titles / links shared by the home cards. */
+.home-card-title { margin: 0; font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; color: #1a1a2e; }
+.home-card-sub { margin: 4px 0 0; font-size: .88rem; color: #6b7280; }
+.home-card-link { font-size: .85rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.home-card-link:hover { text-decoration: underline; }
+
+/* Grid container (mobile: single column, source order). */
+.home-grid { display: grid; gap: 16px; }
+
+/* Hide the pay card until we know there's an active loan (no flash). */
+html:not(.cif-has-active-loan) .home-pay { display: none; }
+
+/* Need-another-loan card. */
+.home-needloan {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  background: linear-gradient(160deg, #eaf7ef 0%, #f5faf7 100%);
+  border: 1px solid #d3eadd; border-radius: 18px; padding: 20px;
+}
+.home-needloan-emoji { font-size: 1.9rem; line-height: 1; }
+.home-needloan-body strong { display: block; font-size: 1.05rem; font-weight: 800; color: #1a1a2e; }
+.home-needloan-body small { display: block; margin-top: 3px; font-size: .86rem; color: #557; line-height: 1.4; }
+.home-needloan-cta { margin-top: 6px; }
+
+/* Make-a-payment card. */
+.home-pay-figs { display: flex; gap: 22px; margin: 16px 0 4px; }
+.home-pay-flabel { margin: 0 0 4px; font-size: .8rem; font-weight: 600; color: #6b7280; }
+.home-pay-amt { margin: 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; color: #1a1a2e; font-variant-numeric: tabular-nums; }
+.home-pay-due { margin: 0; font-size: 1.05rem; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; gap: 6px; }
+.home-pay-due svg { color: #0E8741; }
+.home-pay-countdown { display: block; margin-top: 5px; font-size: .78rem; font-weight: 700; color: #6b7280; }
+.home-pay-countdown.is-soon { color: #b45309; }
+.home-pay-countdown.is-late { color: #b42318; }
+
+/* Recent-activity card. */
+.home-activity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.home-activity-body { margin-top: 2px; }
+
+/* Bottom tiles. */
+.home-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.home-tile { min-height: 124px; }
+.home-tile-link { margin-top: auto; font-size: .8rem; font-weight: 700; }
+
+/* Anchors inside the app layout opt out of `.dashboard-page a {color:inherit}`. */
+.app-cta-primary, .app-cta-primary:link, .app-cta-primary:visited { color: #fff !important; }
+.app-cta-outline, .app-cta-outline:link, .app-cta-outline:visited { color: #0E8741 !important; }
+.home-card-link, .home-tile-link, .app-sidebar-help-link { color: #0E8741 !important; }
+.app-sidebar-link { color: #475569 !important; }
+.app-sidebar-link.is-active { color: #0E8741 !important; }
+
+/* Sidebar help card (desktop only). */
+.app-sidebar-help { display: none; }
+
+@media (min-width: 900px) {
+  /* Swap the mobile welcome for the desktop page header. */
+  .app-welcome { display: none !important; }
+  .app-pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+
+  /* Two-column dashboard grid. */
+  .home-grid {
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    grid-template-areas:
+      "loan     need"
+      "loan     pay"
+      "activity activity"
+      "tiles    tiles";
+    gap: 18px 20px;
+    align-items: start;
+  }
+  .home-loan     { grid-area: loan; }
+  .home-needloan { grid-area: need; }
+  .home-pay      { grid-area: pay; }
+  .home-activity { grid-area: activity; }
+  .home-tiles    { grid-area: tiles; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  /* Sidebar help card. */
+  .app-sidebar-help {
+    display: block; margin: 22px 12px 0; padding: 16px;
+    background: #e8f5ee; border-radius: 14px;
+  }
+  .app-sidebar-help-icon { display: inline-flex; width: 36px; height: 36px; border-radius: 10px; background: #fff; align-items: center; justify-content: center; margin-bottom: 8px; }
+  .app-sidebar-help strong { display: block; font-size: .92rem; font-weight: 800; color: #1a1a2e; }
+  .app-sidebar-help small { display: block; margin-top: 3px; font-size: .8rem; color: #557; line-height: 1.4; }
+  .app-sidebar-help-link { display: inline-block; margin-top: 10px; font-size: .82rem; font-weight: 700; text-decoration: none; }
+}

@@ -107,6 +107,9 @@
     }
     const firstNameEl = qs('#dashFirstName');
     if (firstNameEl) firstNameEl.textContent = firstName || 'there';
+    // Populate every name slot in the redesigned Home (welcome heading,
+    // desktop page-sub, desktop user chip) — all share .dash-first-name.
+    qsa('.dash-first-name').forEach(function (el) { el.textContent = firstName || 'there'; });
     const greetEl = qs('#dashGreeting');
     if (greetEl) {
       const h = new Date().getHours();
@@ -611,6 +614,11 @@
     setText(qs('[data-loan-next-amount]', card), formatCurrencyPrecise(loan.nextDueAmount));
     setText(qs('[data-loan-fee]', card), formatCurrencyPrecise(loan.fees));
 
+    // Home "Make a payment" card lives OUTSIDE #activeLoanCard — query the
+    // document so its amount-due + due-date mirror the loan card.
+    setText(document.querySelector('[data-loan-pay-balance]'), formatCurrencyPrecise(loan.balance).replace(/^\$/, ''));
+    setText(document.querySelector('[data-loan-pay-due]'), formatDate(loan.nextDueDate));
+
     // Public loan id tag next to the "Active loan" heading.
     const idTag = qs('[data-loan-public-id]', card);
     if (idTag) {
@@ -627,7 +635,9 @@
     if (autopayPill) autopayPill.hidden = !loan.autopay;
 
     renderProgress(card, loan);
-    renderCountdown(card, loan);
+    // The countdown chip moved into the Home pay card (outside the loan
+    // card) — scope to the document so renderCountdown finds it.
+    renderCountdown(document, loan);
 
     const captionEl = qs('[data-loan-caption]', card);
     if (captionEl) {
