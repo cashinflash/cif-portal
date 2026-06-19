@@ -85,6 +85,7 @@
   const state = {
     loan: null,
     methods: [],
+    bankAccounts: [],
     selectedMethodId: null,
     submitting: false,
     initialBalance: null,
@@ -103,10 +104,18 @@
       if (!data || !data.loan) {
         if (body) body.hidden = true;
         if (empty) empty.hidden = false;
+        // No active loan — surface the "Need extra cash?" cross-sell banner.
+        var bannerEmpty = document.querySelector('.app-loan-banner');
+        if (bannerEmpty) bannerEmpty.style.display = '';
         return null;
       }
       const loan = data.loan;
       state.loan = loan;
+      // Gate the "Need extra cash?" banner: never offer a new loan while an
+      // active loan with a balance is open.
+      var hasActiveLoan = !!(loan && Number(loan.balance) > 0);
+      var bannerActive = document.querySelector('.app-loan-banner');
+      if (bannerActive) bannerActive.style.display = hasActiveLoan ? 'none' : '';
       setText(qs('[data-pay-loan-id]', card), 'Loan #' + (loan.publicId || loan.id || '—'));
       setText(qs('[data-pay-balance]', card), money(loan.balance).replace(/^\$/, ''));
       const caption = qs('[data-pay-caption]', card);
@@ -210,7 +219,12 @@
 
     state.methods.forEach(function (m, idx) {
       const label = document.createElement('label');
-      label.className = 'pay-method' + (m.methodId === state.selectedMethodId ? ' is-selected' : '');
+      // Only the first (default) card shows by default; the rest stay in the
+      // DOM but hidden behind "View more" so the block stays compact. They
+      // remain fully selectable once revealed — the radio logic is untouched.
+      label.className = 'pay-method' +
+        (m.methodId === state.selectedMethodId ? ' is-selected' : '') +
+        (idx > 0 ? ' pay-method--hidden' : '');
       label.innerHTML =
         '<input type="radio" name="payMethod" value="' + escapeHtml(m.methodId) + '"' +
           (m.methodId === state.selectedMethodId ? ' checked' : '') + '>' +
@@ -226,8 +240,87 @@
       list.appendChild(label);
     });
 
+    // "View more (N)" toggle — reveals the hidden cards. All cards stay
+    // selectable; this is purely a show/hide of rows already in the DOM.
+    if (state.methods.length > 1) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'pay-viewmore';
+      const hiddenCount = state.methods.length - 1;
+      more.textContent = 'View more (' + hiddenCount + ')';
+      more.addEventListener('click', function () {
+        const hidden = list.querySelectorAll('.pay-method.pay-method--hidden');
+        if (hidden.length) {
+          hidden.forEach(function (el) { el.classList.remove('pay-method--hidden'); });
+          more.textContent = 'Show less';
+        } else {
+          // Re-hide every card after the first.
+          list.querySelectorAll('.pay-method').forEach(function (el, idx) {
+            if (idx > 0) el.classList.add('pay-method--hidden');
+          });
+          more.textContent = 'View more (' + hiddenCount + ')';
+        }
+      });
+      list.appendChild(more);
+    }
+
     updateRepayLabel();
     applyMethodSelection();
+  }
+
+  // ---------- Bank accounts (pay-from-checking) ----------
+  // Placeholder loader — wired to set an empty list for now so the group
+  // renders its "no bank account on file" row. Plug-and-play once the API
+  // lands.
+  function loadBankAccounts() {
+    state.bankAccounts = [];
+    // TODO: wire to bank-accounts API
+    renderBankAccounts();
+    return Promise.resolve(state.bankAccounts);
+  }
+
+  // Non-selectable bank-account rows (chevron instead of radio). When there
+  // are no accounts we show ONE muted placeholder row — never a fake account.
+  function renderBankAccounts() {
+    const list = qs('#payBankAccounts');
+    if (!list) return;
+    list.innerHTML = '';
+
+    const bankSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="8" y1="10" x2="8" y2="21"/><line x1="12" y1="10" x2="12" y2="21"/><line x1="16" y1="10" x2="16" y2="21"/></svg>';
+    const chevron = '<span class="pay-method-bankchev" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span>';
+
+    if (!state.bankAccounts || state.bankAccounts.length === 0) {
+      const row = document.createElement('div');
+      row.className = 'pay-method pay-method-bank is-placeholder';
+      row.innerHTML =
+        '<span class="pay-method-icon" aria-hidden="true">' + bankSvg + '</span>' +
+        '<div class="pay-method-body">' +
+          '<div class="pay-method-brand">No bank account on file</div>' +
+          '<div class="pay-method-meta">Link a bank account to pay from your checking</div>' +
+        '</div>' +
+        chevron;
+      list.appendChild(row);
+      return;
+    }
+
+    state.bankAccounts.forEach(function (b, idx) {
+      const row = document.createElement('div');
+      row.className = 'pay-method pay-method-bank';
+      const acctType = b.accountType || b.type || 'Checking';
+      const last4 = b.last4 || b.mask || '';
+      const bankName = b.bankName || b.institution || b.name || '';
+      const isDefault = (b.isDefault === true) || (idx === 0 && b.isDefault !== false);
+      row.innerHTML =
+        '<span class="pay-method-icon" aria-hidden="true">' + bankSvg + '</span>' +
+        '<div class="pay-method-body">' +
+          '<div class="pay-method-brand">' + escapeHtml(acctType) +
+            (last4 ? ' •••• ' + escapeHtml(last4) : '') + '</div>' +
+          '<div class="pay-method-meta">' + escapeHtml(bankName) + '</div>' +
+        '</div>' +
+        (isDefault ? '<span class="pay-method-default">Default</span>' : '') +
+        chevron;
+      list.appendChild(row);
+    });
   }
 
   function applyMethodSelection() {
@@ -631,6 +724,7 @@
     // Load loan + methods in parallel.
     const loanP = loadLoan();
     const methodsP = loadMethods();
+    loadBankAccounts();
     Promise.all([loanP, methodsP]).then(function (results) {
       const loan = results[0];
       const formCard = qs('#payFormCard');

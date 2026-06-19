@@ -2411,6 +2411,20 @@ button.dash-doc-download:disabled {
 }
 .pay-method-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(14,135,65,.10); color: #0E8741; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .pay-method-default { margin-left: auto; align-self: center; background: rgba(14,135,65,.12); color: #0a6e35; font-size: .7rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+
+/* Group labels ("Cards", "Bank account") above each list of methods. */
+.pay-method-group-label { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #8a93a0; margin: 4px 2px 8px; }
+.pay-method-group-label--bank { margin-top: 16px; }
+
+/* Bank-account rows: same row chrome as the card rows, but non-selectable
+   (a chevron on the right instead of a radio). */
+.pay-method-bank { cursor: default; }
+.pay-method-bank.is-placeholder { opacity: .75; }
+.pay-method-bankchev { margin-left: auto; color: #c2cad3; flex: 0 0 auto; display: flex; align-items: center; }
+/* When a "Default" pill precedes the chevron, the pill already owns the
+   auto-margin — keep the chevron tucked next to it instead of pushing apart. */
+.pay-method-default + .pay-method-bankchev { margin-left: 8px; }
+
 .pay-card-head--row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .pay-method-edit { color: #0E8741; font-weight: 700; font-size: .9rem; text-decoration: none; white-space: nowrap; }
 .pay-method-edit:hover { text-decoration: underline; }
@@ -4469,6 +4483,11 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 
 .pay-nocards-hint { margin: 8px 0 0; color: #475569; font-size: .9rem; line-height: 1.5; }
 
+/* "View more (N)" / "Show less" — reveals extra saved cards. */
+.pay-viewmore { display: inline-block; margin: 10px auto 0; background: none; border: none; color: #0E8741; font-weight: 700; font-size: .9rem; cursor: pointer; font-family: inherit; }
+.pay-viewmore:hover { text-decoration: underline; }
+.pay-method--hidden { display: none; }
+
 /* Amount + CVV live-charge fields: compact, de-emphasized, side by side. */
 .pay-fieldrow { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 .pay-field-amount { flex: 1 1 160px; min-width: 0; }
@@ -4503,13 +4522,12 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 
 /* Two-up cards once there's room. */
 @media (min-width: 760px) {
-  .pay-grid { grid-template-columns: 1fr 1fr; align-items: stretch; }
-  .pay-method-card, .pay-breakdown-card { height: 100%; }
+  .pay-grid { grid-template-columns: 1fr 1fr; align-items: start; }
 }
 
 /* Desktop: a touch more breathing room, matching the home cards. */
 @media (min-width: 900px) {
-  .pay-stack { gap: 20px; max-width: 920px; }
+  .pay-stack { gap: 20px; max-width: 800px; }
   .pay-now-btn { max-width: 100%; }
 }
 
