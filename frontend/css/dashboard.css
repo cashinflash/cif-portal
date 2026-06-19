@@ -4594,6 +4594,24 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    the detail view) wouldn't hide when toggled. Restore real hiding. */
 .loans-stack[hidden], .loans-detail[hidden], #loansDetailView[hidden] { display: none !important; }
 
+/* Past-loans "Show more" — progressive disclosure so customers with 40+
+   loans page through 10 at a time instead of an endless list. The
+   `.dashboard-page` prefix beats the bare `button { border:none; background:none }`
+   reset; the [hidden] guard beats `display:flex` overriding the attribute. */
+.dashboard-page .loans-showmore {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; margin: 16px 0 0; padding: 13px 18px;
+  background: #fff; color: #0E8741;
+  border: 1px solid #d7e2dc; border-radius: 12px;
+  font-size: .95rem; font-weight: 700; font-family: inherit;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background .15s ease, border-color .15s ease;
+}
+.dashboard-page .loans-showmore:hover { background: #f3faf6; border-color: #b9d7c7; }
+.dashboard-page .loans-showmore:active { background: #eaf5ee; }
+.dashboard-page .loans-showmore svg { stroke: #0E8741; }
+.dashboard-page .loans-showmore[hidden] { display: none !important; }
+
 /* ----- Active loan green card (reuses .loan-card) ----- */
 /* The figure values (funded / balance) read like the home balance figure
    but a touch smaller so the 4-up row fits. Date sits on its own line with

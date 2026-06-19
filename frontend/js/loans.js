@@ -13,12 +13,20 @@
   var CARDS_ENDPOINT = API_BASE + '/my-cards';
   var LOGIN_URL = '/start.html';
 
-  // How many past loans to show in the list view before "View all".
+  // How many past loans to show before the "Show more" button, and how
+  // many more to reveal per click. Customers with 40+ loans should never
+  // get an endless page — they page through 10 at a time instead.
   var PAST_LOANS_PREVIEW = 5;
+  var PAST_LOANS_INCREMENT = 10;
 
   // List view shows a preview slice of past loans by default; the
   // "View all loans" link (?view=all) flips this true.
   var SHOW_ALL_PAST = false;
+
+  // Sorted past-loan cache + how many are currently visible. Grown by the
+  // "Show more" button without re-fetching (all loans arrive in one call).
+  var pastSorted = [];
+  var pastShown = PAST_LOANS_PREVIEW;
 
   // ---------- Helpers ----------
   function qs(sel, root) { return (root || document).querySelector(sel); }
@@ -111,6 +119,7 @@
     initDocModal();
     wireSignOut();
     loadRepaymentMethod();
+    wirePastControls();
 
     var params = new URLSearchParams(window.location.search);
     var loanIdParam = params.get('id');
@@ -120,6 +129,7 @@
     // "View all loans" link sets ?view=all; the list view renders the full
     // history instead of the preview slice.
     SHOW_ALL_PAST = (viewParam === 'all');
+    pastShown = SHOW_ALL_PAST ? Infinity : PAST_LOANS_PREVIEW;
 
     // Backwards-compat: older dashboard banner deep-linked here
     // with ?esign=<guid>&action=sign. Redirect such links straight
@@ -195,10 +205,6 @@
     setText(qs('[data-loan-funded]', card), fmtCurrency(loan.principal));
     setText(qs('[data-loan-balance]', card), fmtCurrency(loan.balance));
     setText(qs('[data-loan-next-due]', card), loan.nextDueDate ? fmtDate(loan.nextDueDate) : '—');
-    // Next-payment amount: prefer the scheduled installment, else the balance.
-    var nextAmt = (loan.nextDueAmount != null && !isNaN(Number(loan.nextDueAmount)))
-      ? loan.nextDueAmount : loan.balance;
-    setText(qs('[data-loan-next-amount]', card), fmtCurrency(nextAmt));
 
     var pill = qs('[data-loan-status]', card);
     if (pill) {
@@ -208,20 +214,62 @@
   }
 
   function renderPastLoans(past) {
-    // Newest first by funded/origination date.
-    var sorted = (past || []).slice().sort(function (a, b) {
+    // Newest first by funded/origination date. Cache the full sorted list
+    // so "Show more" can reveal additional slices without re-fetching.
+    pastSorted = (past || []).slice().sort(function (a, b) {
       var da = new Date(a.loanDate || a.originationDate || 0).getTime();
       var db = new Date(b.loanDate || b.originationDate || 0).getTime();
       return db - da;
     });
-    var shown = SHOW_ALL_PAST ? sorted : sorted.slice(0, PAST_LOANS_PREVIEW);
+    paintPast();
+  }
 
-    // Hide the "View all" link if there's nothing more to show.
-    var viewAll = qs('.loans-viewall');
-    if (viewAll) viewAll.hidden = SHOW_ALL_PAST || sorted.length <= PAST_LOANS_PREVIEW;
-
+  // Render the currently-visible slice of past loans and sync the
+  // "Show more" button + "View all" link. Called on first paint and on
+  // every "Show more" click (which just grows pastShown).
+  function paintPast() {
+    var total = pastSorted.length;
+    var shown = pastSorted.slice(0, pastShown);
     renderPastTable(shown);
     renderPastCards(shown);
+
+    var remaining = Math.max(0, total - shown.length);
+
+    var moreBtn = qs('#loansShowMore');
+    if (moreBtn) {
+      moreBtn.hidden = remaining <= 0;
+      var lbl = qs('.loans-showmore-label', moreBtn);
+      if (lbl && remaining > 0) {
+        var next = Math.min(remaining, PAST_LOANS_INCREMENT);
+        lbl.textContent = 'Show ' + next + ' more loan' + (next === 1 ? '' : 's');
+      }
+    }
+
+    // "View all" jumps straight to the full list; hide it once everything
+    // is already on screen.
+    var viewAll = qs('.loans-viewall');
+    if (viewAll) viewAll.hidden = remaining <= 0;
+  }
+
+  // One-time wiring for the past-loans "Show more" button and "View all"
+  // link. Both grow the visible slice client-side (no extra network call).
+  function wirePastControls() {
+    var moreBtn = qs('#loansShowMore');
+    if (moreBtn) {
+      moreBtn.addEventListener('click', function () {
+        if (pastShown === Infinity) pastShown = pastSorted.length;
+        pastShown += PAST_LOANS_INCREMENT;
+        paintPast();
+      });
+    }
+    var viewAll = qs('.loans-viewall');
+    if (viewAll) {
+      viewAll.addEventListener('click', function (e) {
+        e.preventDefault();
+        pastShown = pastSorted.length;
+        paintPast();
+      });
+    }
   }
 
   // Reusable doc icon (green outline) for both table rows and mobile cards.

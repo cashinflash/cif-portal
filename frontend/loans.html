@@ -139,20 +139,19 @@
           </div>
           <div class="loan-card-figures">
             <div class="loan-card-fig">
-              <p class="loan-card-flabel">Original funded amount</p>
+              <p class="loan-card-flabel">Loan Amount</p>
               <p class="loan-card-figval"><span data-loan-funded>&mdash;</span></p>
             </div>
             <div class="loan-card-fig">
-              <p class="loan-card-flabel">Current balance</p>
+              <p class="loan-card-flabel">Current Balance</p>
               <p class="loan-card-figval"><span data-loan-balance>&mdash;</span></p>
             </div>
             <div class="loan-card-fig">
-              <p class="loan-card-flabel">Next payment</p>
-              <p class="loan-card-figval loan-card-figval--date"><span data-loan-next-due>&mdash;</span></p>
-              <p class="loan-card-figsub"><span data-loan-next-amount>&mdash;</span></p>
+              <p class="loan-card-flabel">Due Date</p>
+              <p class="loan-card-due"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span data-loan-next-due>&mdash;</span></p>
             </div>
             <div class="loan-card-fig">
-              <p class="loan-card-flabel">Repayment method</p>
+              <p class="loan-card-flabel">Repayment Method</p>
               <p class="loan-card-method"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg><span data-loan-repay-method>Card on file</span></p>
             </div>
           </div>
@@ -179,7 +178,7 @@
             <thead>
               <tr>
                 <th scope="col">Loan</th>
-                <th scope="col">Original funded amount</th>
+                <th scope="col">Loan Amount</th>
                 <th scope="col">Date funded</th>
                 <th scope="col">Date paid</th>
                 <th scope="col">Status</th>
@@ -199,6 +198,13 @@
             <div class="skeleton-row"><div class="skeleton-line w-60"></div><div class="skeleton-line w-20"></div></div>
           </div>
         </div>
+
+        <!-- Progressive disclosure: reveal 10 more past loans per click so
+             customers with 40+ loans don't get an endless page. -->
+        <button type="button" class="loans-showmore" id="loansShowMore" hidden>
+          <span class="loans-showmore-label">Show more loans</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
       </section>
 
       <!-- ============ NEED ANOTHER LOAN (responsive banner) ============ -->
