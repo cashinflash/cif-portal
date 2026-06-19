@@ -135,30 +135,11 @@
 .auth-aux a:hover { text-decoration: underline; }
 
 /* ---------- Right column: promo ---------- */
-/* Promo: a green banner (heading + art) + a white feature card. Mobile-first
-   = a THIN horizontal banner (text left, art right); the desktop block below
-   folds the whole thing back into one tall green card. */
-.auth-promo-banner {
-  background: linear-gradient(160deg, #f1faf4 0%, #e9f6ee 100%);
-  border: 1px solid #d9efe3; border-radius: 20px; padding: 16px 18px;
-  display: flex; align-items: center; gap: 14px;
-}
-.auth-promo-text { flex: 1 1 auto; min-width: 0; }
-.auth-promo-title { margin: 0; font-size: clamp(1.45rem, 1.2rem + 1.6vw, 1.95rem); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; color: #0f1729; }
-.auth-promo-title .fast { color: #15a34a; display: block; }
-.auth-promo-sub { margin: 9px 0 0; font-size: .9rem; color: #5b6b7b; line-height: 1.4; }
-.auth-promo-art { flex: 0 0 auto; display: block; width: 44%; max-width: 172px; height: auto; }
+/* The promo is a single uploaded image (it already contains the heading,
+   illustration and the Approved / Money / Good-credit row), so just show it. */
+.auth-promo { align-self: start; }
+.auth-promo-art { display: block; width: 100%; }
 .auth-promo-art img { display: block; width: 100%; height: auto; border: 0; }
-
-/* Feature row (white card with 3 items + dividers). One line each (nowrap). */
-.auth-features { display: flex; background: #fff; border: 1px solid #e7f1ea; border-radius: 16px; padding: 14px 4px; margin-top: 14px; box-shadow: 0 2px 8px rgba(16,24,40,.04); }
-.auth-feature { flex: 1 1 0; display: flex; align-items: center; gap: 10px; padding: 2px 10px; min-width: 0; }
-.auth-feature + .auth-feature { border-left: 1px solid #eef1f4; }
-.auth-feature-ic { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%; background: #e9f7ef; color: #16a34a; display: grid; place-items: center; }
-.auth-feature-ic svg { width: 19px; height: 19px; }
-.auth-feature-tx { min-width: 0; line-height: 1.2; }
-.auth-feature-tx strong { display: block; font-size: .92rem; font-weight: 700; color: #1a1a2e; white-space: nowrap; }
-.auth-feature-tx span { font-size: .82rem; color: #6b7785; white-space: nowrap; }
 
 /* ---------- Footer (desktop) ---------- */
 .auth-footer { border-top: 1px solid #e9edf1; }
@@ -199,16 +180,7 @@
   .auth-card { background: #fff; border: 1px solid #e7ecf1; border-radius: 18px; padding: 8px 26px 24px; box-shadow: 0 2px 6px rgba(16,24,40,.04); }
   .auth-fields { background: none; border: none; padding: 0; box-shadow: none; }
   .auth-actions { margin-top: 6px; }
-  .auth-promo {
-    align-self: stretch; display: flex; flex-direction: column;
-    background: linear-gradient(160deg, #f1faf4 0%, #e9f6ee 100%);
-    border: 1px solid #d9efe3; border-radius: 24px; padding: clamp(26px, 3vw, 40px);
-  }
-  .auth-promo-banner { background: none; border: none; border-radius: 0; padding: 0; display: block; }
-  .auth-promo-title { font-size: clamp(1.9rem, 1.4rem + 2.4vw, 2.8rem); }
-  .auth-promo-sub { margin-top: 16px; font-size: clamp(1rem, .95rem + .4vw, 1.15rem); line-height: 1.45; }
-  .auth-promo-art { width: 100%; max-width: 440px; margin: 16px auto 0; }
-  .auth-features { margin-top: auto; }
+  /* Promo is a full-width image; no desktop card overrides needed. */
 }
 
 /* On mobile the desktop footer is hidden (tabbar/secure strip take over);
