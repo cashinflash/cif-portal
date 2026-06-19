@@ -4135,3 +4135,50 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 
 /* Hide the dashboard sidebar/footer chrome on the app layout. */
 .app-page .dash-sidebar, .app-page .site-header, .app-page .dash-footer { display: none; }
+
+/* ============================================================
+   APP REDESIGN — desktop (sidebar) layout.
+   Mobile (< 900px): top bar + bottom tab bar (default above).
+   Desktop (>= 900px): fixed left sidebar, wider content.
+   ============================================================ */
+.app-sidebar { display: none; }
+@media (min-width: 900px) {
+  .app-topbar, .app-tabbar { display: none; }
+  .app-page { padding-bottom: 24px; }
+
+  .app-sidebar {
+    display: flex; flex-direction: column;
+    position: fixed; top: 0; left: 0; bottom: 0; width: 252px; z-index: 800;
+    background: #fff; border-right: 1px solid #eceff3; padding: 26px 16px;
+  }
+  .app-sidebar-logo { display: block; margin: 0 12px 28px; }
+  .app-sidebar-logo img { height: 22px; width: auto; display: block; }
+  .app-sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
+  .app-sidebar-link {
+    display: flex; align-items: center; gap: 13px; padding: 12px 14px;
+    border-radius: 12px; color: #475569; font-weight: 600; font-size: .96rem; text-decoration: none;
+    transition: background .12s ease, color .12s ease;
+  }
+  .app-sidebar-link svg { width: 20px; height: 20px; flex: 0 0 20px; }
+  .app-sidebar-link:hover { background: #f4f6f8; color: #1a1a2e; }
+  .app-sidebar-link.is-active { background: #e8f5ee; color: #0E8741; }
+  .app-sidebar-foot { margin-top: auto; padding-top: 16px; border-top: 1px solid #f1f4f7; }
+  .app-sidebar-logout {
+    display: flex; align-items: center; gap: 13px; width: 100%; padding: 12px 14px;
+    border: none; background: none; cursor: pointer; color: #6b7280; font-weight: 600;
+    font-size: .96rem; font-family: inherit; border-radius: 12px;
+  }
+  .app-sidebar-logout svg { width: 20px; height: 20px; flex: 0 0 20px; }
+  .app-sidebar-logout:hover { background: #fef2f2; color: #b42318; }
+
+  /* Content sits to the right of the sidebar, comfortably wide. */
+  .app-main { margin-left: 252px; max-width: 1040px; padding: 34px 48px 48px; }
+  .app-welcome { margin-bottom: 22px; }
+  .app-welcome-text h1 { font-size: 1.95rem; }
+
+  /* Wider, more spacious cards on desktop. */
+  .loan-card { padding: 26px 30px; border-radius: 24px; }
+  .loan-card-balance { font-size: 2.7rem; }
+  .app-cta-primary, .app-cta-outline { max-width: 100%; padding: 18px 24px; }
+  .app-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+}
