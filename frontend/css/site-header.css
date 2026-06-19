@@ -14,7 +14,7 @@
 
 .site-header, .mobile-menu { font-family: 'Euclid Circular B', sans-serif; }
 .site-header *, .mobile-menu * { box-sizing: border-box; }
-.site-header ul, .mobile-menu ul { list-style: none; margin: 0; padding: 0; }
+.site-header ul, .mobile-menu ul { list-style: none; margin: 0; }
 .site-header a, .mobile-menu a { text-decoration: none; color: inherit; -webkit-tap-highlight-color: transparent; }
 .site-header img, .mobile-menu img { max-width: 100%; height: auto; display: block; }
 .site-header .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
@@ -49,7 +49,7 @@
 .site-header .logo img { height: 24px; width: auto; }
 
 .site-header .main-nav { display: flex; }
-.site-header .nav-list { display: flex; gap: 32px; align-items: center; }
+.site-header .nav-list { display: flex; gap: 32px; align-items: center; padding: 0; }
 .site-header .nav-item > a { font-weight: 500; font-size: 1rem; display: flex; align-items: center; gap: 4px; padding: 8px 0; transition: color .2s; }
 .site-header .nav-item > a:hover { color: #0E8741; }
 .site-header .nav-item > a svg { transition: transform .2s; }
