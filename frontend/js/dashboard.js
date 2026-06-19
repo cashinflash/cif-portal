@@ -624,7 +624,8 @@
     if (idTag) {
       const pid = loan.publicId || loan.id;
       if (pid) {
-        idTag.textContent = 'Loan #' + pid;
+        // Markup already prints the "Loan #" prefix — just fill the id.
+        idTag.textContent = pid;
         idTag.hidden = false;
       } else {
         idTag.hidden = true;
