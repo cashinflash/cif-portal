@@ -11,6 +11,13 @@ name: Perf boost (Lambda memory + keep-warm)
 
 on:
   workflow_dispatch:
+  # workflow_dispatch only registers from the default branch; until this lands
+  # on main, run it from the feature branch by pushing this file (idempotent).
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - '.github/workflows/perf-boost.yml'
 
 env:
   AWS_REGION: us-east-1
