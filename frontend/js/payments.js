@@ -113,6 +113,7 @@
       card.setAttribute('aria-busy', 'false');
 
       if (!data || !data.loan) {
+        card.classList.add('loan-card--art');
         if (body) body.hidden = true;
         if (empty) empty.hidden = false;
         // No active loan — surface the "Need extra cash?" cross-sell banner.
@@ -121,6 +122,7 @@
         return null;
       }
       const loan = data.loan;
+      card.classList.remove('loan-card--art');
       state.loan = loan;
       // Gate the "Need extra cash?" banner: never offer a new loan while an
       // active loan with a balance is open.
