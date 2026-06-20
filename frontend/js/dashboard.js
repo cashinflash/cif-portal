@@ -437,11 +437,23 @@
     } else {
       if (card) {
         card.hidden = false;
+        card.classList.remove('is-pastdue');
         card.setAttribute('aria-busy', 'false');
         var _sk = qs('.dash-card-skeleton', card); if (_sk) _sk.style.display = 'none';
         var _bd = qs('.dash-loan-body', card); if (_bd) _bd.hidden = true;
         var _emp = qs('.dash-loan-empty', card); if (_emp) _emp.hidden = false;
       }
+      // First-time (never borrowed) vs returning (paid off): tailor the empty
+      // hero copy AND the "Need a loan?" / "Need another loan?" side card.
+      var firstTime = !allLoans.length;
+      var emptyTitle = qs('#dashEmptyTitle');
+      var emptySub = qs('#dashEmptySub');
+      if (emptyTitle) emptyTitle.textContent = firstTime ? 'Welcome to Cash in Flash' : "You're all paid up";
+      if (emptySub) emptySub.textContent = firstTime
+        ? 'Get the cash you need — approved in minutes and funded the same day. Apply whenever you’re ready.'
+        : 'Nice work — your balance is clear. Need cash again? Applying only takes a few minutes.';
+      var needLoanHeading = qs('.home-needloan-body strong');
+      if (needLoanHeading) needLoanHeading.textContent = firstTime ? 'Need a loan?' : 'Need another loan?';
       if (hero) hero.hidden = false;
     }
 
@@ -655,11 +667,21 @@
     }
 
     const pill = qs('[data-loan-status]', card);
+    const note = qs('.loan-card-note', card);
+    const noteText = qs('[data-note-text]', card);
+    var GOOD_NOTE = 'Make your payment on time to keep your account in good standing.';
+    var LATE_NOTE = 'Your payment is past due. Make a payment now to bring your account back into good standing.';
     if (pill) {
       const status = (loan.status || '').toLowerCase();
       const daysLate = (loan.daysLate || '').toLowerCase();
       pill.classList.remove('dash-pill--ok', 'dash-pill--warn', 'dash-pill--past-due');
-      if (status.indexOf('past') !== -1 || status.indexOf('delinquent') !== -1 || (daysLate && daysLate !== 'not late')) {
+      var isPastDue = (status.indexOf('past') !== -1 || status.indexOf('delinquent') !== -1 || (daysLate && daysLate !== 'not late'));
+      // Mirror the urgency on the whole hero (red ring) + swap the note copy
+      // (the note's icon is preserved — only the [data-note-text] span changes).
+      card.classList.toggle('is-pastdue', isPastDue);
+      if (note) note.classList.toggle('is-pastdue-note', isPastDue);
+      if (noteText) noteText.textContent = isPastDue ? LATE_NOTE : GOOD_NOTE;
+      if (isPastDue) {
         pill.classList.add('dash-pill--past-due');
         pill.textContent = 'Past due';
       } else if (status.indexOf('grace') !== -1 || status.indexOf('pending') !== -1 || loan.isInRescindPeriod) {

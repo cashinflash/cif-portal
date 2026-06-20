@@ -4075,6 +4075,24 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .loan-card-method { margin: 4px 0 0; font-size: .98rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .dash-loan-empty .loan-card-empty-sub { margin: 6px 0 0; color: rgba(255,255,255,.85); font-size: .9rem; }
 
+/* Enriched empty hero (no active loan / first-time) — fills the green card
+   so it never looks bare. White-on-green, centered, with benefit chips + CTA. */
+.dash-loan-empty { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.dash-empty-badge { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.16); color: #fff; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 14px; }
+.dash-empty-title { font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; }
+.dash-loan-empty .dash-empty-sub { max-width: 440px; margin: 6px auto 0; font-size: .95rem; line-height: 1.5; }
+.dash-empty-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 18px 0 4px; }
+.dash-empty-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,.14); color: #fff; font-size: .8rem; font-weight: 600; }
+.dash-empty-chip svg { flex: 0 0 auto; opacity: .95; }
+.dash-loan-empty .dash-empty-cta { display: inline-flex; align-items: center; gap: 9px; margin-top: 20px; padding: 13px 26px; border-radius: 14px; background: #fff; color: #0E8741; font-weight: 800; font-size: 1rem; text-decoration: none; box-shadow: 0 8px 20px rgba(0,0,0,.16); transition: transform .04s ease, box-shadow .15s ease; }
+.dash-loan-empty .dash-empty-cta:hover { box-shadow: 0 10px 26px rgba(0,0,0,.24); }
+.dash-loan-empty .dash-empty-cta:active { transform: translateY(1px); }
+
+/* Past-due accent on the active-loan hero: red ring + urgent note. */
+.loan-card.is-pastdue { box-shadow: 0 0 0 2px rgba(254,202,202,.9), 0 18px 40px rgba(180,35,24,.20); }
+.loan-card.is-pastdue .loan-card-note { color: #fff; font-weight: 700; }
+.loan-card .loan-card-note.is-pastdue-note svg { color: #ffd2d2; }
+
 /* CTAs */
 .app-cta-primary {
   display: flex; align-items: center; justify-content: center; gap: 10px;
