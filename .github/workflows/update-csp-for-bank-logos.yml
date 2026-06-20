@@ -1,0 +1,157 @@
+name: Update CSP for bank logos
+
+# One-shot workflow to allow the bank-logo favicon host
+# (icons.duckduckgo.com) in the CloudFront response-headers-policy
+# attached to the customer-portal distribution.
+#
+# The Payments page shows each saved bank account's real logo (the
+# bank's favicon) in the method circle. Those images load from
+# https://icons.duckduckgo.com/ip3/<domain>.ico, which the portal's
+# CSP img-src must allow. Without this, the favicon is blocked and the
+# row falls back to the colored monogram (no broken image — just no
+# logo).
+#
+# Mechanism mirrors update-csp-for-plaid.yml: read the policy's current
+# CSP, ADD the host to img-src (idempotent), save it back, invalidate.
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  CF_DISTRIBUTION: EOV9K12LFKK8T
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Discover the response-headers-policy on the distribution
+        id: discover
+        run: |
+          set -e
+          aws cloudfront get-distribution-config \
+            --id "$CF_DISTRIBUTION" > /tmp/dist.json
+          POLICY_ID=$(jq -r \
+            '.DistributionConfig.DefaultCacheBehavior.ResponseHeadersPolicyId // empty' \
+            /tmp/dist.json)
+          if [ -z "$POLICY_ID" ] || [ "$POLICY_ID" = "null" ]; then
+            echo "::error::No ResponseHeadersPolicyId on default cache behavior." >&2
+            exit 1
+          fi
+          echo "Found response-headers-policy id: $POLICY_ID"
+          echo "policy_id=$POLICY_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Patch CSP to allow the bank-logo host
+        env:
+          POLICY_ID: ${{ steps.discover.outputs.policy_id }}
+        run: |
+          set -e
+          aws cloudfront get-response-headers-policy \
+            --id "$POLICY_ID" > /tmp/policy.json
+          ETAG=$(jq -r '.ETag' /tmp/policy.json)
+          CONFIG=$(jq '.ResponseHeadersPolicy.ResponseHeadersPolicyConfig' /tmp/policy.json)
+
+          CSP_OLD=$(echo "$CONFIG" | jq -r '
+            .SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy
+            // (.CustomHeadersConfig.Items[]?
+                 | select(.Header | ascii_downcase == "content-security-policy")
+                 | .Value)
+            // empty
+          ' | head -n 1)
+          if [ -z "$CSP_OLD" ]; then
+            echo "::error::No CSP found on the policy. Aborting." >&2
+            exit 1
+          fi
+          echo "Current CSP:"
+          echo "  $CSP_OLD"
+
+          # Add the favicon host to img-src. If img-src is missing, add it.
+          # If it already includes the host, leave it alone.
+          add_host() {
+            local csp="$1" directive="$2" host="$3"
+            if echo "$csp" | grep -E "(^|;)[[:space:]]*$directive[[:space:]][^;]*$host" >/dev/null; then
+              echo "$csp"; return 0
+            fi
+            if echo "$csp" | grep -E "(^|;)[[:space:]]*$directive[[:space:]]" >/dev/null; then
+              echo "$csp" | sed -E "s#((^|;)[[:space:]]*$directive)([[:space:]]+[^;]*)#\1\3 $host#"
+            else
+              echo "${csp%;} ; $directive $host"
+            fi
+          }
+
+          PATCHED=$(add_host "$CSP_OLD" "img-src" "https://icons.duckduckgo.com")
+          echo "Patched CSP:"
+          echo "  $PATCHED"
+
+          if [ "$PATCHED" = "$CSP_OLD" ]; then
+            echo "CSP already allows the bank-logo host; nothing to do."
+            exit 0
+          fi
+
+          NEW_CONFIG=$(echo "$CONFIG" | jq --arg csp "$PATCHED" '
+            if .SecurityHeadersConfig.ContentSecurityPolicy then
+              .SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy = $csp
+            else . end
+            | if (.CustomHeadersConfig.Items // []) | any(.Header | ascii_downcase == "content-security-policy") then
+              .CustomHeadersConfig.Items |= map(
+                if (.Header | ascii_downcase) == "content-security-policy"
+                then .Value = $csp else . end
+              )
+            else . end
+            | if .SecurityHeadersConfig.XSSProtection != null then
+                .SecurityHeadersConfig.XSSProtection.Override = (.SecurityHeadersConfig.XSSProtection.Override // false)
+                | .SecurityHeadersConfig.XSSProtection.Protection = (.SecurityHeadersConfig.XSSProtection.Protection // false)
+              else . end
+            | if .SecurityHeadersConfig.ContentTypeOptions != null then
+                .SecurityHeadersConfig.ContentTypeOptions.Override = (.SecurityHeadersConfig.ContentTypeOptions.Override // false)
+              else . end
+            | if .SecurityHeadersConfig.FrameOptions != null then
+                .SecurityHeadersConfig.FrameOptions.Override = (.SecurityHeadersConfig.FrameOptions.Override // false)
+                | .SecurityHeadersConfig.FrameOptions.FrameOption = (.SecurityHeadersConfig.FrameOptions.FrameOption // "DENY")
+              else . end
+            | if .SecurityHeadersConfig.ReferrerPolicy != null then
+                .SecurityHeadersConfig.ReferrerPolicy.Override = (.SecurityHeadersConfig.ReferrerPolicy.Override // false)
+                | .SecurityHeadersConfig.ReferrerPolicy.ReferrerPolicy = (.SecurityHeadersConfig.ReferrerPolicy.ReferrerPolicy // "strict-origin-when-cross-origin")
+              else . end
+            | if .SecurityHeadersConfig.StrictTransportSecurity != null then
+                .SecurityHeadersConfig.StrictTransportSecurity.Override = (.SecurityHeadersConfig.StrictTransportSecurity.Override // false)
+                | .SecurityHeadersConfig.StrictTransportSecurity.AccessControlMaxAgeSec = (.SecurityHeadersConfig.StrictTransportSecurity.AccessControlMaxAgeSec // 31536000)
+              else . end
+            | if .SecurityHeadersConfig.ContentSecurityPolicy != null then
+                .SecurityHeadersConfig.ContentSecurityPolicy.Override = (.SecurityHeadersConfig.ContentSecurityPolicy.Override // false)
+              else . end
+          ')
+
+          echo "$NEW_CONFIG" > /tmp/new_config.json
+          aws cloudfront update-response-headers-policy \
+            --id "$POLICY_ID" \
+            --if-match "$ETAG" \
+            --response-headers-policy-config file:///tmp/new_config.json \
+            --no-cli-pager > /dev/null
+          echo "Policy $POLICY_ID updated."
+
+      - name: Invalidate CloudFront so the new CSP serves immediately
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$CF_DISTRIBUTION" \
+            --paths '/*' --no-cli-pager > /dev/null
+          echo "Invalidation created on $CF_DISTRIBUTION."
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### CSP updated for bank logos"
+            echo ""
+            echo "- Distribution: \`$CF_DISTRIBUTION\`"
+            echo "- Host added to \`img-src\`: \`icons.duckduckgo.com\`"
+            echo "- Invalidation: \`/*\`"
+            echo ""
+            echo "Next: hard-refresh the Payments page in a private window — saved bank rows show the bank's logo."
+          } >> "$GITHUB_STEP_SUMMARY"

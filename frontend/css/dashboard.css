@@ -4102,8 +4102,12 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .loan-card[aria-busy="true"] { background: linear-gradient(150deg, #cdd5dd 0%, #b7c0ca 60%, #aab4bf 100%); box-shadow: 0 12px 30px rgba(100,116,139,.18); }
 /* Payment-method brand icons (card networks) sit on a white chip. */
 .pay-method-icon.pay-brand-icon { background: #fff; border: 1px solid #e7ecf1; }
-/* Bank-row monogram: the bank's initial in a colored circle. */
-.pay-bank-mono { font-weight: 800; font-size: .98rem; color: #fff; }
+/* Bank-row icon: the bank's real logo (favicon) over a colored monogram
+   fallback. The monogram shows instantly; the logo fades in once it loads. */
+.pay-bank-mono { position: relative; overflow: hidden; }
+.pay-bank-mono .pay-bank-mono-letter { font-weight: 800; font-size: .98rem; color: #fff; }
+.pay-bank-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 5px; background: #fff; opacity: 0; transition: opacity .15s ease; }
+.pay-bank-logo.is-loaded { opacity: 1; }
 
 /* CTAs */
 .app-cta-primary {

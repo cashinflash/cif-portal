@@ -331,16 +331,64 @@
     });
   }
 
-  // Bank "logo": the institution's initial in a stable color-from-name circle.
-  // (A real favicon would need the bank's domain, which the routing directory
-  // doesn't give us — a monogram always renders and looks intentional.)
+  // Map a bank name (from the FedACH directory) to its domain so we can show
+  // its real logo. Covers the major US banks; the long tail falls back to the
+  // colored monogram. Substring match on the normalized name.
+  function bankDomain(name) {
+    var n = (name || '').toUpperCase();
+    var rules = [
+      ['BANK OF AMERICA', 'bankofamerica.com'], ['WELLS FARGO', 'wellsfargo.com'],
+      ['JPMORGAN', 'chase.com'], ['CHASE', 'chase.com'], ['CITIBANK', 'citi.com'],
+      ['U.S. BANK', 'usbank.com'], ['US BANK', 'usbank.com'], ['USBANK', 'usbank.com'],
+      ['PNC', 'pnc.com'], ['TRUIST', 'truist.com'], ['SUNTRUST', 'truist.com'],
+      ['CAPITAL ONE', 'capitalone.com'], ['TD BANK', 'td.com'], ['CITIZENS', 'citizensbank.com'],
+      ['FIFTH THIRD', '53.com'], ['KEYBANK', 'key.com'], ['KEY BANK', 'key.com'],
+      ['REGIONS', 'regions.com'], ['HUNTINGTON', 'huntington.com'], ['M&T', 'mtb.com'],
+      ['ALLY', 'ally.com'], ['USAA', 'usaa.com'], ['NAVY FEDERAL', 'navyfederal.org'],
+      ['BMO', 'bmo.com'], ['HARRIS', 'bmo.com'], ['COMERICA', 'comerica.com'],
+      ['DISCOVER', 'discover.com'], ['SCHWAB', 'schwab.com'], ['AMERICAN EXPRESS', 'americanexpress.com'],
+      ['MARCUS', 'marcus.com'], ['GOLDMAN', 'marcus.com'], ['SOFI', 'sofi.com'],
+      ['CHIME', 'chime.com'], ['VARO', 'varomoney.com'], ['GREEN DOT', 'greendot.com'],
+      ['WOODFOREST', 'woodforest.com'], ['FIRST CITIZENS', 'firstcitizens.com'],
+      ['SYNOVUS', 'synovus.com'], ['ZIONS', 'zionsbank.com'], ['FROST', 'frostbank.com'],
+      ['FIRST HORIZON', 'firsthorizon.com'], ['VALLEY NATIONAL', 'valley.com'],
+      ['WEBSTER', 'websterbank.com'], ['EAST WEST', 'eastwestbank.com'],
+      ['SANTANDER', 'santanderbank.com'], ['FLAGSTAR', 'flagstar.com'],
+      ['PENTAGON FEDERAL', 'penfed.org'], ['PENFED', 'penfed.org'],
+      ['SCHOOLSFIRST', 'schoolsfirstfcu.org'], ['GOLDEN 1', 'golden1.com'],
+      ['BECU', 'becu.org'], ['MORGAN STANLEY', 'morganstanley.com'],
+    ];
+    for (var i = 0; i < rules.length; i++) {
+      if (n.indexOf(rules[i][0]) !== -1) return rules[i][1];
+    }
+    return '';
+  }
+
+  // Bank "logo" for the circle: the bank's favicon (actual logo) layered over a
+  // colored monogram. The monogram shows instantly and stays as the fallback if
+  // the favicon is blocked/missing — so it never shows a broken image.
   function bankMonoHtml(name) {
     var n = (name || 'Bank').trim();
     var letter = (n.charAt(0) || 'B').toUpperCase();
     var palette = ['#1a4d6b', '#0E8741', '#3b5bdb', '#7048e8', '#c2255c', '#e8590c', '#1098ad', '#2b8a3e'];
     var h = 0;
     for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
-    return '<span class="pay-method-icon pay-bank-mono" style="background:' + palette[h % palette.length] + '" aria-hidden="true">' + escapeHtml(letter) + '</span>';
+    var domain = bankDomain(n);
+    var logo = domain
+      ? '<img class="pay-bank-logo" alt="" src="https://icons.duckduckgo.com/ip3/' + encodeURIComponent(domain) + '.ico">'
+      : '';
+    return '<span class="pay-method-icon pay-bank-mono" style="background:' + palette[h % palette.length] + '" aria-hidden="true">' +
+      '<span class="pay-bank-mono-letter">' + escapeHtml(letter) + '</span>' + logo + '</span>';
+  }
+
+  // After bank rows render, reveal each favicon only once it loads cleanly
+  // (CSP-safe: no inline onerror). On error the colored monogram remains.
+  function wireBankLogos(root) {
+    (root || document).querySelectorAll('img.pay-bank-logo').forEach(function (img) {
+      if (img.complete && img.naturalWidth > 0) { img.classList.add('is-loaded'); return; }
+      img.addEventListener('load', function () { if (img.naturalWidth > 0) img.classList.add('is-loaded'); });
+      img.addEventListener('error', function () { img.classList.remove('is-loaded'); });
+    });
   }
 
   // Non-selectable bank-account rows (chevron instead of radio). When there
@@ -385,6 +433,7 @@
         chevron;
       list.appendChild(row);
     });
+    wireBankLogos(list);
   }
 
   function applyMethodSelection() {
