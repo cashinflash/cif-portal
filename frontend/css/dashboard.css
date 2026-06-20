@@ -4081,6 +4081,14 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
    display to :not([hidden]) so the hidden attribute still hides it. */
 .dash-loan-empty:not([hidden]) { display: block; }
 .loan-card.loan-card--art { background: none; padding: 0; box-shadow: none; border-radius: 0; overflow: visible; }
+/* The empty-state wrapper still carried padding from the OLD text-based
+   "no loans" design (.dash-loan-empty { padding:48px 32px } at ~2707, and a
+   32px 16px variant at ~3002). With the image-as-card hero, that padding
+   insets the image — so the green card renders NARROWER than the promo/
+   activity cards beside it — and leaves a tall white band above and below it
+   (the empty "gap" under the hero the user keeps flagging). Zero it so the
+   image truly is the card, flush edge-to-edge and the same width as the rest. */
+.loan-card--art .dash-loan-empty { padding: 0; margin: 0; }
 .dash-hero-link { display: block; }
 .dash-hero-full { display: block; width: 100%; height: auto; filter: drop-shadow(0 12px 26px rgba(16,40,28,.15)); }
 /* Desktop: pin the home hero to the image's aspect ratio so it has a definite
