@@ -194,10 +194,12 @@
     if (skel) skel.style.display = 'none';
 
     if (!loan) {
+      card.classList.add('loan-card--art');
       if (body) body.hidden = true;
       if (empty) empty.hidden = false;
       return;
     }
+    card.classList.remove('loan-card--art');
     if (empty) empty.hidden = true;
     if (body) body.hidden = false;
 

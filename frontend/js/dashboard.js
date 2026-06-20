@@ -432,12 +432,14 @@
       if (hero) hero.hidden = true;
       if (card) {
         card.hidden = false;
+        card.classList.remove('loan-card--art');
         renderActiveLoan(card, data);
       }
     } else {
       if (card) {
         card.hidden = false;
         card.classList.remove('is-pastdue', 'is-pastdue-soft');
+        card.classList.add('loan-card--art');
         card.setAttribute('aria-busy', 'false');
         var _sk = qs('.dash-card-skeleton', card); if (_sk) _sk.style.display = 'none';
         var _bd = qs('.dash-loan-body', card); if (_bd) _bd.hidden = true;
