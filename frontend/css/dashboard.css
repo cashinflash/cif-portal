@@ -4093,7 +4093,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 }
 /* Mobile: the hero spans the full content width, identical to the CTAs below. */
 @media (max-width: 899px) {
-  #activeLoanCard.loan-card--art, #activeLoanCard .dash-hero-link, #activeLoanCard .dash-hero-full { width: 100%; }
+  #activeLoanCard.loan-card--art { width: 100%; margin-left: 0; margin-right: 0; }
+  #activeLoanCard .dash-loan-empty:not([hidden]), #activeLoanCard .dash-hero-link, #activeLoanCard .dash-hero-full { display: block; width: 100%; max-width: 100%; }
+  #activeLoanCard .dash-hero-full { filter: drop-shadow(0 6px 16px rgba(16,40,28,.12)); }
   /* No active loan: the hero already carries the apply CTA + the benefits, so
      drop the redundant Make-a-Payment / Apply buttons + duplicate trust badges,
      and lift the "Need cash" promo up directly under the hero — mirroring the
