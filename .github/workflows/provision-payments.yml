@@ -124,6 +124,7 @@ jobs:
             "GET /api/my-cards"
             "POST /api/my-cards"
             "GET /api/my-banks"
+            "POST /api/my-banks"
             "GET /api/my-payment/loan-summary"
             "POST /api/my-payment"
             "POST /api/my-payment/charge"

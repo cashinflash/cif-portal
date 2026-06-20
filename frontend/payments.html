@@ -217,6 +217,10 @@
 
               <p class="pay-method-group-label pay-method-group-label--bank">Bank account</p>
               <div id="payBankAccounts"></div>
+              <button type="button" id="payAddBankBtn" class="pay-addcard-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add a bank account
+              </button>
 
               <p id="payCardAddedNote" hidden class="pay-cardadded-note"></p>
               <p class="pay-error" id="payError" hidden></p>
@@ -304,6 +308,56 @@
               <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">
                 <button type="button" class="btn-login" id="payAddCardCancel">Cancel</button>
                 <button type="submit" class="btn-apply" id="payAddCardSave">Save card</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add-bank modal (saves a checking/savings account to Vergent; never charges). -->
+      <div class="profile-modal" id="payAddBankModal" hidden>
+        <button type="button" class="profile-modal-backdrop" id="payAddBankBackdrop" aria-label="Close"></button>
+        <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="payAddBankTitle">
+          <div class="profile-modal-head">
+            <h3 class="profile-modal-title" id="payAddBankTitle">Add a bank account</h3>
+          </div>
+          <div class="profile-modal-body">
+            <p class="profile-modal-intro">
+              Add a checking or savings account to your Cash in Flash profile. You won't be charged now.
+            </p>
+            <form id="payAddBankForm" class="profile-modal-form" autocomplete="off" novalidate>
+              <div class="profile-modal-field">
+                <label class="profile-modal-field-label" for="payBankType">Account type</label>
+                <select id="payBankType" name="accountType" style="width:100%;padding:12px 14px;border:1px solid #d4dae3;border-radius:10px;font-family:inherit;font-size:1rem;background:#fff;color:#1a1a2e;">
+                  <option value="checking">Checking</option>
+                  <option value="savings">Savings</option>
+                </select>
+              </div>
+              <div class="profile-modal-row">
+                <div class="profile-modal-field profile-modal-field--narrow">
+                  <label class="profile-modal-field-label" for="payBankRouting">Routing number</label>
+                  <input type="text" inputmode="numeric" id="payBankRouting" name="routingNumber"
+                         placeholder="9 digits" maxlength="9" autocomplete="off">
+                </div>
+                <div class="profile-modal-field profile-modal-field--narrow">
+                  <label class="profile-modal-field-label" for="payBankAccount">Account number</label>
+                  <input type="text" inputmode="numeric" id="payBankAccount" name="accountNumber"
+                         placeholder="Account number" maxlength="17" autocomplete="off">
+                </div>
+              </div>
+              <div class="profile-modal-field">
+                <label class="profile-modal-field-label" for="payBankName">Bank name <span style="color:#8a94a1;font-weight:400">(optional)</span></label>
+                <input type="text" id="payBankName" name="bankName"
+                       placeholder="e.g. Chase" maxlength="64" autocomplete="off">
+              </div>
+              <p class="profile-modal-error" id="payAddBankError" hidden></p>
+              <div class="pay-trust" style="margin-top:4px">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Your account details are encrypted and stored securely with our lender of record.
+              </div>
+              <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">
+                <button type="button" class="btn-login" id="payAddBankCancel">Cancel</button>
+                <button type="submit" class="btn-apply" id="payAddBankSave">Save bank account</button>
               </div>
             </form>
           </div>

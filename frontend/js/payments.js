@@ -277,15 +277,20 @@
     applyMethodSelection();
   }
 
-  // ---------- Bank accounts (pay-from-checking) ----------
-  // Placeholder loader — wired to set an empty list for now so the group
-  // renders its "no bank account on file" row. Plug-and-play once the API
-  // lands.
+  // ---------- Bank accounts (on-file, from Vergent) ----------
+  // Lists the customer's saved bank accounts (GET /api/my-banks → Vergent
+  // GetCustomerBanks). Display-only for now; paying-by-bank (ACH) ships once
+  // the PostBankPayment ReferralId/InstrumentId mapping is confirmed.
   function loadBankAccounts() {
-    state.bankAccounts = [];
-    // TODO: wire to bank-accounts API
-    renderBankAccounts();
-    return Promise.resolve(state.bankAccounts);
+    return api('/api/my-banks').then(function (data) {
+      state.bankAccounts = (data && data.banks) || [];
+      renderBankAccounts();
+      return state.bankAccounts;
+    }).catch(function () {
+      state.bankAccounts = [];
+      renderBankAccounts();
+      return state.bankAccounts;
+    });
   }
 
   // Non-selectable bank-account rows (chevron instead of radio). When there
@@ -318,7 +323,7 @@
       const acctType = b.accountType || b.type || 'Checking';
       const last4 = b.last4 || b.mask || '';
       const bankName = b.bankName || b.institution || b.name || '';
-      const isDefault = (b.isDefault === true) || (idx === 0 && b.isDefault !== false);
+      const isDefault = (b.isPrimary === true) || (b.isDefault === true);
       row.innerHTML =
         '<span class="pay-method-icon" aria-hidden="true">' + bankSvg + '</span>' +
         '<div class="pay-method-body">' +
@@ -387,6 +392,107 @@
   function clearAddCardError() {
     const el = qs('#payAddCardError');
     if (el) { el.hidden = true; el.textContent = ''; }
+  }
+
+  // ---------- Add-bank modal ----------
+  function openAddBank() {
+    clearAddBankError();
+    ['#payBankRouting', '#payBankAccount', '#payBankName'].forEach(function (s) {
+      const el = qs(s); if (el) el.value = '';
+    });
+    const typeSel = qs('#payBankType'); if (typeSel) typeSel.value = 'checking';
+    const modal = qs('#payAddBankModal');
+    if (!modal) return;
+    modal.hidden = false;
+    requestAnimationFrame(function () { modal.classList.add('is-open'); });
+    const first = qs('#payBankRouting');
+    if (first) { try { first.focus(); } catch (e) { /* ignore */ } }
+  }
+  function closeAddBank() {
+    const modal = qs('#payAddBankModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    setTimeout(function () { modal.hidden = true; }, 180);
+  }
+  function showAddBankError(msg) {
+    const el = qs('#payAddBankError');
+    if (!el) return;
+    el.textContent = msg || "We couldn't save that bank account. Please try again.";
+    el.hidden = false;
+  }
+  function clearAddBankError() {
+    const el = qs('#payAddBankError');
+    if (el) { el.hidden = true; el.textContent = ''; }
+  }
+  function readNewBank() {
+    return {
+      routingNumber: String((qs('#payBankRouting') || {}).value || '').replace(/\D/g, ''),
+      accountNumber: String((qs('#payBankAccount') || {}).value || '').replace(/\D/g, ''),
+      accountType:   String((qs('#payBankType') || {}).value || 'checking'),
+      bankName:      String((qs('#payBankName') || {}).value || '').trim(),
+    };
+  }
+  function validateNewBank(b) {
+    if (!/^\d{9}$/.test(b.routingNumber)) return 'Please enter the 9-digit routing number.';
+    if (!b.accountNumber || b.accountNumber.length < 4 || b.accountNumber.length > 17) {
+      return 'Please enter a valid account number.';
+    }
+    return null;
+  }
+  function saveBank(e) {
+    if (e) e.preventDefault();
+    if (state.submitting) return;
+    clearAddBankError();
+
+    const bank = readNewBank();
+    const err = validateNewBank(bank);
+    if (err) { showAddBankError(err); return; }
+
+    const btn = qs('#payAddBankSave');
+    state.submitting = true;
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+    api('/api/my-banks', {
+      method: 'POST',
+      body: {
+        routingNumber: bank.routingNumber,
+        accountNumber: bank.accountNumber,
+        accountType:   bank.accountType,
+        bankName:      bank.bankName,
+      },
+    })
+      .then(function () {
+        // Don't keep the account number in the DOM after a successful save.
+        ['#payBankRouting', '#payBankAccount', '#payBankName'].forEach(function (s) {
+          const el = qs(s); if (el) el.value = '';
+        });
+        return loadBankAccounts().then(function () {
+          closeAddBank();
+          showBankAdded(bank.accountNumber.slice(-4));
+        });
+      })
+      .catch(function (e2) {
+        const code = (e2 && e2.body && (e2.body.error || e2.body.code)) || '';
+        const msgs = {
+          invalid_routing_number: 'That routing number doesn’t look right — please double-check the 9 digits.',
+          invalid_account_number: 'Please enter a valid account number.',
+          vergent_save_failed:    'We couldn’t save that bank account right now. Please try again in a moment.',
+        };
+        showAddBankError(msgs[code] || 'We couldn’t save that bank account. Please try again.');
+      })
+      .then(function () {
+        state.submitting = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Save bank account'; }
+      });
+  }
+  function showBankAdded(last4) {
+    const el = qs('#payCardAddedNote');
+    if (!el) return;
+    el.textContent = last4
+      ? ('Bank account ending ' + last4 + ' added to your profile.')
+      : 'Bank account added to your profile.';
+    el.hidden = false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   // ---------- Input formatting ----------
@@ -701,10 +807,27 @@
     if (addCancel) addCancel.addEventListener('click', closeAddCard);
     const addBackdrop = qs('#payAddCardBackdrop');
     if (addBackdrop) addBackdrop.addEventListener('click', closeAddCard);
+
+    // Add-bank modal wiring.
+    const addBankBtn = qs('#payAddBankBtn');
+    if (addBankBtn) addBankBtn.addEventListener('click', openAddBank);
+    const addBankForm = qs('#payAddBankForm');
+    if (addBankForm) addBankForm.addEventListener('submit', saveBank);
+    const addBankCancel = qs('#payAddBankCancel');
+    if (addBankCancel) addBankCancel.addEventListener('click', closeAddBank);
+    const addBankBackdrop = qs('#payAddBankBackdrop');
+    if (addBankBackdrop) addBankBackdrop.addEventListener('click', closeAddBank);
+    const bankRouting = qs('#payBankRouting');
+    if (bankRouting) bankRouting.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 9); });
+    const bankAccount = qs('#payBankAccount');
+    if (bankAccount) bankAccount.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 17); });
+
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') {
-        const modal = qs('#payAddCardModal');
-        if (modal && !modal.hidden) closeAddCard();
+        const cardModal = qs('#payAddCardModal');
+        if (cardModal && !cardModal.hidden) closeAddCard();
+        const bankModal = qs('#payAddBankModal');
+        if (bankModal && !bankModal.hidden) closeAddBank();
       }
     });
 

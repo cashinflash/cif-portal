@@ -1136,31 +1136,36 @@ def _extract_last4(candidates) -> str:
 
 
 def _shape_bank_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize Vergent v1 customer_bank → UI shape.
+    """Normalize a Vergent v1 customer_bank record → UI shape.
 
-    Field names are inconsistent across Vergent's v1 surfaces so we
-    check every variant we've seen before giving up.
+    Real field names (confirmed via the GetCustomerBanks swagger):
+      id, Name, RoutingNum, AccountNum, TypeId, TypeName, IsPrimary,
+      DDAPRN, IsDDA, Status. Older snake_case guesses are still tolerated
+      as a fallback for safety.
     """
     last4 = _extract_last4([
-        raw.get("account_number"), raw.get("AccountNumber"),
-        raw.get("account_number_masked"), raw.get("AccountNumberMasked"),
-        raw.get("MaskedAccountNumber"), raw.get("AcctLast4"),
-        raw.get("last4"), raw.get("Last4"),
-        raw.get("AccountNum"),
+        raw.get("AccountNum"), raw.get("account_number"),
+        raw.get("AccountNumber"), raw.get("MaskedAccountNumber"),
+        raw.get("AcctLast4"), raw.get("last4"), raw.get("Last4"),
     ])
-    type_id = raw.get("account_type_id") or raw.get("AccountTypeId") or raw.get("type_id") or 0
-    try:
-        type_id_int = int(type_id) if type_id not in (None, "") else 0
-    except (TypeError, ValueError):
-        type_id_int = 0
-    type_name = {1: "Checking", 2: "Savings"}.get(type_id_int, "Checking")
+    # Prefer Vergent's own TypeName ("Checking"/"Savings"); fall back to
+    # mapping the numeric TypeId (1=Checking, 2=Savings).
+    type_name = (raw.get("TypeName") or raw.get("type_name") or "").strip()
+    if not type_name:
+        type_id = (raw.get("TypeId") or raw.get("account_type_id")
+                   or raw.get("AccountTypeId") or raw.get("type_id") or 0)
+        try:
+            type_id_int = int(type_id) if type_id not in (None, "") else 0
+        except (TypeError, ValueError):
+            type_id_int = 0
+        type_name = {1: "Checking", 2: "Savings"}.get(type_id_int, "Checking")
     return {
         "id": raw.get("id") or raw.get("Id") or raw.get("bank_id"),
-        "name": (raw.get("bank_name") or raw.get("name") or raw.get("Name")
+        "name": (raw.get("Name") or raw.get("bank_name") or raw.get("name")
                  or raw.get("BankName") or "Bank"),
         "last4": last4,
         "accountType": type_name,
-        "isPrimary": bool(raw.get("is_primary") or raw.get("IsPrimary")),
+        "isPrimary": bool(raw.get("IsPrimary") or raw.get("is_primary")),
     }
 
 
@@ -1232,6 +1237,91 @@ def _fallback_bank_from_loan(cid: str) -> Optional[Dict[str, Any]]:
         }
     return None
 
+
+def _aba_routing_ok(routing: str) -> bool:
+    """Basic ABA routing-number sanity check: 9 digits + checksum."""
+    if len(routing) != 9 or not routing.isdigit():
+        return False
+    d = [int(c) for c in routing]
+    checksum = (3 * (d[0] + d[3] + d[6])
+                + 7 * (d[1] + d[4] + d[7])
+                + 1 * (d[2] + d[5] + d[8]))
+    return checksum % 10 == 0
+
+
+def post_bank(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-banks — save a bank account to the customer's Vergent
+    profile via v1 PostCustomerBank.
+
+    Body: {routingNumber, accountNumber, accountType: 'checking'|'savings',
+           bankName?}. The customer id comes from the JWT, never the body.
+    Account/routing numbers are never logged (last 4 only).
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_json"})
+    if not isinstance(body, dict):
+        return _json_response(400, {"error": "invalid_body"})
+
+    routing = _strip_digits(body.get("routingNumber"))
+    account = _strip_digits(body.get("accountNumber"))
+    acct_type = (body.get("accountType") or "checking").strip().lower()
+    bank_name = (body.get("bankName") or "").strip()[:64]
+
+    if not _aba_routing_ok(routing):
+        return _json_response(400, {"error": "invalid_routing_number"})
+    if len(account) < 4 or len(account) > 17:
+        return _json_response(400, {"error": "invalid_account_number"})
+    type_id = 2 if acct_type in ("savings", "saving") else 1
+
+    try:
+        cid_int = int(cid)
+    except (TypeError, ValueError):
+        cid_int = 0
+
+    # Conservative body: add a payment bank WITHOUT disturbing the
+    # customer's direct-deposit / primary disbursement account.
+    bank_body = {
+        "CompanyId":   VERGENT_COMPANY_ID,
+        "CustomerId":  cid_int,
+        "Name":        bank_name or ("Savings account" if type_id == 2 else "Checking account"),
+        "RoutingNum":  routing,
+        "AccountNum":  account,
+        "TypeId":      type_id,
+        "IsPrimary":   False,
+        "IsDirectDep": False,
+    }
+
+    log.info("save-bank POST PostCustomerBank cid=%s type=%s routing=***%s acct=***%s",
+             cid, type_id, routing[-4:], account[-4:])
+    status, parsed, raw = _v1_request("POST", "/V1/PostCustomerBank", body=bank_body)
+    log.info("save-bank response status=%s body_head=%s", status, (raw or "")[:300])
+
+    # PostCustomerBank echoes the saved bank with an Errors array
+    # (empty on success).
+    errors = []
+    if isinstance(parsed, dict):
+        errors = parsed.get("Errors") or []
+    elif isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+        errors = parsed[0].get("Errors") or []
+
+    if status in (200, 201) and not errors:
+        shaped = _shape_bank_v1(parsed if isinstance(parsed, dict) else bank_body)
+        if not shaped.get("last4"):
+            shaped["last4"] = account[-4:]
+        if not shaped.get("accountType"):
+            shaped["accountType"] = "Savings" if type_id == 2 else "Checking"
+        return _json_response(200, {"ok": True, "bank": shaped})
+
+    detail = str(errors[0])[:200] if (errors and isinstance(errors, list)) else ""
+    log.warning("save-bank failed cid=%s status=%s detail=%s", cid, status, detail)
+    return _json_response(502, {"error": "vergent_save_failed", "detail": detail})
 
 
 def post_payment(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -2576,6 +2666,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return post_card(event)
         if path.endswith("/my-banks") and method == "GET":
             return get_my_banks(event)
+        if path.endswith("/my-banks") and method == "POST":
+            return post_bank(event)
         if path.endswith("/my-payment/loan-summary") and method == "GET":
             return get_loan_summary(event)
         if path.endswith("/my-payment/charge") and method == "POST":
