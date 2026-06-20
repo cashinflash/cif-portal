@@ -4080,9 +4080,21 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
    green bg + padding (via .loan-card--art) so the image IS the card. Scope
    display to :not([hidden]) so the hidden attribute still hides it. */
 .dash-loan-empty:not([hidden]) { display: block; }
-.loan-card.loan-card--art { background: none; padding: 0; box-shadow: none; border-radius: 0; overflow: visible; height: auto; align-self: start; }
+.loan-card.loan-card--art { background: none; padding: 0; box-shadow: none; border-radius: 0; overflow: visible; }
 .dash-hero-link { display: block; }
 .dash-hero-full { display: block; width: 100%; height: auto; filter: drop-shadow(0 12px 26px rgba(16,40,28,.15)); }
+/* Desktop: pin the home hero to the image's aspect ratio so it has a definite
+   height; the "Need cash fast?" card then stretches to that same height
+   (equal-height row). Image fills via cover — aspect matches, so no crop. */
+@media (min-width: 900px) {
+  .home-loan.loan-card--art { aspect-ratio: 1000 / 610; height: auto; border-radius: 18px; overflow: hidden; box-shadow: 0 12px 28px rgba(16,40,28,.14); }
+  .home-loan .dash-loan-empty:not([hidden]), .home-loan .dash-hero-link { height: 100%; }
+  .home-loan .dash-hero-full { width: 100%; height: 100%; object-fit: cover; object-position: center; filter: none; }
+}
+/* Mobile: the hero spans the full content width, identical to the CTAs below. */
+@media (max-width: 899px) {
+  #activeLoanCard.loan-card--art, #activeLoanCard .dash-hero-link, #activeLoanCard .dash-hero-full { width: 100%; }
+}
 
 /* Loans "You're all caught up!" hero = the FULL illustration card (everything
    baked into the image); the .loan-card wrapper drops bg/padding via
