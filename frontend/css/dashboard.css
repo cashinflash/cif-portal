@@ -4094,6 +4094,14 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 /* Mobile: the hero spans the full content width, identical to the CTAs below. */
 @media (max-width: 899px) {
   #activeLoanCard.loan-card--art, #activeLoanCard .dash-hero-link, #activeLoanCard .dash-hero-full { width: 100%; }
+  /* No active loan: the hero already carries the apply CTA + the benefits, so
+     drop the redundant Make-a-Payment / Apply buttons + duplicate trust badges,
+     and lift the "Need cash" promo up directly under the hero — mirroring the
+     desktop layout (hero -> need-cash card -> recent activity -> tiles). */
+  html:not(.cif-has-active-loan) .home-mobile > .app-cta-primary,
+  html:not(.cif-has-active-loan) .home-mobile > .app-cta-outline,
+  html:not(.cif-has-active-loan) .home-mobile > .app-trust { display: none; }
+  html:not(.cif-has-active-loan) .home-mobile > .app-promo { order: -1; }
 }
 
 /* Loans "You're all caught up!" hero = the FULL illustration card (everything
