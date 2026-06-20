@@ -124,6 +124,11 @@
 .auth-btn--primary:hover:not(:disabled) { background: #128a3e; }
 .auth-btn--ghost { background: #fff; color: #16a34a; border-color: #8fd3ab; }
 .auth-btn--ghost:hover { background: #f3faf6; border-color: #16a34a; }
+/* Anchor-tag buttons: `.auth-body a { color: inherit }` (0,1,1) otherwise
+   beats `.auth-btn--*` (0,1,0) and renders the label dark (e.g. the modal's
+   "Apply Now"). Restore the intended button text colors for <a> buttons. */
+.auth-body a.auth-btn--primary { color: #fff; }
+.auth-body a.auth-btn--ghost { color: #16a34a; }
 
 /* ---------- Secure strip ---------- */
 .auth-secure { margin: 22px 0 0; text-align: center; }

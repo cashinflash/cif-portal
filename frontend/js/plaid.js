@@ -19,7 +19,7 @@
   'use strict';
 
   var TOKEN_KEY = 'cif_id_token';
-  var LOGIN_URL = '/start.html';
+  var LOGIN_URL = '/login.html';
 
   function $(sel, root) { return (root || document).querySelector(sel); }
   function token() { return sessionStorage.getItem(TOKEN_KEY); }

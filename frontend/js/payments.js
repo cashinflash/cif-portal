@@ -14,7 +14,7 @@
   'use strict';
 
   const TOKEN_KEY = 'cif_id_token';
-  const LOGIN_URL = '/start.html';
+  const LOGIN_URL = '/login.html';
   const SUCCESS_KEY = 'cif_payment_success';
 
   function qs(sel, root) { return (root || document).querySelector(sel); }

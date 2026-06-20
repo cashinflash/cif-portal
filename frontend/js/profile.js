@@ -8,7 +8,7 @@
 
   var API_BASE = '/api';
   var TOKEN_KEY = 'cif_id_token';
-  var LOGIN_URL = '/start.html';
+  var LOGIN_URL = '/login.html';
   var PROFILE_ENDPOINT = API_BASE + '/my-profile';
   var EMAIL_ENDPOINT = API_BASE + '/my-profile/email';
   var EMAIL_START_ENDPOINT = API_BASE + '/my-profile/email/start-verify';

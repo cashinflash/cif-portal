@@ -11,7 +11,7 @@
   var ACTIVE_ENDPOINT = API_BASE + '/my-loans/active';
   var DOCS_ENDPOINT = API_BASE + '/my-loans/documents';
   var CARDS_ENDPOINT = API_BASE + '/my-cards';
-  var LOGIN_URL = '/start.html';
+  var LOGIN_URL = '/login.html';
 
   // How many past loans to show before the "Show more" button, and how
   // many more to reveal per click. Customers with 40+ loans should never

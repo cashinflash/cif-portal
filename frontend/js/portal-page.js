@@ -9,7 +9,7 @@
   'use strict';
 
   var TOKEN_KEY = 'cif_id_token';
-  var LOGIN_URL = '/start.html';
+  var LOGIN_URL = '/login.html';
   var token = sessionStorage.getItem(TOKEN_KEY);
 
   function decodeJwt(t) {

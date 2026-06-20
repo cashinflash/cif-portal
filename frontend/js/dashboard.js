@@ -9,7 +9,7 @@
   const API_BASE = '/api';
   const TOKEN_KEY = 'cif_id_token';
   const ACTIVE_ENDPOINT = API_BASE + '/my-loans/active';
-  const LOGIN_URL = '/start.html';
+  const LOGIN_URL = '/login.html';
 
   // ---------- Helpers ----------
   function qs(sel, root) { return (root || document).querySelector(sel); }
@@ -865,7 +865,7 @@
       sessionStorage.removeItem(TOKEN_KEY);
       sessionStorage.removeItem('cif_access_token');
       sessionStorage.removeItem('cif_refresh_token');
-      window.location.replace(LOGIN_URL + '?reason=session_expired');
+      window.location.replace(LOGIN_URL + '?reason=signed_out');
     }
     const btn = qs('#signOutBtn');
     const btnMobile = qs('#signOutBtnMobile');

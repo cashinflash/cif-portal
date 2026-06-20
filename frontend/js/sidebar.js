@@ -7,7 +7,7 @@
   'use strict';
 
   var TOKEN_KEY = 'cif_id_token';
-  var LOGIN_URL = '/start.html';
+  var LOGIN_URL = '/login.html';
 
   function decodeJwt(token) {
     try {
@@ -26,7 +26,7 @@
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem('cif_access_token');
     sessionStorage.removeItem('cif_refresh_token');
-    window.location.replace(LOGIN_URL);
+    window.location.replace(LOGIN_URL + '?reason=signed_out');
   }
 
   function init() {

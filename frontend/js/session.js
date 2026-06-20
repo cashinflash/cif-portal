@@ -21,7 +21,7 @@
   var TOKEN_KEY = 'cif_id_token';
   var ACCESS_KEY = 'cif_access_token';
   var REFRESH_KEY = 'cif_refresh_token';
-  var LOGIN_URL = '/start.html';
+  var LOGIN_URL = '/login.html';
   var COGNITO_REGION = 'us-east-1';
   var COGNITO_CLIENT_ID = '1mddi61n19hftaldt9t3r622b';
 

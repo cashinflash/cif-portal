@@ -123,6 +123,8 @@
           <h1 class="auth-welcome">Welcome back</h1>
           <p class="auth-sub">Log in to manage payments, loans, and your account.</p>
 
+          <div id="loginReasonBanner" class="auth-reason" hidden role="status" aria-live="polite"></div>
+
           <div class="auth-card">
             <div class="auth-fields">
               <!-- Step 1: credentials -->
@@ -235,6 +237,22 @@
 <script src="/js/site-header.js"></script>
 <script>
 (function(){ var y = document.getElementById('footerYear'); if (y) y.textContent = String(new Date().getFullYear()); })();
+
+// Surface why we landed here after a sign-out / forced logout (session.js and
+// the page guards redirect to /login.html?reason=...). Mirrors start.html.
+(function () {
+  var reason = new URLSearchParams(window.location.search).get('reason');
+  if (!reason) return;
+  var banner = document.getElementById('loginReasonBanner');
+  if (!banner) return;
+  var msg = '';
+  if (reason === 'session_expired') {
+    msg = 'Your session timed out for security. Please sign in again.';
+  } else if (reason === 'signed_out') {
+    msg = "You're signed out. Sign in any time to manage your loan.";
+  }
+  if (msg) { banner.textContent = msg; banner.hidden = false; }
+})();
 
 // Password show/hide toggles (any .auth-eye[data-eye]).
 document.querySelectorAll('.auth-eye[data-eye]').forEach(function (btn) {
