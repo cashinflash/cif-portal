@@ -443,17 +443,7 @@
         var _bd = qs('.dash-loan-body', card); if (_bd) _bd.hidden = true;
         var _emp = qs('.dash-loan-empty', card); if (_emp) _emp.hidden = false;
       }
-      // First-time (never borrowed) vs returning (paid off): tailor the empty
-      // hero copy AND the "Need a loan?" / "Need another loan?" side card.
-      var firstTime = !allLoans.length;
-      var emptyTitle = qs('#dashEmptyTitle');
-      var emptySub = qs('#dashEmptySub');
-      if (emptyTitle) emptyTitle.textContent = firstTime ? 'Welcome to Cash in Flash' : "You're all paid up";
-      if (emptySub) emptySub.textContent = firstTime
-        ? 'Get the cash you need — same-day funding, and applying only takes a few minutes.'
-        : 'Nice work — your balance is clear. Need cash again? Applying only takes a few minutes.';
-      var needLoanHeading = qs('.home-needloan-body strong');
-      if (needLoanHeading) needLoanHeading.textContent = firstTime ? 'Need a loan?' : 'Need another loan?';
+      // No active loan → show the static "Cash when you need it" hero (markup).
       if (hero) hero.hidden = false;
     }
 

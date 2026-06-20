@@ -159,9 +159,18 @@
           <p class="loan-card-note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>Make your payment on time to keep your loan in good standing.</p>
         </div>
         <div class="loans-active-empty" hidden>
-          <p class="loan-card-eyebrow">No active loan</p>
-          <p class="loan-card-empty-sub">You're all paid up. Request a new loan anytime.</p>
-          <a href="/request-loan.html" class="pay-empty-cta" data-action="new-loan">Request a loan</a>
+          <picture class="loans-caughtup-art">
+            <source media="(min-width: 900px)" srcset="/images/loans-caughtup.png">
+            <img src="/images/loans-caughtup-mobile.png" alt="" loading="lazy">
+          </picture>
+          <div class="loans-caughtup-copy">
+            <h2 class="loans-caughtup-title">You're all caught up!</h2>
+            <p class="loans-caughtup-sub">You don't have an active loan right now. Request a new loan anytime you need fast cash.</p>
+            <a href="/request-loan.html" class="loans-caughtup-cta" data-action="new-loan">
+              Request a Loan
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            </a>
+          </div>
         </div>
       </section>
 
@@ -208,11 +217,11 @@
       </section>
 
       <!-- ============ NEED ANOTHER LOAN (responsive banner) ============ -->
-      <a class="app-loan-banner loans-banner" href="/request-loan.html" data-action="new-loan" aria-label="Need another loan? Request up to $255">
+      <a class="app-loan-banner loans-banner" href="/request-loan.html" data-action="new-loan" aria-label="Need cash again? Request up to $255">
         <img class="app-loan-banner-art" src="/images/needloan-cash.png" alt="" width="72" height="72" loading="lazy">
         <div class="app-loan-banner-text">
-          <p class="app-loan-banner-title">Need another loan?</p>
-          <p class="app-loan-banner-sub">Request up to $255 and get funds fast. It's quick, easy, and secure.</p>
+          <p class="app-loan-banner-title">Need cash again?</p>
+          <p class="app-loan-banner-sub">Request up to $255 and get funds fast.</p>
         </div>
         <span class="loans-banner-cta" aria-hidden="true">Request another loan
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
