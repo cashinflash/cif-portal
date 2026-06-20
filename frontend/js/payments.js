@@ -45,6 +45,17 @@
     return;
   }
 
+  function daysPastDue(loan) {
+    if (!loan || !loan.nextDueDate) return 0;
+    var due = new Date(loan.nextDueDate);
+    if (isNaN(due.getTime())) return 0;
+    var t = new Date();
+    var a = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+    var b = Date.UTC(t.getFullYear(), t.getMonth(), t.getDate());
+    var d = Math.round((b - a) / 86400000);
+    return d > 0 ? d : 0;
+  }
+
   function api(path, opts) {
     opts = opts || {};
     const headers = Object.assign({
@@ -132,6 +143,14 @@
         pill.textContent = isPast ? (loan.status || 'Past due') : 'In good standing';
         pill.classList.toggle('dash-pill--past-due', isPast);
       }
+      // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
+      // matching Home — independent of the pill so it works even if absent.
+      var _st = (loan.status || '').toLowerCase();
+      var _past = _st.indexOf('past') !== -1 || _st.indexOf('late') !== -1 || _st.indexOf('delinq') !== -1;
+      var _dpd = _past ? daysPastDue(loan) : 0;
+      var _soft = _past && _dpd >= 1 && _dpd <= 4;
+      card.classList.toggle('is-pastdue-soft', _soft);
+      card.classList.toggle('is-pastdue', _past && !_soft);
       // Payment breakdown (defensive — every element is optional). Total is
       // the balance; principal/fee are shown only when the API surfaces them,
       // otherwise they stay as an em-dash placeholder (do NOT overwrite with
@@ -206,6 +225,25 @@
     }
   }
 
+  // Card-network mark for the method circle. Recognizable, trademark-light
+  // marks on a white chip; falls back to a generic card glyph.
+  function brandIconHtml(brand) {
+    var b = (brand || '').toLowerCase();
+    if (b.indexOf('master') !== -1) {
+      return '<span class="pay-method-icon pay-brand-icon" aria-hidden="true"><svg width="28" height="18" viewBox="0 0 32 20"><circle cx="13" cy="10" r="8" fill="#EB001B"/><circle cx="19" cy="10" r="8" fill="#F79E1B" fill-opacity=".9"/></svg></span>';
+    }
+    if (b.indexOf('visa') !== -1) {
+      return '<span class="pay-method-icon pay-brand-icon" aria-hidden="true"><span style="color:#1A1F71;font-weight:800;font-style:italic;font-size:.66rem;letter-spacing:.3px">VISA</span></span>';
+    }
+    if (b.indexOf('amex') !== -1 || b.indexOf('american') !== -1) {
+      return '<span class="pay-method-icon pay-brand-icon" style="background:#1F72CD;border-color:#1F72CD" aria-hidden="true"><span style="color:#fff;font-weight:800;font-size:.5rem;letter-spacing:.3px">AMEX</span></span>';
+    }
+    if (b.indexOf('discover') !== -1) {
+      return '<span class="pay-method-icon pay-brand-icon" aria-hidden="true"><span style="color:#E8850D;font-weight:800;font-size:.52rem;letter-spacing:.2px">DISC</span></span>';
+    }
+    return '<span class="pay-method-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>';
+  }
+
   function renderMethods() {
     const list = qs('#paySavedMethods');
     const noCards = qs('#payNoCardsHint');
@@ -237,7 +275,7 @@
       label.innerHTML =
         '<input type="radio" name="payMethod" value="' + escapeHtml(m.methodId) + '"' +
           (m.methodId === state.selectedMethodId ? ' checked' : '') + '>' +
-        '<span class="pay-method-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>' +
+        brandIconHtml(m.brand) +
         '<div class="pay-method-body">' +
           '<div class="pay-method-brand">' + escapeHtml(m.brand) + ' •••• ' + escapeHtml(m.last4) + '</div>' +
           '<div class="pay-method-meta">Expires ' +
@@ -293,6 +331,18 @@
     });
   }
 
+  // Bank "logo": the institution's initial in a stable color-from-name circle.
+  // (A real favicon would need the bank's domain, which the routing directory
+  // doesn't give us — a monogram always renders and looks intentional.)
+  function bankMonoHtml(name) {
+    var n = (name || 'Bank').trim();
+    var letter = (n.charAt(0) || 'B').toUpperCase();
+    var palette = ['#1a4d6b', '#0E8741', '#3b5bdb', '#7048e8', '#c2255c', '#e8590c', '#1098ad', '#2b8a3e'];
+    var h = 0;
+    for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+    return '<span class="pay-method-icon pay-bank-mono" style="background:' + palette[h % palette.length] + '" aria-hidden="true">' + escapeHtml(letter) + '</span>';
+  }
+
   // Non-selectable bank-account rows (chevron instead of radio). When there
   // are no accounts we show ONE muted placeholder row — never a fake account.
   function renderBankAccounts() {
@@ -325,7 +375,7 @@
       const bankName = b.bankName || b.institution || b.name || '';
       const isDefault = (b.isPrimary === true) || (b.isDefault === true);
       row.innerHTML =
-        '<span class="pay-method-icon" aria-hidden="true">' + bankSvg + '</span>' +
+        bankMonoHtml(bankName) +
         '<div class="pay-method-body">' +
           '<div class="pay-method-brand">' + escapeHtml(acctType) +
             (last4 ? ' •••• ' + escapeHtml(last4) : '') + '</div>' +

@@ -211,6 +211,24 @@
       pill.className = 'loan-card-pill ' + statusPillClass(loan);
       pill.textContent = statusPillText(loan);
     }
+    // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching Home.
+    var isPastDue = statusPillClass(loan) === 'dash-pill--past-due';
+    var dpd = isPastDue ? daysPastDue(loan) : 0;
+    var soft = isPastDue && dpd >= 1 && dpd <= 4;
+    card.classList.toggle('is-pastdue-soft', soft);
+    card.classList.toggle('is-pastdue', isPastDue && !soft);
+  }
+
+  // Whole days a loan is past its due date (0 if not past due / unknown).
+  function daysPastDue(loan) {
+    if (!loan || !loan.nextDueDate) return 0;
+    var due = new Date(loan.nextDueDate);
+    if (isNaN(due.getTime())) return 0;
+    var t = new Date();
+    var a = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+    var b = Date.UTC(t.getFullYear(), t.getMonth(), t.getDate());
+    var d = Math.round((b - a) / 86400000);
+    return d > 0 ? d : 0;
   }
 
   function renderPastLoans(past) {
