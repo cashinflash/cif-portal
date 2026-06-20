@@ -4095,7 +4095,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 @media (max-width: 899px) {
   #activeLoanCard.loan-card--art { width: 100%; margin-left: 0; margin-right: 0; }
   #activeLoanCard .dash-loan-empty:not([hidden]), #activeLoanCard .dash-hero-link, #activeLoanCard .dash-hero-full { display: block; width: 100%; max-width: 100%; }
-  #activeLoanCard .dash-hero-full { filter: drop-shadow(0 6px 16px rgba(16,40,28,.12)); }
+  /* No shadow halo: the green card reads flush + the same width as the cards,
+     and it removes the dead space the shadow was casting underneath. */
+  #activeLoanCard .dash-hero-full { filter: none; }
   /* No active loan: the hero already carries the apply CTA + the benefits, so
      drop the redundant Make-a-Payment / Apply buttons + duplicate trust badges,
      and lift the "Need cash" promo up directly under the hero — mirroring the
@@ -4103,7 +4105,10 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   html:not(.cif-has-active-loan) .home-mobile > .app-cta-primary,
   html:not(.cif-has-active-loan) .home-mobile > .app-cta-outline,
   html:not(.cif-has-active-loan) .home-mobile > .app-trust { display: none; }
-  html:not(.cif-has-active-loan) .home-mobile > .app-promo { order: -1; }
+  /* Promo sits snug right under the hero (kill its top margin so it's tight). */
+  html:not(.cif-has-active-loan) .home-mobile > .app-promo { order: -1; margin-top: 0; }
+  /* Bigger cash/coin icon on the promo (text size unchanged). */
+  .app-promo-art { width: 88px; height: 88px; }
 }
 
 /* Loans "You're all caught up!" hero = the FULL illustration card (everything
