@@ -140,16 +140,46 @@
   }
 
   // ── 3. Banner ─────────────────────────────────────────
+  // Inject layout-compensation CSS once. The banner is position:fixed so it
+  // is taken OUT of normal flow — critical because the redesigned portal makes
+  // <body class="app-page"> a 2-column CSS grid (252px sidebar + content) on
+  // desktop. A normal child (the old position:sticky banner) became a grid
+  // item, got squeezed into the 252px sidebar column, and shoved the real
+  // sidebar + content out of place. Fixed = no grid cell; everything else is
+  // pushed down by the banner's measured height (--cif-imp-h).
+  function injectImpStyle() {
+    if (document.getElementById('cif-imp-style')) return;
+    var st = document.createElement('style');
+    st.id = 'cif-imp-style';
+    st.textContent = [
+      '#cif-impersonation-banner{position:fixed;top:0;left:0;right:0;width:100%;}',
+      'body.cif-impersonating{padding-top:var(--cif-imp-h,44px);}',
+      'body.cif-impersonating .app-topbar{top:var(--cif-imp-h,44px);}',
+      '@media (min-width:900px){body.cif-impersonating .app-sidebar{' +
+        'top:var(--cif-imp-h,44px);height:calc(100vh - var(--cif-imp-h,44px));}}',
+      // Best-effort: dim write actions so the operator doesn't trigger a
+      // confusing failure. The customer Lambdas ALSO 403 writes server-side
+      // while impersonated, so this is purely cosmetic defense-in-depth.
+      'body.cif-impersonating form button[type="submit"]:not([data-allow-impersonation]),' +
+      'body.cif-impersonating .btn-primary:not([data-allow-impersonation]),' +
+      'body.cif-impersonating .btn-danger:not([data-allow-impersonation]){' +
+        'opacity:.4 !important;pointer-events:none !important;cursor:not-allowed !important;}',
+    ].join('');
+    document.head.appendChild(st);
+  }
+
   function renderBanner() {
     var info = getInfo();
     if (!info) return;
     if (document.getElementById('cif-impersonation-banner')) return;
     if (!document.body) return;
 
+    injectImpStyle();
+
     var bar = document.createElement('div');
     bar.id = 'cif-impersonation-banner';
     bar.style.cssText = [
-      'position:sticky', 'top:0', 'z-index:99999',
+      'z-index:99999',
       'background:#5a0d0d', 'color:#fff',
       'font-family:inherit', 'font-size:13px', 'font-weight:600',
       'padding:10px 16px',
@@ -173,19 +203,19 @@
       'font-family:inherit">End now</button>';
 
     document.body.insertBefore(bar, document.body.firstChild);
+    document.body.classList.add('cif-impersonating');
+
     var endBtn = document.getElementById('cif-imp-end');
     if (endBtn) endBtn.addEventListener('click', endImpersonation);
 
-    // Hide write controls — best-effort UX. The customer
-    // Lambdas also 403 writes server-side regardless.
-    var style = document.createElement('style');
-    style.textContent =
-      '#cif-impersonation-banner ~ * form button[type="submit"]:not([data-allow-impersonation]),' +
-      '#cif-impersonation-banner ~ * .btn-primary:not([data-allow-impersonation]),' +
-      '#cif-impersonation-banner ~ * .btn-danger:not([data-allow-impersonation]) {' +
-      '  opacity:.35 !important; pointer-events:none !important; cursor:not-allowed !important;' +
-      '}';
-    document.head.appendChild(style);
+    // Expose the banner's real height as a CSS var so the page offset matches
+    // exactly — the banner wraps to two lines on narrow phones.
+    function syncHeight() {
+      var h = bar.offsetHeight || 44;
+      document.body.style.setProperty('--cif-imp-h', h + 'px');
+    }
+    syncHeight();
+    window.addEventListener('resize', syncHeight);
 
     function tick() {
       if (!info.exp) return;
