@@ -4080,9 +4080,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
    green bg + padding (via .loan-card--art) so the image IS the card. Scope
    display to :not([hidden]) so the hidden attribute still hides it. */
 .dash-loan-empty:not([hidden]) { display: block; }
-.loan-card.loan-card--art { background: none; padding: 0; height: auto; align-self: start; }
+.loan-card.loan-card--art { background: none; padding: 0; box-shadow: none; border-radius: 0; overflow: visible; height: auto; align-self: start; }
 .dash-hero-link { display: block; }
-.dash-hero-full { display: block; width: 100%; height: auto; border-radius: 22px; }
+.dash-hero-full { display: block; width: 100%; height: auto; filter: drop-shadow(0 12px 26px rgba(16,40,28,.15)); }
 
 /* Loans "You're all caught up!" hero = the FULL illustration card (everything
    baked into the image); the .loan-card wrapper drops bg/padding via
@@ -4090,7 +4090,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .loans-active-empty:not([hidden]) { display: block; }
 .loans-hero-link { display: block; }
 .loans-hero-full-pic { display: block; }
-.loans-hero-full { display: block; width: 100%; height: auto; border-radius: 22px; }
+.loans-hero-full { display: block; width: 100%; height: auto; filter: drop-shadow(0 12px 26px rgba(16,40,28,.15)); }
 
 /* Past-due active-loan hero: amber for 1–4 days, red for 5+ days. The whole
    card recolors (text/pill/note already render white-on-color). */
