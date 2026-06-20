@@ -4076,10 +4076,13 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .dash-loan-empty .loan-card-empty-sub { margin: 6px 0 0; color: rgba(255,255,255,.85); font-size: .9rem; }
 
 /* Enriched empty hero (no active loan / first-time) — fills the green card
-   so it never looks bare. White-on-green, centered, with benefit chips + CTA. */
-.dash-loan-empty { display: flex; flex-direction: column; align-items: center; text-align: center; }
+   so it never looks bare. White-on-green, centered, with benefit chips + CTA.
+   IMPORTANT: scope the display to :not([hidden]) so the `hidden` attribute
+   still hides it — a bare `display:flex` overrides [hidden]{display:none} and
+   the empty state leaks into the ACTIVE loan card. */
+.dash-loan-empty:not([hidden]) { display: flex; flex-direction: column; align-items: center; text-align: center; }
 .dash-empty-badge { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.16); color: #fff; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 14px; }
-.dash-empty-title { font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; }
+.dash-empty-title { font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; color: #fff; }
 .dash-loan-empty .dash-empty-sub { max-width: 440px; margin: 6px auto 0; font-size: .95rem; line-height: 1.5; }
 .dash-empty-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 18px 0 4px; }
 .dash-empty-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,.14); color: #fff; font-size: .8rem; font-weight: 600; }
