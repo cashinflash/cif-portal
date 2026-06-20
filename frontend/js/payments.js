@@ -397,10 +397,11 @@
   // ---------- Add-bank modal ----------
   function openAddBank() {
     clearAddBankError();
-    ['#payBankRouting', '#payBankAccount', '#payBankName'].forEach(function (s) {
+    ['#payBankRouting', '#payBankAccount', '#payBankAccountConfirm', '#payBankName'].forEach(function (s) {
       const el = qs(s); if (el) el.value = '';
     });
     const typeSel = qs('#payBankType'); if (typeSel) typeSel.value = 'checking';
+    loadBankDir();  // warm the directory so bank-name autofill is instant
     const modal = qs('#payAddBankModal');
     if (!modal) return;
     modal.hidden = false;
@@ -424,10 +425,39 @@
     const el = qs('#payAddBankError');
     if (el) { el.hidden = true; el.textContent = ''; }
   }
+
+  // Routing-number → bank-name autofill. The FedACH directory
+  // (routing -> bank name) is a static JSON bundled with the frontend;
+  // lazy-load it the first time the modal needs it (same approach as
+  // apply.cashinflash.com, just resolved client-side here).
+  var _bankDir = null, _bankDirPromise = null;
+  function loadBankDir() {
+    if (_bankDir) return Promise.resolve(_bankDir);
+    if (_bankDirPromise) return _bankDirPromise;
+    _bankDirPromise = fetch('/bank_routing_numbers.json', { credentials: 'omit' })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { _bankDir = j || {}; return _bankDir; })
+      .catch(function () { _bankDir = {}; return _bankDir; });
+    return _bankDirPromise;
+  }
+  function lookupBankName() {
+    const routingEl = qs('#payBankRouting');
+    const nameEl = qs('#payBankName');
+    if (!routingEl || !nameEl) return;
+    const rn = (routingEl.value || '').replace(/\D/g, '');
+    if (rn.length !== 9) { nameEl.value = ''; return; }
+    loadBankDir().then(function (dir) {
+      // The routing number may have changed while the directory loaded.
+      if ((routingEl.value || '').replace(/\D/g, '') !== rn) return;
+      nameEl.value = (dir && dir[rn]) ? dir[rn] : '';
+    });
+  }
+
   function readNewBank() {
     return {
       routingNumber: String((qs('#payBankRouting') || {}).value || '').replace(/\D/g, ''),
       accountNumber: String((qs('#payBankAccount') || {}).value || '').replace(/\D/g, ''),
+      accountNumberConfirm: String((qs('#payBankAccountConfirm') || {}).value || '').replace(/\D/g, ''),
       accountType:   String((qs('#payBankType') || {}).value || 'checking'),
       bankName:      String((qs('#payBankName') || {}).value || '').trim(),
     };
@@ -436,6 +466,9 @@
     if (!/^\d{9}$/.test(b.routingNumber)) return 'Please enter the 9-digit routing number.';
     if (!b.accountNumber || b.accountNumber.length < 4 || b.accountNumber.length > 17) {
       return 'Please enter a valid account number.';
+    }
+    if (b.accountNumber !== b.accountNumberConfirm) {
+      return 'Account numbers don’t match. Please re-enter them.';
     }
     return null;
   }
@@ -463,7 +496,7 @@
     })
       .then(function () {
         // Don't keep the account number in the DOM after a successful save.
-        ['#payBankRouting', '#payBankAccount', '#payBankName'].forEach(function (s) {
+        ['#payBankRouting', '#payBankAccount', '#payBankAccountConfirm', '#payBankName'].forEach(function (s) {
           const el = qs(s); if (el) el.value = '';
         });
         return loadBankAccounts().then(function () {
@@ -818,9 +851,11 @@
     const addBankBackdrop = qs('#payAddBankBackdrop');
     if (addBankBackdrop) addBankBackdrop.addEventListener('click', closeAddBank);
     const bankRouting = qs('#payBankRouting');
-    if (bankRouting) bankRouting.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 9); });
+    if (bankRouting) bankRouting.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 9); lookupBankName(); });
     const bankAccount = qs('#payBankAccount');
     if (bankAccount) bankAccount.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 17); });
+    const bankAccountConfirm = qs('#payBankAccountConfirm');
+    if (bankAccountConfirm) bankAccountConfirm.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 17); });
 
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') {

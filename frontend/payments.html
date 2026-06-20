@@ -333,22 +333,26 @@
                   <option value="savings">Savings</option>
                 </select>
               </div>
-              <div class="profile-modal-row">
-                <div class="profile-modal-field profile-modal-field--narrow">
-                  <label class="profile-modal-field-label" for="payBankRouting">Routing number</label>
-                  <input type="text" inputmode="numeric" id="payBankRouting" name="routingNumber"
-                         placeholder="9 digits" maxlength="9" autocomplete="off">
-                </div>
-                <div class="profile-modal-field profile-modal-field--narrow">
-                  <label class="profile-modal-field-label" for="payBankAccount">Account number</label>
-                  <input type="text" inputmode="numeric" id="payBankAccount" name="accountNumber"
-                         placeholder="Account number" maxlength="17" autocomplete="off">
-                </div>
+              <div class="profile-modal-field">
+                <label class="profile-modal-field-label" for="payBankRouting">Routing number</label>
+                <input type="text" inputmode="numeric" id="payBankRouting" name="routingNumber"
+                       placeholder="9-digit routing number" maxlength="9" autocomplete="off">
               </div>
               <div class="profile-modal-field">
-                <label class="profile-modal-field-label" for="payBankName">Bank name <span style="color:#8a94a1;font-weight:400">(optional)</span></label>
-                <input type="text" id="payBankName" name="bankName"
-                       placeholder="e.g. Chase" maxlength="64" autocomplete="off">
+                <label class="profile-modal-field-label" for="payBankAccount">Account number</label>
+                <input type="text" inputmode="numeric" id="payBankAccount" name="accountNumber"
+                       placeholder="Account number" maxlength="17" autocomplete="off">
+              </div>
+              <div class="profile-modal-field">
+                <label class="profile-modal-field-label" for="payBankAccountConfirm">Confirm account number</label>
+                <input type="text" inputmode="numeric" id="payBankAccountConfirm" name="accountNumberConfirm"
+                       placeholder="Re-enter account number" maxlength="17" autocomplete="off">
+              </div>
+              <div class="profile-modal-field">
+                <label class="profile-modal-field-label" for="payBankName">Bank name</label>
+                <input type="text" id="payBankName" name="bankName" readonly
+                       placeholder="Auto-fills from routing number" maxlength="64" autocomplete="off"
+                       style="background:#f3f4f6;color:#475467;cursor:not-allowed">
               </div>
               <p class="profile-modal-error" id="payAddBankError" hidden></p>
               <div class="pay-trust" style="margin-top:4px">
