@@ -4135,9 +4135,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
     linear-gradient(140deg, #2FBF53 0%, #1DA84B 52%, #0F9242 100%);
 }
 .loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
-.paidup-hero { display: flex; align-items: center; gap: 22px; padding: 26px 30px; }
+.paidup-hero { display: flex; align-items: center; gap: 20px; padding: 26px 30px; }
 .paidup-illus { flex: 0 0 auto; }
-.paidup-illus img { display: block; width: 238px; height: auto; filter: drop-shadow(0 16px 26px rgba(0,46,20,.30)); }
+.paidup-illus img { display: block; width: 226px; height: auto; filter: drop-shadow(0 16px 26px rgba(0,46,20,.30)); }
 .paidup-content { flex: 1 1 auto; min-width: 0; }
 .paidup-head { display: flex; align-items: center; gap: 13px; margin: 0 0 12px; }
 .paidup-check { flex: 0 0 auto; display: inline-flex; }
@@ -4148,7 +4148,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .paidup-content .paidup-text { margin: 0 0 18px; max-width: 40ch; color: rgba(255,255,255,.95); font-size: 1.02rem; line-height: 1.5; }
 .paidup-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 18px; }
 .paidup-chips[hidden] { display: none; }
-.paidup-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 999px; background: rgba(2,58,26,.32); border: 1px solid rgba(255,255,255,.30); color: #fff; font-size: .8rem; font-weight: 700; white-space: nowrap; }
+.paidup-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; background: rgba(2,58,26,.32); border: 1px solid rgba(255,255,255,.30); color: #fff; font-size: .78rem; font-weight: 700; white-space: nowrap; }
 .paidup-chip svg { flex: 0 0 auto; opacity: .95; }
 .paidup-content .paidup-cta { display: flex; width: 100%; align-items: center; justify-content: center; gap: 10px; padding: 16px 26px; border-radius: 14px; background: #fff; color: #0E8741 !important; font-size: 1.08rem; font-weight: 800; text-decoration: none; box-shadow: 0 10px 22px rgba(0,34,16,.20); transition: transform .12s ease, box-shadow .12s ease; }
 .paidup-content .paidup-cta:hover { transform: translateY(-1px); box-shadow: 0 13px 28px rgba(0,34,16,.26); }
