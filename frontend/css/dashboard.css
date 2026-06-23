@@ -4160,9 +4160,15 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 .paidup-content .paidup-cta svg { flex: 0 0 auto; }
 /* Mobile: illustration on top, content beneath, full-width CTA. */
 @media (max-width: 899px) {
-  /* Clean gradient on the tall mobile card — the desktop radial highlight
-     reads as a washed rectangle behind the art on a narrow/tall card. */
-  .loan-card.loan-card--paidup { background: linear-gradient(165deg, #2DBD51 0%, #1AA448 55%, #0E9043 100%); }
+  /* Subtle two-tone depth on the mobile card — soft light from the top + a
+     soft glow from the lower-right corner, over the green gradient. Kept low
+     (~10% white) so it reads as gentle depth, not a washed block. */
+  .loan-card.loan-card--paidup {
+    background:
+      radial-gradient(115% 48% at 50% -4%, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 60%),
+      radial-gradient(95% 55% at 113% 113%, rgba(255,255,255,.11) 0%, rgba(255,255,255,0) 55%),
+      linear-gradient(166deg, #2EBE52 0%, #1AA448 58%, #0E9043 100%);
+  }
   .paidup-hero { flex-direction: column; align-items: center; gap: 16px; padding: 24px 22px 28px; text-align: center; }
   .paidup-illus { flex: 0 0 auto; width: 250px; }
   .paidup-illus img { width: 100%; height: auto; object-fit: contain; }
