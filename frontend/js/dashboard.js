@@ -448,15 +448,15 @@
         // tailor the hero copy + show the "paid up" status chips only when
         // they actually had a balance to clear.
         var _returning = allLoans.length > 0;
-        var _pt = qs('[data-paidup-title]', card);
+        var _pl = qs('[data-paidup-lead]', card);
         var _px = qs('[data-paidup-text]', card);
         var _pc = qs('[data-paidup-chips]', card);
         if (_returning) {
-          if (_pt) _pt.textContent = "You're all paid up";
-          if (_px) _px.textContent = "No active loan right now. When you need extra cash, you can request up to $255 quickly and securely.";
+          if (_pl) { _pl.textContent = "No active loan right now."; _pl.hidden = false; }
+          if (_px) _px.textContent = "When you need extra cash, you can request up to $255 quickly and securely.";
           if (_pc) _pc.hidden = false;
         } else {
-          if (_pt) _pt.textContent = "Cash when you need it";
+          if (_pl) _pl.hidden = true;
           if (_px) _px.textContent = "Get up to $255 in minutes — quick, easy, and secure, with no hidden fees.";
           if (_pc) _pc.hidden = true;
         }

@@ -4136,21 +4136,20 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 }
 .loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
 .paidup-hero { display: flex; align-items: stretch; gap: 24px; padding: 26px 30px; }
-.paidup-illus { flex: 0 0 214px; }
+.paidup-illus { flex: 0 0 220px; }
 /* Stretch the slot to the FULL height of the text block (align-items:stretch),
    then object-fit:contain shows the WHOLE illustration scaled to that height —
    no cropping/cutoff. The slot width (~text height x image aspect) is tuned so
    the art fills the height with only a hair of transparent side margin. */
 .paidup-illus img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; filter: drop-shadow(0 14px 22px rgba(0,46,20,.26)); }
-.paidup-content { flex: 1 1 auto; min-width: 0; }
-.paidup-head { display: flex; align-items: center; gap: 13px; margin: 0 0 12px; }
-.paidup-check { flex: 0 0 auto; display: inline-flex; }
-.paidup-title { margin: 0; font-size: 2.3rem; line-height: 1.08; font-weight: 800; letter-spacing: -.015em; color: #fff; }
+.paidup-content { flex: 1 1 auto; min-width: 0; text-align: center; }
+.paidup-lead { margin: 0 0 7px; font-size: 1.32rem; line-height: 1.25; font-weight: 800; color: #fff; }
+.paidup-lead[hidden] { display: none; }
 /* .paidup-content prefix is REQUIRED: `.dash-loan-empty p {color:var(--cif-muted)}`
    (0,1,1) otherwise out-specifies a bare `.paidup-text` (0,1,0) and renders the
    body copy in dark muted text on the green card (invisible). */
-.paidup-content .paidup-text { margin: 0 0 20px; max-width: 42ch; color: rgba(255,255,255,.95); font-size: 1.06rem; line-height: 1.5; }
-.paidup-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 20px; }
+.paidup-content .paidup-text { margin: 0 0 20px; color: rgba(255,255,255,.95); font-size: 1.02rem; line-height: 1.5; text-align: center; }
+.paidup-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin: 0 0 20px; }
 .paidup-chips[hidden] { display: none; }
 .paidup-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; background: rgba(2,58,26,.32); border: 1px solid rgba(255,255,255,.30); color: #fff; font-size: .78rem; font-weight: 700; white-space: nowrap; }
 .paidup-chip svg { flex: 0 0 auto; opacity: .95; }
@@ -4162,8 +4161,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .paidup-hero { flex-direction: column; align-items: center; gap: 16px; padding: 24px 22px 26px; text-align: center; }
   .paidup-illus { flex: 0 0 auto; width: 250px; }
   .paidup-illus img { width: 100%; height: auto; object-fit: contain; }
-  .paidup-head { justify-content: center; gap: 11px; }
-  .paidup-title { font-size: 1.8rem; }
+  .paidup-lead { font-size: 1.2rem; }
   .paidup-content .paidup-text { font-size: .97rem; margin-bottom: 16px; }
   .paidup-chips { justify-content: center; margin-bottom: 18px; }
 }
