@@ -4135,12 +4135,13 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
     linear-gradient(140deg, #2FBF53 0%, #1DA84B 52%, #0F9242 100%);
 }
 .loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
-.paidup-hero { display: flex; align-items: center; gap: 24px; padding: 26px 30px; }
-.paidup-illus { flex: 0 0 auto; }
-/* Height-based so the art stands exactly as tall as the text block beside it
-   (text + chips + button). ~1.19 aspect keeps it narrow enough that the two
-   status chips still share one row. */
-.paidup-illus img { display: block; height: 190px; width: auto; object-fit: contain; filter: drop-shadow(0 16px 26px rgba(0,46,20,.30)); }
+.paidup-hero { display: flex; align-items: stretch; gap: 24px; padding: 22px 30px; }
+.paidup-illus { flex: 0 0 236px; }
+/* Stretch the art to the FULL height of the text block (align-items:stretch on
+   the row) and fill that height via object-fit:cover. The ~1.05 near-square crop
+   means cover only trims a sliver of the empty side margin, so the illustration
+   ends up exactly as tall as the text + chips + button column beside it. */
+.paidup-illus img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; filter: drop-shadow(0 14px 22px rgba(0,46,20,.26)); }
 .paidup-content { flex: 1 1 auto; min-width: 0; }
 .paidup-head { display: flex; align-items: center; gap: 13px; margin: 0 0 12px; }
 .paidup-check { flex: 0 0 auto; display: inline-flex; }
@@ -4159,7 +4160,8 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 /* Mobile: illustration on top, content beneath, full-width CTA. */
 @media (max-width: 899px) {
   .paidup-hero { flex-direction: column; align-items: center; gap: 16px; padding: 24px 22px 26px; text-align: center; }
-  .paidup-illus img { width: 250px; height: auto; }
+  .paidup-illus { flex: 0 0 auto; width: 250px; }
+  .paidup-illus img { width: 100%; height: auto; object-fit: contain; }
   .paidup-head { justify-content: center; gap: 11px; }
   .paidup-title { font-size: 1.8rem; }
   .paidup-content .paidup-text { font-size: .97rem; margin-bottom: 16px; }
