@@ -4128,35 +4128,39 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
    hero). Toggled by .loan-card--paidup, set in dashboard.js when the
    customer has no active loan. JS swaps the copy for first-timers.
    ============================================================ */
-.loan-card.loan-card--paidup { padding: 0; }
+.loan-card.loan-card--paidup {
+  padding: 0;
+  background:
+    radial-gradient(120% 95% at 83% 10%, rgba(255,255,255,.17) 0%, rgba(255,255,255,0) 46%),
+    linear-gradient(140deg, #2FBF53 0%, #1DA84B 52%, #0F9242 100%);
+}
 .loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
-.paidup-hero { display: flex; align-items: center; gap: 26px; padding: 28px 32px; }
+.paidup-hero { display: flex; align-items: center; gap: 30px; padding: 30px 36px; }
 .paidup-illus { flex: 0 0 auto; }
-.paidup-illus img { display: block; width: 150px; height: auto; filter: drop-shadow(0 12px 22px rgba(0,40,18,.28)); }
+.paidup-illus img { display: block; width: 190px; height: auto; filter: drop-shadow(0 14px 24px rgba(0,46,20,.30)); }
 .paidup-content { flex: 1 1 auto; min-width: 0; }
-.paidup-head { display: flex; align-items: center; gap: 11px; margin: 0 0 10px; }
+.paidup-head { display: flex; align-items: center; gap: 13px; margin: 0 0 12px; }
 .paidup-check { flex: 0 0 auto; display: inline-flex; }
-.paidup-title { margin: 0; font-size: 1.7rem; line-height: 1.12; font-weight: 800; letter-spacing: -.01em; color: #fff; }
+.paidup-title { margin: 0; font-size: 1.9rem; line-height: 1.1; font-weight: 800; letter-spacing: -.015em; color: #fff; }
 /* .paidup-content prefix is REQUIRED: `.dash-loan-empty p {color:var(--cif-muted)}`
    (0,1,1) otherwise out-specifies a bare `.paidup-text` (0,1,0) and renders the
    body copy in dark muted text on the green card (invisible). */
-.paidup-content .paidup-text { margin: 0 0 16px; max-width: 44ch; color: rgba(255,255,255,.94); font-size: 1rem; line-height: 1.5; }
-.paidup-chips { display: flex; flex-wrap: wrap; gap: 9px; margin: 0 0 20px; }
+.paidup-content .paidup-text { margin: 0 0 18px; max-width: 44ch; color: rgba(255,255,255,.95); font-size: 1.04rem; line-height: 1.5; }
+.paidup-chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 20px; }
 .paidup-chips[hidden] { display: none; }
-.paidup-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px; background: rgba(255,255,255,.16); color: #fff; font-size: .82rem; font-weight: 700; white-space: nowrap; }
-.paidup-chip svg { flex: 0 0 auto; }
-.paidup-content .paidup-cta { display: inline-flex; align-items: center; gap: 9px; padding: 14px 26px; border-radius: 14px; background: #fff; color: #0E8741 !important; font-size: 1.02rem; font-weight: 800; text-decoration: none; box-shadow: 0 8px 20px rgba(0,30,14,.18); transition: transform .12s ease, box-shadow .12s ease; }
-.paidup-content .paidup-cta:hover { transform: translateY(-1px); box-shadow: 0 11px 26px rgba(0,30,14,.24); }
+.paidup-chip { display: inline-flex; align-items: center; gap: 7px; padding: 8px 15px; border-radius: 999px; background: rgba(2,58,26,.32); border: 1px solid rgba(255,255,255,.30); color: #fff; font-size: .84rem; font-weight: 700; white-space: nowrap; }
+.paidup-chip svg { flex: 0 0 auto; opacity: .95; }
+.paidup-content .paidup-cta { display: flex; width: 100%; align-items: center; justify-content: center; gap: 10px; padding: 16px 26px; border-radius: 14px; background: #fff; color: #0E8741 !important; font-size: 1.08rem; font-weight: 800; text-decoration: none; box-shadow: 0 10px 22px rgba(0,34,16,.20); transition: transform .12s ease, box-shadow .12s ease; }
+.paidup-content .paidup-cta:hover { transform: translateY(-1px); box-shadow: 0 13px 28px rgba(0,34,16,.26); }
 .paidup-content .paidup-cta svg { flex: 0 0 auto; }
 /* Mobile: illustration on top, content beneath, full-width CTA. */
 @media (max-width: 899px) {
-  .paidup-hero { flex-direction: column; align-items: center; gap: 14px; padding: 22px 22px 24px; text-align: center; }
-  .paidup-illus img { width: 146px; }
-  .paidup-head { justify-content: center; }
-  .paidup-title { font-size: 1.5rem; }
-  .paidup-content .paidup-text { font-size: .95rem; margin-bottom: 14px; }
-  .paidup-chips { justify-content: center; margin-bottom: 16px; }
-  .paidup-content .paidup-cta { width: 100%; justify-content: center; }
+  .paidup-hero { flex-direction: column; align-items: center; gap: 16px; padding: 24px 22px 26px; text-align: center; }
+  .paidup-illus img { width: 168px; }
+  .paidup-head { justify-content: center; gap: 11px; }
+  .paidup-title { font-size: 1.55rem; }
+  .paidup-content .paidup-text { font-size: .97rem; margin-bottom: 16px; }
+  .paidup-chips { justify-content: center; margin-bottom: 18px; }
 }
 
 /* Loans "You're all caught up!" hero = the FULL illustration card (everything
