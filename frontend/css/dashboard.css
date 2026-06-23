@@ -4135,8 +4135,8 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
     linear-gradient(140deg, #2FBF53 0%, #1DA84B 52%, #0F9242 100%);
 }
 .loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
-.paidup-hero { display: flex; align-items: stretch; gap: 24px; padding: 22px 30px; }
-.paidup-illus { flex: 0 0 224px; }
+.paidup-hero { display: flex; align-items: stretch; gap: 24px; padding: 26px 30px; }
+.paidup-illus { flex: 0 0 214px; }
 /* Stretch the slot to the FULL height of the text block (align-items:stretch),
    then object-fit:contain shows the WHOLE illustration scaled to that height —
    no cropping/cutoff. The slot width (~text height x image aspect) is tuned so
@@ -4149,8 +4149,8 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 /* .paidup-content prefix is REQUIRED: `.dash-loan-empty p {color:var(--cif-muted)}`
    (0,1,1) otherwise out-specifies a bare `.paidup-text` (0,1,0) and renders the
    body copy in dark muted text on the green card (invisible). */
-.paidup-content .paidup-text { margin: 0 0 18px; max-width: 40ch; color: rgba(255,255,255,.95); font-size: 1.02rem; line-height: 1.5; }
-.paidup-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 18px; }
+.paidup-content .paidup-text { margin: 0 0 20px; max-width: 42ch; color: rgba(255,255,255,.95); font-size: 1.06rem; line-height: 1.5; }
+.paidup-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 20px; }
 .paidup-chips[hidden] { display: none; }
 .paidup-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; background: rgba(2,58,26,.32); border: 1px solid rgba(255,255,255,.30); color: #fff; font-size: .78rem; font-weight: 700; white-space: nowrap; }
 .paidup-chip svg { flex: 0 0 auto; opacity: .95; }
