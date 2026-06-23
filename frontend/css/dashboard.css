@@ -4142,6 +4142,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
    like the ~640px home hero (centered in the wide green card) instead of
    sprawling a full-width button. No-op on mobile (card is narrower). */
 .loans-page .loans-active-empty .paidup-hero { max-width: 700px; margin-left: auto; margin-right: auto; }
+/* The clipboard art is portrait (~0.78), so narrow its slot (vs the home's
+   220px) to fill the text-block height snugly instead of floating with margin. */
+.loans-page .loans-active-empty .paidup-illus { flex-basis: 162px; }
 .paidup-hero { display: flex; align-items: stretch; gap: 24px; padding: 26px 30px; }
 .paidup-illus { flex: 0 0 220px; }
 /* Stretch the slot to the FULL height of the text block (align-items:stretch),
