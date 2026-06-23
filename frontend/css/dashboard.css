@@ -4182,6 +4182,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .paidup-hero { flex-direction: column; align-items: center; gap: 16px; padding: 24px 22px 28px; text-align: center; }
   .paidup-illus { flex: 0 0 auto; width: 250px; }
   .paidup-illus img { width: 100%; height: auto; object-fit: contain; }
+  /* Loans: the clipboard is portrait, so 250px wide = ~320px tall (too big).
+     Size it by width so its height (~235px) matches the home icon on mobile. */
+  .loans-page .loans-active-empty .paidup-illus { flex-basis: auto; width: 184px; }
   .paidup-content .paidup-lead { font-size: 1.18rem; }
   .paidup-content .paidup-text { font-size: .97rem; margin-bottom: 16px; }
   .paidup-chips { justify-content: center; margin-bottom: 18px; }
