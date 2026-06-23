@@ -4136,12 +4136,12 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 }
 .loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
 .paidup-hero { display: flex; align-items: stretch; gap: 24px; padding: 22px 30px; }
-.paidup-illus { flex: 0 0 236px; }
-/* Stretch the art to the FULL height of the text block (align-items:stretch on
-   the row) and fill that height via object-fit:cover. The ~1.05 near-square crop
-   means cover only trims a sliver of the empty side margin, so the illustration
-   ends up exactly as tall as the text + chips + button column beside it. */
-.paidup-illus img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; filter: drop-shadow(0 14px 22px rgba(0,46,20,.26)); }
+.paidup-illus { flex: 0 0 224px; }
+/* Stretch the slot to the FULL height of the text block (align-items:stretch),
+   then object-fit:contain shows the WHOLE illustration scaled to that height —
+   no cropping/cutoff. The slot width (~text height x image aspect) is tuned so
+   the art fills the height with only a hair of transparent side margin. */
+.paidup-illus img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; filter: drop-shadow(0 14px 22px rgba(0,46,20,.26)); }
 .paidup-content { flex: 1 1 auto; min-width: 0; }
 .paidup-head { display: flex; align-items: center; gap: 13px; margin: 0 0 12px; }
 .paidup-check { flex: 0 0 auto; display: inline-flex; }
