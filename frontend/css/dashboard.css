@@ -4121,6 +4121,41 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .home-mobile .app-promo-art { width: 88px; height: 88px; }
 }
 
+/* ============================================================
+   Returning-customer "You're all paid up" hero (no active loan).
+   Keeps the green .loan-card gradient; composes the illustration +
+   message + status chips + white CTA (replaces the old image-only
+   hero). Toggled by .loan-card--paidup, set in dashboard.js when the
+   customer has no active loan. JS swaps the copy for first-timers.
+   ============================================================ */
+.loan-card.loan-card--paidup { padding: 0; }
+.loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
+.paidup-hero { display: flex; align-items: center; gap: 26px; padding: 28px 32px; }
+.paidup-illus { flex: 0 0 auto; }
+.paidup-illus img { display: block; width: 166px; height: auto; filter: drop-shadow(0 12px 22px rgba(0,40,18,.28)); }
+.paidup-content { flex: 1 1 auto; min-width: 0; }
+.paidup-head { display: flex; align-items: center; gap: 11px; margin: 0 0 10px; }
+.paidup-check { flex: 0 0 auto; display: inline-flex; }
+.paidup-title { margin: 0; font-size: 1.7rem; line-height: 1.12; font-weight: 800; letter-spacing: -.01em; color: #fff; }
+.paidup-text { margin: 0 0 16px; max-width: 44ch; color: rgba(255,255,255,.92); font-size: 1rem; line-height: 1.5; }
+.paidup-chips { display: flex; flex-wrap: wrap; gap: 9px; margin: 0 0 20px; }
+.paidup-chips[hidden] { display: none; }
+.paidup-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px; background: rgba(255,255,255,.16); color: #fff; font-size: .82rem; font-weight: 700; white-space: nowrap; }
+.paidup-chip svg { flex: 0 0 auto; }
+.paidup-content .paidup-cta { display: inline-flex; align-items: center; gap: 9px; padding: 14px 26px; border-radius: 14px; background: #fff; color: #0E8741 !important; font-size: 1.02rem; font-weight: 800; text-decoration: none; box-shadow: 0 8px 20px rgba(0,30,14,.18); transition: transform .12s ease, box-shadow .12s ease; }
+.paidup-content .paidup-cta:hover { transform: translateY(-1px); box-shadow: 0 11px 26px rgba(0,30,14,.24); }
+.paidup-content .paidup-cta svg { flex: 0 0 auto; }
+/* Mobile: illustration on top, content beneath, full-width CTA. */
+@media (max-width: 899px) {
+  .paidup-hero { flex-direction: column; align-items: center; gap: 14px; padding: 22px 22px 24px; text-align: center; }
+  .paidup-illus img { width: 152px; }
+  .paidup-head { justify-content: center; }
+  .paidup-title { font-size: 1.5rem; }
+  .paidup-text { font-size: .95rem; margin-bottom: 14px; }
+  .paidup-chips { justify-content: center; margin-bottom: 16px; }
+  .paidup-content .paidup-cta { width: 100%; justify-content: center; }
+}
+
 /* Loans "You're all caught up!" hero = the FULL illustration card (everything
    baked into the image); the .loan-card wrapper drops bg/padding via
    .loan-card--art so the image IS the card. */

@@ -11,8 +11,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="/css/portal.css?v=20260620d">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260620d">
+  <link rel="stylesheet" href="/css/portal.css?v=20260623a">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260623a">
   <script>
     (function(){ try { if (sessionStorage.getItem('cif_has_active_loan') === 'true') { document.documentElement.classList.add('cif-has-active-loan'); } } catch(e){} })();
   </script>
@@ -158,12 +158,26 @@
           </a>
         </div>
         <div class="dash-loan-empty" hidden>
-          <a class="dash-hero-link" href="https://apply.cashinflash.com" aria-label="Cash when you need it — apply for a loan">
-            <picture>
-              <source media="(max-width: 899px)" srcset="/images/home-hero-cash-mobile.png?v=20260620d">
-              <img class="dash-hero-full" src="/images/home-hero-cash.png" alt="Cash when you need it. Fast. Simple. Secure. Apply for a loan.">
-            </picture>
-          </a>
+          <div class="paidup-hero">
+            <div class="paidup-illus" aria-hidden="true">
+              <img src="/images/hero-paidup.png?v=20260623a" alt="" width="800" height="1155">
+            </div>
+            <div class="paidup-content">
+              <div class="paidup-head">
+                <span class="paidup-check" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="#fff" fill-opacity=".18"/><path d="M7.3 12.4l3.1 3.1 6.3-6.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                <h2 class="paidup-title" data-paidup-title>You're all paid up</h2>
+              </div>
+              <p class="paidup-text" data-paidup-text>No active loan right now. When you need extra cash, you can request up to $255 quickly and securely.</p>
+              <div class="paidup-chips" data-paidup-chips>
+                <span class="paidup-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>No balance due</span>
+                <span class="paidup-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>Account in good standing</span>
+              </div>
+              <a class="paidup-cta" href="https://apply.cashinflash.com">
+                Apply for a Loan
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </a>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -267,12 +281,12 @@
             </svg>
           </span>
           <div class="home-needloan-body">
-            <strong>Need cash fast?</strong>
-            <small>Get up to $255 quickly and securely.</small>
+            <strong>Need extra cash?</strong>
+            <small>Request up to $255 and get funds fast. It's quick, easy, and secure.</small>
           </div>
         </div>
-        <button type="button" class="app-cta-outline home-needloan-cta" id="requestLoanBtn">
-          Request a Loan
+        <button type="button" class="app-cta-primary home-needloan-cta" id="requestLoanBtn">
+          Apply for a Loan
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
         </button>
       </aside>
@@ -377,7 +391,7 @@
 
   <script src="/js/impersonation.js"></script>
   <script src="/js/session.js"></script>
-  <script src="/js/dashboard.js?v=20260620d"></script>
+  <script src="/js/dashboard.js?v=20260623a"></script>
   <script src="/js/plaid.js"></script>
 </body>
 </html>

@@ -432,20 +432,36 @@
       if (hero) hero.hidden = true;
       if (card) {
         card.hidden = false;
-        card.classList.remove('loan-card--art');
+        card.classList.remove('loan-card--art', 'loan-card--paidup');
         renderActiveLoan(card, data);
       }
     } else {
       if (card) {
         card.hidden = false;
         card.classList.remove('is-pastdue', 'is-pastdue-soft');
-        card.classList.add('loan-card--art');
+        card.classList.add('loan-card--paidup');
         card.setAttribute('aria-busy', 'false');
         var _sk = qs('.dash-card-skeleton', card); if (_sk) _sk.style.display = 'none';
         var _bd = qs('.dash-loan-body', card); if (_bd) _bd.hidden = true;
         var _emp = qs('.dash-loan-empty', card); if (_emp) _emp.hidden = false;
+        // Returning customer (has prior loans, none active) vs first-timer:
+        // tailor the hero copy + show the "paid up" status chips only when
+        // they actually had a balance to clear.
+        var _returning = allLoans.length > 0;
+        var _pt = qs('[data-paidup-title]', card);
+        var _px = qs('[data-paidup-text]', card);
+        var _pc = qs('[data-paidup-chips]', card);
+        if (_returning) {
+          if (_pt) _pt.textContent = "You're all paid up";
+          if (_px) _px.textContent = "No active loan right now. When you need extra cash, you can request up to $255 quickly and securely.";
+          if (_pc) _pc.hidden = false;
+        } else {
+          if (_pt) _pt.textContent = "Cash when you need it";
+          if (_px) _px.textContent = "Get up to $255 in minutes — quick, easy, and secure, with no hidden fees.";
+          if (_pc) _pc.hidden = true;
+        }
       }
-      // No active loan → show the static "Cash when you need it" hero (markup).
+      // No active loan → show the composed "paid up / cash when you need it" hero.
       if (hero) hero.hidden = false;
     }
 
