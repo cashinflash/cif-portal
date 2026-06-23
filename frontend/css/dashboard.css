@@ -4135,9 +4135,12 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
     linear-gradient(140deg, #2FBF53 0%, #1DA84B 52%, #0F9242 100%);
 }
 .loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
-.paidup-hero { display: flex; align-items: center; gap: 20px; padding: 26px 30px; }
+.paidup-hero { display: flex; align-items: center; gap: 24px; padding: 26px 30px; }
 .paidup-illus { flex: 0 0 auto; }
-.paidup-illus img { display: block; width: 226px; height: auto; filter: drop-shadow(0 16px 26px rgba(0,46,20,.30)); }
+/* Height-based so the art stands exactly as tall as the text block beside it
+   (text + chips + button). ~1.19 aspect keeps it narrow enough that the two
+   status chips still share one row. */
+.paidup-illus img { display: block; height: 190px; width: auto; object-fit: contain; filter: drop-shadow(0 16px 26px rgba(0,46,20,.30)); }
 .paidup-content { flex: 1 1 auto; min-width: 0; }
 .paidup-head { display: flex; align-items: center; gap: 13px; margin: 0 0 12px; }
 .paidup-check { flex: 0 0 auto; display: inline-flex; }
@@ -4156,7 +4159,7 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
 /* Mobile: illustration on top, content beneath, full-width CTA. */
 @media (max-width: 899px) {
   .paidup-hero { flex-direction: column; align-items: center; gap: 16px; padding: 24px 22px 26px; text-align: center; }
-  .paidup-illus img { width: 256px; }
+  .paidup-illus img { width: 250px; height: auto; }
   .paidup-head { justify-content: center; gap: 11px; }
   .paidup-title { font-size: 1.8rem; }
   .paidup-content .paidup-text { font-size: .97rem; margin-bottom: 16px; }
