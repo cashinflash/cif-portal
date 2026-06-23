@@ -113,7 +113,7 @@
       card.setAttribute('aria-busy', 'false');
 
       if (!data || !data.loan) {
-        card.classList.add('loan-card--art');
+        card.classList.add('loan-card--paidup');
         if (body) body.hidden = true;
         if (empty) empty.hidden = false;
         // No active loan — surface the "Need extra cash?" cross-sell banner.
@@ -122,7 +122,7 @@
         return null;
       }
       const loan = data.loan;
-      card.classList.remove('loan-card--art');
+      card.classList.remove('loan-card--art', 'loan-card--paidup');
       state.loan = loan;
       // Gate the "Need extra cash?" banner: never offer a new loan while an
       // active loan with a balance is open.
@@ -996,7 +996,17 @@
     Promise.all([loanP, methodsP]).then(function (results) {
       const loan = results[0];
       const formCard = qs('#payFormCard');
-      if (formCard) formCard.hidden = !loan;
+      // Keep the payment-method manager visible even with no active loan (so
+      // customers can add/update a card before their next loan). The .pay-noloan
+      // body class hides the pay-action parts (amount/CVV/breakdown/Pay button).
+      if (formCard) formCard.hidden = false;
+      document.body.classList.toggle('pay-noloan', !loan);
+      if (!loan) {
+        var mh = document.querySelector('.pay-method-card .home-card-title');
+        var ms = document.querySelector('.pay-method-card .home-card-sub');
+        if (mh) mh.textContent = 'Your payment methods';
+        if (ms) ms.textContent = "Add or update a debit card so you're ready for your next loan.";
+      }
     }).catch(function (err) {
       if (err && err.message === 'unauthorized') return;
       showError('Could not load your loan details. Please refresh the page.');

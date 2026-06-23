@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="/css/portal.css?v=20260620b">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260620b">
+  <link rel="stylesheet" href="/css/portal.css?v=20260623t">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260623t">
   <script>
     (function(){
       try {
@@ -162,9 +162,23 @@
           <p class="loan-card-note"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>Pay on time to keep your loan in good standing.</p>
         </div>
         <div class="pay-summary-empty" hidden>
-          <a class="dash-hero-link" href="/dashboard.html" aria-label="No active loan — back to dashboard">
-            <img class="dash-hero-full" src="/images/payments-noloan.png" alt="No active loan. You don't have a balance to pay right now. Back to dashboard.">
-          </a>
+          <div class="paidup-hero">
+            <div class="paidup-illus" aria-hidden="true">
+              <img src="/images/hero-paidup.png?v=20260623t" alt="" width="640" height="599">
+            </div>
+            <div class="paidup-content">
+              <p class="paidup-lead">No payments due</p>
+              <p class="paidup-text">You don't have an active loan right now — nothing to pay. When you need cash, applying is quick and secure.</p>
+              <div class="paidup-chips">
+                <span class="paidup-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>No balance due</span>
+                <span class="paidup-chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>Account in good standing</span>
+              </div>
+              <a class="paidup-cta" href="/request-loan.html" data-action="new-loan">
+                Apply for a Loan
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </a>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -522,6 +536,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/payments.js"></script>
+  <script src="/js/payments.js?v=20260623t"></script>
 </body>
 </html>
