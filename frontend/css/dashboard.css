@@ -4134,7 +4134,14 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
     radial-gradient(120% 95% at 83% 10%, rgba(255,255,255,.17) 0%, rgba(255,255,255,0) 46%),
     linear-gradient(140deg, #2FBF53 0%, #1DA84B 52%, #0F9242 100%);
 }
-.loan-card--paidup .dash-loan-empty { padding: 0; margin: 0; text-align: left; }
+.loan-card--paidup .dash-loan-empty,
+.loan-card--paidup .loans-active-empty { padding: 0; margin: 0; text-align: left; }
+/* Subtle divider under the mobile Recent activity card. */
+.home-divider { height: 0; border: 0; border-top: 1px solid #e7edf2; margin: 4px 4px 6px; }
+/* The loans-stack is up to 1040px wide; cap the loans paid-up hero so it reads
+   like the ~640px home hero (centered in the wide green card) instead of
+   sprawling a full-width button. No-op on mobile (card is narrower). */
+.loans-page .loans-active-empty .paidup-hero { max-width: 700px; margin-left: auto; margin-right: auto; }
 .paidup-hero { display: flex; align-items: stretch; gap: 24px; padding: 26px 30px; }
 .paidup-illus { flex: 0 0 220px; }
 /* Stretch the slot to the FULL height of the text block (align-items:stretch),
@@ -4165,9 +4172,9 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
      (~10% white) so it reads as gentle depth, not a washed block. */
   .loan-card.loan-card--paidup {
     background:
-      radial-gradient(115% 48% at 50% -4%, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 60%),
-      radial-gradient(95% 55% at 113% 113%, rgba(255,255,255,.11) 0%, rgba(255,255,255,0) 55%),
-      linear-gradient(166deg, #2EBE52 0%, #1AA448 58%, #0E9043 100%);
+      radial-gradient(120% 52% at 50% -8%, rgba(255,255,255,.18) 0%, rgba(255,255,255,0) 58%),
+      radial-gradient(100% 62% at 115% 115%, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 55%),
+      linear-gradient(168deg, #35C75B 0%, #1AA448 54%, #0B8B3F 100%);
   }
   .paidup-hero { flex-direction: column; align-items: center; gap: 16px; padding: 24px 22px 28px; text-align: center; }
   .paidup-illus { flex: 0 0 auto; width: 250px; }
@@ -4542,8 +4549,8 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
   .home-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     grid-template-areas:
-      "loan  loan  loan  need  need"
-      "pay   pay   act   act   act"
+      "loan  loan  loan  pay   pay"
+      "act   act   act   act   act"
       "tiles tiles tiles tiles tiles";
     gap: 20px;
     align-items: stretch;
@@ -4559,11 +4566,11 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
      equalizing them — the taller card was overflowing the track). */
   .home-loan, .home-needloan, .home-pay, .home-activity { height: 100%; }
 
-  /* No active loan: pay card is gone — let activity fill row 2. */
+  /* No active loan: the "Need extra cash" card was removed, so the hero sits
+     beside Recent activity on row 1, then the tiles span the bottom. */
   html:not(.cif-has-active-loan) .home-grid {
     grid-template-areas:
-      "loan  loan  loan  need  need"
-      "act   act   act   act   act"
+      "loan loan loan act act"
       "tiles tiles tiles tiles tiles";
   }
 
