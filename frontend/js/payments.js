@@ -850,13 +850,13 @@
     })
       .then(function (res) {
         if (res && res.success === true) {
-          var when = formatDate(res.scheduledFor || (dateVal + 'T00:00:00'));
+          // Format from the date the customer picked (local midnight) to
+          // avoid a UTC off-by-one on the displayed day.
+          var when = formatDate(dateVal + 'T00:00:00');
           var ok = qs('#payScheduleOk');
           if (ok) {
-            ok.textContent = 'Scheduled ' + money(res.amount || form.amount) +
-              ' for ' + when +
-              (form.brand ? ' on ' + form.brand : '') +
-              (form.last4 ? ' ••••' + form.last4 : '') + '.';
+            ok.textContent = 'Scheduled with Vergent for ' + when +
+              '. Nothing was charged today — it runs automatically that day.';
             ok.hidden = false;
             ok.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
@@ -870,13 +870,14 @@
         var errBody = (e2 && e2.body) || {};
         var code = errBody.error || errBody.code || '';
         var msgs = {
-          invalid_amount:       'Please enter a valid amount above.',
-          amount_out_of_range:  'Amount must be between $0.01 and $5,000.',
-          invalid_or_past_date: 'Please pick a date after today (within 90 days).',
-          invalid_card:         'Please pick a saved card.',
-          missing_loan_or_card: 'Please pick a saved card.',
-          card_not_owned:       'That card isn’t on your account. Please pick one of your saved cards.',
-          loan_not_owned:       'We couldn’t match that to your loan. Please refresh and try again.',
+          invalid_amount:        'Please enter a valid amount above.',
+          amount_out_of_range:   'Amount must be between $0.01 and $5,000.',
+          invalid_or_past_date:  'Please pick a date after today (within 90 days).',
+          invalid_card:          'Please pick a saved card.',
+          missing_loan_or_card:  'Please pick a saved card.',
+          card_not_owned:        'That card isn’t on your account. Please pick one of your saved cards.',
+          loan_not_owned:        'We couldn’t match that to your loan. Please refresh and try again.',
+          schedule_store_failed: 'We couldn’t save your scheduled payment. Please try again.',
         };
         showScheduleError(msgs[code] || errBody.resultText ||
           "We couldn't schedule that payment. Please try again.");
