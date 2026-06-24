@@ -4128,15 +4128,19 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
      at the bottom of the file (equal specificity otherwise = later rule wins). */
   .home-mobile .app-promo-art { width: 88px; height: 88px; }
 
-  /* Active-loan home: the loan card sat too far above the Make-a-Payment /
-     Apply buttons. Its heavy drop shadow cast a halo that read as dead space
-     (the same issue we already fixed on the no-loan hero), and the grid gap
-     added more. Soften the shadow and snug the buttons up under the card.
-     Scoped to the active-loan state so the no-loan hero is untouched. */
-  #activeLoanCard:not(.loan-card--paidup):not(.loan-card--art) {
-    box-shadow: 0 4px 14px rgba(14,135,65,.16);
+  /* Active-loan home: pull the mobile Make-a-Payment / Apply buttons tight
+     under the loan card. Nuke every inter-element margin, tighten the grid
+     row-gap, and cut the card's green drop-shadow halo — it bled below the
+     card and read as a big gap. High-specificity / !important so nothing in
+     the cascade re-opens the gap (the .cif-has-active-loan class isn't always
+     set at paint, so this stays unscoped). */
+  .app-page .home-grid { row-gap: 6px; }
+  .home-loan { margin-bottom: 0 !important; }
+  .home-mobile { margin-top: 0 !important; }
+  .home-mobile > .app-cta-primary { margin-top: 0 !important; }
+  .home-loan:not(.loan-card--paidup):not(.loan-card--art) {
+    box-shadow: 0 1px 4px rgba(13,84,45,.12) !important;
   }
-  .cif-has-active-loan .home-grid { row-gap: 4px; }
 }
 
 /* ============================================================
@@ -4799,17 +4803,24 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .loan-card-figval--date { font-size: 1.05rem; font-weight: 700; }
 .loan-card-figsub { margin: 4px 0 0; font-size: .92rem; font-weight: 700; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; }
 
-/* Mobile: three equal columns were too narrow and wrapped the date onto two
-   lines. Use a 2x2 grid instead — amounts on top (Loan Amount | Current
-   Balance), payment info below (Due Date | Repayment Method) — so each value
-   gets a half-width cell and the date stays on one line. */
+/* Mobile: 2x2 grid — amounts on top (Loan Amount | Current Balance), payment
+   info below (Due Date | Repayment Method). The vertical divider is centred in
+   the gutter (equal padding each side) and a full-width horizontal rule splits
+   the two rows, so the dividers read as a clean cross. */
 @media (max-width: 899px) {
   .loans-active .loan-card-figures {
-    display: grid; grid-template-columns: 1fr 1fr; column-gap: 0; row-gap: 18px;
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 0; row-gap: 0;
   }
-  .loans-active .loan-card-fig { min-width: 0; padding-left: 16px; }
-  .loans-active .loan-card-fig:nth-child(odd) { padding-left: 0; }
-  .loans-active .loan-card-fig:nth-child(even) { border-left: 1px solid rgba(255,255,255,.22); }
+  .loans-active .loan-card-fig { min-width: 0; }
+  /* Centred vertical divider: equal gap on each side of the column boundary. */
+  .loans-active .loan-card-fig:nth-child(odd) { padding-right: 18px; }
+  .loans-active .loan-card-fig:nth-child(even) { padding-left: 18px; border-left: 1px solid rgba(255,255,255,.22); }
+  /* Full-width horizontal divider between the two rows (space above + below so
+     the vertical dividers run continuously through it). */
+  .loans-active .loan-card-fig:nth-child(1),
+  .loans-active .loan-card-fig:nth-child(2) { padding-bottom: 16px; }
+  .loans-active .loan-card-fig:nth-child(3),
+  .loans-active .loan-card-fig:nth-child(4) { padding-top: 16px; border-top: 1px solid rgba(255,255,255,.22); }
   .loans-active .loan-card-figval { font-size: 1.35rem; }
 }
 
