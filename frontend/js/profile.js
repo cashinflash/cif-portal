@@ -870,7 +870,7 @@
     el.hidden = false;
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); }
     if (kind === 'ok') {
-      setTimeout(function () { if (el) el.hidden = true; }, 6000);
+      setTimeout(function () { if (el) el.hidden = true; }, 30000);
     }
   }
 })();

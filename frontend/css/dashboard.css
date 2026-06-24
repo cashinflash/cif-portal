@@ -2606,7 +2606,7 @@ button.dash-doc-download:disabled {
   align-items: center;
   gap: 10px;
   max-width: 1160px;
-  margin: -32px auto 12px;
+  margin: 0 auto 16px;
   padding: 12px 18px;
   border-radius: 10px;
   font-size: .92rem;
@@ -4012,6 +4012,14 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   width: 38px; height: 38px; justify-self: end; border-radius: 50%;
   background: #0E8741; display: inline-flex; align-items: center; justify-content: center;
 }
+/* Mobile nav simplified: the hamburger and the tab-bar "More" tab (both
+   only opened the drawer) are removed — the bottom tab bar is the sole
+   mobile nav now. Pin the logo to the centre column and the avatar to the
+   right column so the bar stays balanced with the hamburger gone. */
+#menu-toggle { display: none; }
+.app-topbar-logo { grid-column: 2; }
+.app-avatar-btn { grid-column: 3; }
+#moreTab { display: none; }
 
 /* Main column */
 .app-main {
@@ -4882,6 +4890,19 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    a security-reassurance banner. No green loan card here.
    ============================================================ */
 .profile-stack { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 16px; }
+
+/* Mobile-only Log out. The drawer that used to hold sign-out was removed
+   along with the hamburger + "More" tab, so the profile page now carries
+   sign-out directly. Desktop keeps the sidebar's Log out (this is .u-mobile). */
+.profile-signout {
+  width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  margin-top: 4px; padding: 16px;
+  background: #fff; border: 1.5px solid #f3b4b4; border-radius: 16px;
+  color: #d8453c; font-weight: 700; font-size: 1.02rem;
+  font-family: inherit; cursor: pointer;
+}
+.profile-signout:active { background: #fef2f2; }
 
 /* Tile grid: single column on mobile, two columns on desktop. */
 .profile-hub { display: grid; grid-template-columns: 1fr; gap: 14px; margin: 0; }
