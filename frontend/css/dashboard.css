@@ -4127,6 +4127,16 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
      .home-mobile prefix to out-specify the base `.app-promo-art { width:66px }`
      at the bottom of the file (equal specificity otherwise = later rule wins). */
   .home-mobile .app-promo-art { width: 88px; height: 88px; }
+
+  /* Active-loan home: the loan card sat too far above the Make-a-Payment /
+     Apply buttons. Its heavy drop shadow cast a halo that read as dead space
+     (the same issue we already fixed on the no-loan hero), and the grid gap
+     added more. Soften the shadow and snug the buttons up under the card.
+     Scoped to the active-loan state so the no-loan hero is untouched. */
+  #activeLoanCard:not(.loan-card--paidup):not(.loan-card--art) {
+    box-shadow: 0 4px 14px rgba(14,135,65,.16);
+  }
+  .cif-has-active-loan .home-grid { row-gap: 4px; }
 }
 
 /* ============================================================
