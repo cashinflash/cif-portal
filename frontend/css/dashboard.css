@@ -4812,8 +4812,11 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
     display: grid; grid-template-columns: 1fr 1fr; column-gap: 0; row-gap: 0;
   }
   .loans-active .loan-card-fig { min-width: 0; }
-  /* Centred vertical divider: equal gap on each side of the column boundary. */
-  .loans-active .loan-card-fig:nth-child(odd) { padding-right: 18px; }
+  /* Centred vertical divider: equal gap on each side of the column boundary.
+     border-left:none on the odd (left-column) cells kills the stray divider the
+     generic `.loan-card-fig + .loan-card-fig` rule would otherwise draw to the
+     left of Due Date. */
+  .loans-active .loan-card-fig:nth-child(odd) { padding-left: 0; padding-right: 18px; border-left: none; }
   .loans-active .loan-card-fig:nth-child(even) { padding-left: 18px; border-left: 1px solid rgba(255,255,255,.22); }
   /* Full-width horizontal divider between the two rows (space above + below so
      the vertical dividers run continuously through it). */
