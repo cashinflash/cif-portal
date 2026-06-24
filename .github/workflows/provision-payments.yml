@@ -128,7 +128,6 @@ jobs:
             "GET /api/my-payment/loan-summary"
             "POST /api/my-payment"
             "POST /api/my-payment/charge"
-            "POST /api/my-payment/schedule"
             "GET /api/my-payment-methods"
             "DELETE /api/my-payment-methods/{methodId}"
             "GET /api/my-payment-config"
