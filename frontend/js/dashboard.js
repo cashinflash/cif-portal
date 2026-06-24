@@ -432,7 +432,7 @@
       if (hero) hero.hidden = true;
       if (card) {
         card.hidden = false;
-        card.classList.remove('loan-card--art', 'loan-card--paidup');
+        card.classList.remove('loan-card--art', 'loan-card--paidup', 'loan-card--firsttime');
         renderActiveLoan(card, data);
       }
     } else {
@@ -460,6 +460,10 @@
           if (_px) _px.textContent = "Get up to $255 in minutes — quick, easy, and secure, with no hidden fees.";
           if (_pc) _pc.hidden = true;
         }
+        // First-timers get a sparse hero (no lead, no chips) — tag the card so
+        // the CSS centers the shorter content + art instead of letting the art
+        // shrink and float in its slot.
+        card.classList.toggle('loan-card--firsttime', !_returning);
       }
       // No active loan → show the composed "paid up / cash when you need it" hero.
       if (hero) hero.hidden = false;

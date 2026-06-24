@@ -4208,6 +4208,16 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .paidup-chips { justify-content: center; margin-bottom: 18px; }
 }
 
+/* First-timer home hero (no prior loans): dashboard.js hides the lead AND the
+   "paid-up" status chips, leaving just text + CTA. With align-items:stretch the
+   illustration shrinks to that short content and floats with big side-gaps in
+   its slot — so on desktop, center the row and let the art keep its natural
+   height. Mobile is already a centered column, so this is desktop-only. */
+@media (min-width: 900px) {
+  .loan-card--firsttime .paidup-hero { align-items: center; }
+  .loan-card--firsttime .paidup-illus img { height: auto; }
+}
+
 /* Loans "You're all caught up!" hero = the FULL illustration card (everything
    baked into the image); the .loan-card wrapper drops bg/padding via
    .loan-card--art so the image IS the card. */
