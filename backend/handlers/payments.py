@@ -798,6 +798,109 @@ def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
 
 
 
+def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
+                        account_type: str = ""
+                        ) -> Tuple[bool, Optional[str], str, str]:
+    """Real-time ACH debit on a loan via v1 ``PostCustomerLoanACH/{loanId}``.
+
+    The ACH twin of _charge_card_auto_v1: SAME v1 service Token, the loan id
+    in the path (mirrors our PutCustomerLoanPayment/{loanId} usage), and the
+    customer's saved bank account named by ``BankAcctId`` (the ``id`` from
+    GetCustomerBanks / our /api/my-banks). Pulls the payment from the bank
+    to the loan. No customer JWT needed — service Token only, exactly like
+    the card path.
+
+    Body follows the PostCustomerLoanACH schema. The ACH-protocol fields
+    (AchSecCode / AchTranCode / AchEffDate / AchTypeFlag / Type / IsApproved)
+    are FIRST-PASS standard values — WEB single-entry consumer debit,
+    27=checking / 37=savings debit, effective today — to be confirmed or
+    adjusted by the first test on a test loan (an ACH endpoint has ~25
+    fields and we can't know every required one without one live round-trip).
+
+    NOTE: ACH is submit-now / settle-later. A 2xx here means Vergent ACCEPTED
+    the debit for processing (it posts/settles over the next 1-3 business
+    days), not that funds have cleared — the UI says "submitted", not
+    "approved". Returns (ok, reference_id, detail, raw_body).
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    iso_now = now.isoformat()
+    eff_date = now.date().isoformat()
+    # NACHA transaction code: 27 = checking debit, 37 = savings debit.
+    tran_code = "37" if str(account_type or "").lower().startswith("sav") else "27"
+
+    body = {
+        "HeaderId":        int(loan_id),
+        "companyId":       VERGENT_COMPANY_ID,
+        "StoreId":         0,
+        "BankAcctId":      int(bank_id),
+        "Amount":          round(float(amount), 2),
+        "AchEffDate":      eff_date,
+        "AchSecCode":      "WEB",      # internet-initiated consumer debit
+        "AchTranCode":     tran_code,  # 27 checking / 37 savings debit
+        "AchTypeFlag":     0,
+        "AttemptNum":      1,
+        "ACHReturnsSoFar": 0,
+        "IsRetry":         False,
+        "IsApproved":      True,
+        "Type":            0,
+        "AchSchedId":      0,
+        "ScheduleId":      0,
+        "SendDate":        iso_now,
+        "Created":         iso_now,
+        "CreatedBy":       "CIF Portal",
+    }
+    path = f"/V1/PostCustomerLoanACH/{int(loan_id)}"
+    status, parsed, raw = _v1_request("POST", path, body=body)
+    log.info("ach POST status=%s loan=%s bank=%s amt=%s tran=%s body_head=%s",
+             status, loan_id, bank_id, round(float(amount), 2), tran_code,
+             (raw or "")[:500])
+
+    # Interpret: success = 2xx with NO populated Errors[]. Pull any
+    # reference id Vergent hands back. Parse raw too — _http swallows
+    # HTTPError bodies into raw only.
+    errors: list = []
+    ref: Optional[str] = None
+
+    def _scan(payload: Any) -> None:
+        nonlocal errors, ref
+        if not isinstance(payload, dict):
+            return
+        arr = payload.get("Errors") or payload.get("errors") or []
+        if isinstance(arr, list):
+            errors = [str(e).strip() for e in arr if e and str(e).strip()]
+        for k in ("AchId", "achId", "Id", "id", "TransactionId",
+                  "transactionId", "AchSchedId", "ScheduleId"):
+            v = payload.get(k)
+            if v and str(v) not in ("0", ""):
+                ref = str(v)
+                break
+
+    _scan(parsed)
+    if not errors and not ref and raw:
+        try:
+            reparsed = json.loads(raw)
+            if isinstance(reparsed, str) and reparsed.strip()[:1] in ("[", "{"):
+                reparsed = json.loads(reparsed)
+            _scan(reparsed)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    if status in (200, 201, 204) and not errors:
+        return True, ref, f"ach:{status}", (raw or "")
+
+    # Decline / error — surface Vergent's reason if present.
+    if errors:
+        reason = errors[-1]
+    elif raw:
+        reason = "Bank payment was not accepted. Please try again."
+    else:
+        reason = ("We couldn't reach the bank-payment processor. "
+                  "Please try again in a moment.")
+    return False, None, reason, (raw or "")
+
+
+
 def _luhn_ok(digits: str) -> bool:
     """Checksum-validate a card number. Purely defensive — Vergent will
     reject bad PANs on its side too."""
@@ -2126,6 +2229,39 @@ def _customer_owns_card(cid: str, card_id: int) -> bool:
     return False
 
 
+def _customer_owns_bank(cid: str, bank_id: int) -> bool:
+    """True iff bank_id is one of THIS customer's saved bank accounts.
+
+    Scopes by the customer's own GetCustomerBanks list (the service Token
+    can act on any customer's banks), with a fallback to the bank carried
+    on the customer's active loan (some customers have no GetCustomerBanks
+    row but do have a PaymentBankAccountId on the loan). Fails closed."""
+    try:
+        target = int(bank_id)
+    except (TypeError, ValueError):
+        return False
+    if target <= 0:
+        return False
+    status, body, _raw = _v1_request("GET", f"/V1/GetCustomerBanks?custId={cid}")
+    if status == 200 and isinstance(body, list):
+        for b in body:
+            if isinstance(b, dict):
+                try:
+                    if int(b.get("id") or b.get("Id") or b.get("bank_id") or 0) == target:
+                        return True
+                except (TypeError, ValueError):
+                    continue
+    # Fallback: the bank id on the customer's own active loan.
+    fb = _fallback_bank_from_loan(cid)
+    if fb:
+        try:
+            if int(fb.get("id") or 0) == target:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
+
+
 def _customer_owns_loan(cid: str, loan_id: int) -> bool:
     """True iff loan_id belongs to THIS customer. Fails closed."""
     try:
@@ -2192,13 +2328,13 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(body, dict):
         return _json_response(400, {"error": "invalid_body"})
 
-    # Card (Auto) on a saved Vergent card is the ONLY supported charge path.
-    # Vergent charges the saved card through its own Repay integration and
-    # records it natively as Card. The legacy Repay-direct + APIM branches
-    # further down are now unreachable (kept out of the request flow so a
-    # sandbox/false-success can never occur); they're slated for deletion in
-    # a follow-up cleanup.
-    if not body.get("useCardAuto"):
+    # Two supported real-time charge paths, both v1 + service Token:
+    #   • Card (Auto)  → useCardAuto + cardId  → PostCustomerLoanPayment
+    #   • Bank (ACH)   → useAch     + bankId   → PostCustomerLoanACH/{loanId}
+    # Vergent records each natively (Card / ACH). The legacy Repay-direct +
+    # APIM branches further down are unreachable (kept out of the request
+    # flow so a sandbox/false-success can never occur).
+    if not body.get("useCardAuto") and not body.get("useAch"):
         return _json_response(400, {"error": "unsupported_payment_method"})
 
     # ── Amount validation ──
@@ -2221,6 +2357,67 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
     if loan_id is None:
         active = _fetch_active_loan(cid)
         loan_id = active.get("id") if active else None
+
+    # ── Vergent ACH — real-time bank debit on a saved bank account ──
+    # Body: { useAch: true, bankId: <vergent bank acct id>, amount, loanId,
+    #         accountType? }. The bankId is the `id` from /api/my-banks
+    #         (GetCustomerBanks). Calls v1 PostCustomerLoanACH/{loanId} with
+    #         the service Token — the ACH twin of the Card (Auto) path below.
+    #         No CVV (banks don't have one). ACH is submit-now/settle-later.
+    if body.get("useAch") and body.get("bankId"):
+        try:
+            bank_id = int(body.get("bankId"))
+            loan_id_int = int(loan_id) if loan_id is not None else 0
+        except (TypeError, ValueError):
+            return _json_response(400, {"error": "invalid_ach_params"})
+        if not loan_id_int or not bank_id:
+            return _json_response(400, {"error": "missing_loan_or_bank"})
+
+        # Ownership: never trust ids from the body (the service token can
+        # debit ANY customer's bank), so confirm both belong to the
+        # signed-in customer before charging.
+        if not _customer_owns_bank(cid, bank_id):
+            return _json_response(403, {"error": "bank_not_owned"})
+        if not _customer_owns_loan(cid, loan_id_int):
+            return _json_response(403, {"error": "loan_not_owned"})
+
+        ok, ref, detail, raw = _charge_loan_ach_v1(
+            loan_id=loan_id_int, bank_id=bank_id, amount=amount,
+            account_type=str(body.get("accountType") or ""),
+        )
+        ledger_id = _record_payment_ledger(
+            cid=cid, loan_id=loan_id_int, amount=round(amount, 2),
+            result="0" if ok else "-1", transaction_id=ref,
+            result_text=("ACH submitted" if ok else detail),
+            last4=str(body.get("last4") or ""),
+            error_detail=None if ok else detail,
+        )
+        if ok:
+            return _json_response(200, {
+                "success":       True,
+                "via":           "ach",
+                "transactionId": ref,
+                "authAmount":    round(amount, 2),
+                "last4":         body.get("last4") or "",
+                "brand":         "Bank",
+                "resultText":    "Bank payment submitted",
+                "achPending":    True,
+                "loanId":        loan_id_int,
+                "bankId":        bank_id,
+                "ledgerId":      ledger_id,
+            })
+        # 200 + success:false so the frontend's decline handler shows
+        # Vergent's exact message; diag carries the raw body for the
+        # operator's first-test diagnosis (no PII — ids/amounts only).
+        return _json_response(200, {
+            "success":    False,
+            "via":        "ach",
+            "resultText": detail or "Bank payment was not accepted.",
+            "loanId":     loan_id_int,
+            "bankId":     bank_id,
+            "ledgerId":   ledger_id,
+            "diag":       (raw or "")[:600],
+        })
 
     # ── Vergent "Card (Auto)" — saved Vergent card, charged by Vergent ──
     # Body: { useCardAuto: true, cardId: <vergent card id>, amount,

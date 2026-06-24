@@ -98,6 +98,7 @@
     methods: [],
     bankAccounts: [],
     selectedMethodId: null,
+    selectedBankId: null,
     submitting: false,
     initialBalance: null,
   };
@@ -222,7 +223,20 @@
   // Leaves the "Card on file" fallback when there are no saved methods.
   function updateRepayLabel() {
     var els = document.querySelectorAll('[data-pay-repay-method]');
-    if (!els.length || !state.methods || !state.methods.length) return;
+    if (!els.length) return;
+    // Bank (ACH) selected — show the bank account on the summary.
+    if (state.selectedBankId) {
+      var bank = (state.bankAccounts || []).filter(function (b) {
+        return String(b.id) === String(state.selectedBankId);
+      })[0];
+      if (bank) {
+        els.forEach(function (el) {
+          el.textContent = (bank.accountType || 'Bank') + ' •• ' + (bank.last4 || '');
+        });
+        return;
+      }
+    }
+    if (!state.methods || !state.methods.length) return;
     var sel = state.methods.filter(function (m) { return m.methodId === state.selectedMethodId; })[0] || state.methods[0];
     if (sel) {
       var label = (sel.brand || 'Card') + ' •• ' + (sel.last4 || '');
@@ -437,7 +451,15 @@
       const last4 = b.last4 || b.mask || '';
       const bankName = b.bankName || b.institution || b.name || '';
       const isDefault = (b.isPrimary === true) || (b.isDefault === true);
+      // Selectable (radio in the shared payMethod group → mutually
+      // exclusive with cards) only when we have a real Vergent bank id to
+      // charge. Banks without an id (loan-fallback) stay display-only.
+      const bid = parseInt(b.id, 10);
+      const selectable = !isNaN(bid) && bid > 0;
       row.innerHTML =
+        (selectable
+          ? '<input type="radio" name="payMethod" value="bank:' + bid + '">'
+          : '') +
         bankMonoHtml(bankName) +
         '<div class="pay-method-body">' +
           '<div class="pay-method-brand">' + escapeHtml(acctType) +
@@ -445,7 +467,7 @@
           '<div class="pay-method-meta">' + escapeHtml(bankName) + '</div>' +
         '</div>' +
         (isDefault ? '<span class="pay-method-default">Default</span>' : '') +
-        chevron;
+        (selectable ? '' : chevron);
       list.appendChild(row);
     });
     wireBankLogos(list);
@@ -456,9 +478,12 @@
 
   function applyMethodSelection() {
     const btn = qs('#payChargeBtn');
-    const hasCard = !!state.selectedMethodId;
+    const hasSel = !!state.selectedMethodId || !!state.selectedBankId;
+    // CVV applies to cards only — hide it when paying by bank (ACH).
+    var cvvField = document.querySelector('.pay-field-cvv');
+    if (cvvField) cvvField.style.display = state.selectedBankId ? 'none' : '';
     if (btn && !state.submitting) {
-      btn.disabled = !hasCard;
+      btn.disabled = !hasSel;
       // Show the amount in the button label when we know it (from the amount
       // field, falling back to the loan balance). Falls back to plain
       // "Pay now" if neither is a positive number.
@@ -476,7 +501,16 @@
 
   function onMethodChange(e) {
     if (e.target && e.target.matches('input[name="payMethod"]')) {
-      state.selectedMethodId = e.target.value;
+      var val = String(e.target.value || '');
+      if (val.indexOf('bank:') === 0) {
+        // Bank (ACH) selected — clear any card selection (and vice versa);
+        // the shared radio group already enforces single-select visually.
+        state.selectedBankId = val.slice(5);
+        state.selectedMethodId = null;
+      } else {
+        state.selectedMethodId = val;
+        state.selectedBankId = null;
+      }
       applyMethodSelection();
     }
   }
@@ -672,18 +706,37 @@
   // ---------- Read + validate ----------
   function readPayForm() {
     const amount = parseFloat(String(qs('#payAmount').value || '').replace(/[^\d.]/g, ''));
+    // Bank (ACH) path — no CVV, no card. Returns a distinct `kind`.
+    if (state.selectedBankId) {
+      var bank = (state.bankAccounts || []).find(function (b) {
+        return String(b.id) === String(state.selectedBankId);
+      }) || {};
+      return {
+        kind: 'bank', amount: amount,
+        bankId: state.selectedBankId,
+        accountType: bank.accountType || '',
+        last4: bank.last4 || '',
+        loanId: state.loan && state.loan.id,
+      };
+    }
     const cvv = String(qs('#payCvv').value || '').trim();
     var sel = (state.methods || []).find(function (m) {
       return m.methodId === state.selectedMethodId;
     }) || {};
     return {
-      amount: amount, cvv: cvv,
+      kind: 'card', amount: amount, cvv: cvv,
       vergentCardId: sel.vergentCardId,
       last4: sel.last4, brand: sel.brand,
       loanId: state.loan && state.loan.id,
     };
   }
   function validatePayForm(f) {
+    if (f.kind === 'bank') {
+      if (!f.bankId) return 'Please choose a bank account.';
+      if (!f.amount || isNaN(f.amount) || f.amount <= 0) return 'Please enter a valid amount.';
+      if (f.amount > 5000) return 'Amount must be $5,000 or less.';
+      return null;
+    }
     if (!f.vergentCardId) return 'Please choose a saved card, or add one below.';
     if (!f.amount || isNaN(f.amount) || f.amount <= 0) return 'Please enter a valid amount.';
     if (f.amount > 5000) return 'Amount must be $5,000 or less.';
@@ -728,41 +781,57 @@
       btn.textContent = 'Processing payment…';
     }
 
-    api('/api/my-payment/charge', {
-      method: 'POST',
-      body: {
-        amount: form.amount,
-        useCardAuto: true,
-        cardId: form.vergentCardId,
-        last4: form.last4,
-        brand: form.brand,
-        cvv: form.cvv,
-        loanId: form.loanId,
-      },
-    })
+    // Build the request body for the selected tender. Card body is
+    // unchanged; bank (ACH) is the new branch.
+    var isBank = form.kind === 'bank';
+    var reqBody = isBank
+      ? {
+          amount:      form.amount,
+          useAch:      true,
+          bankId:      form.bankId,
+          accountType: form.accountType,
+          last4:       form.last4,
+          loanId:      form.loanId,
+        }
+      : {
+          amount:      form.amount,
+          useCardAuto: true,
+          cardId:      form.vergentCardId,
+          last4:       form.last4,
+          brand:       form.brand,
+          cvv:         form.cvv,
+          loanId:      form.loanId,
+        };
+
+    api('/api/my-payment/charge', { method: 'POST', body: reqBody })
       .then(function (res) {
-        // STRICT success gate — only show the receipt when the backend
-        // explicitly says success AND we have a real transaction id.
-        if (res && res.success === true && res.transactionId) {
+        // Success gate. Card: success + a real transaction id. Bank (ACH):
+        // success is enough — ACH is submit-now/settle-later and Vergent
+        // may not return a transaction id synchronously.
+        var ok = isBank ? (res && res.success === true)
+                        : (res && res.success === true && res.transactionId);
+        if (ok) {
           const paid = Number(res.authAmount || form.amount);
           const receipt = {
             amount:        paid,
             last4:         res.last4 || form.last4 || '',
-            brand:         res.brand || form.brand || '',
-            transactionId: res.transactionId,
+            brand:         res.brand || form.brand || (isBank ? 'Bank' : ''),
+            transactionId: res.transactionId || res.ledgerId || '',
             when:          Date.now(),
+            pending:       isBank ? true : !!res.achPending,
           };
           sessionStorage.setItem(SUCCESS_KEY, JSON.stringify(receipt));
           return loadLoan()
             .catch(function () {})
             .then(function () { showReceipt(receipt); });
         }
-        // Decline — surface the issuer's exact reason on the decline page.
+        // Decline — surface the exact reason on the decline page.
         showDecline({
-          reason: (res && res.resultText) || 'Card declined.',
+          reason: (res && res.resultText)
+                || (isBank ? 'Bank payment was not accepted.' : 'Card declined.'),
           amount: form.amount,
           last4:  form.last4 || (res && res.last4) || '',
-          brand:  form.brand || (res && res.brand) || 'Card',
+          brand:  form.brand || (res && res.brand) || (isBank ? 'Bank' : 'Card'),
         });
       })
       .catch(function (e2) {
@@ -775,6 +844,9 @@
           missing_loan_or_card:     'Please pick a saved card.',
           invalid_cardauto_params:  'Please pick a saved card.',
           card_not_owned:           'That card isn’t on your account. Please pick one of your saved cards.',
+          missing_loan_or_bank:     'Please pick a bank account.',
+          invalid_ach_params:       'Please pick a bank account.',
+          bank_not_owned:           'That bank account isn’t on your account. Please pick one of your saved accounts.',
           loan_not_owned:           'We couldn’t match that to your loan. Please refresh and try again.',
         };
         if (inlineMsgs[code]) { showError(inlineMsgs[code]); return; }
@@ -783,7 +855,7 @@
                 || 'We couldn\'t reach the payment processor. Please try again.',
           amount: form.amount,
           last4:  form.last4 || '',
-          brand:  form.brand || 'Card',
+          brand:  form.brand || (isBank ? 'Bank' : 'Card'),
         });
       })
       .then(function () {
@@ -947,6 +1019,10 @@
 
     const methodsList = qs('#paySavedMethods');
     if (methodsList) methodsList.addEventListener('change', onMethodChange);
+    // Bank rows live in a separate container but share the payMethod radio
+    // group, so the change listener must cover them too (ACH selection).
+    const banksList = qs('#payBankAccounts');
+    if (banksList) banksList.addEventListener('change', onMethodChange);
 
     // Add-card modal wiring.
     const addBtn = qs('#payAddCardBtn');
