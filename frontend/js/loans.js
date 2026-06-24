@@ -406,7 +406,6 @@
         '</div>' +
         '<div class="loans-card-right">' +
           '<span class="loans-status-pill">' + escapeHtml(pastStatusText(loan)) + '</span>' +
-          '<span class="loans-card-paid">Paid ' + escapeHtml(paid ? fmtDate(paid) : '—') + '</span>' +
         '</div>' +
         '<svg class="loans-card-chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c2cad3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>';
 

@@ -4138,9 +4138,17 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .home-loan { margin-bottom: 0 !important; }
   .home-mobile { margin-top: 0 !important; }
   .home-mobile > .app-cta-primary { margin-top: 0 !important; }
-  .home-loan:not(.loan-card--paidup):not(.loan-card--art) {
+  /* Same green-halo cut on the Loans + Payments active cards, so the shadow
+     doesn't read as extra space above the next section. */
+  .home-loan:not(.loan-card--paidup):not(.loan-card--art),
+  .loans-active:not(.loan-card--paidup):not(.loan-card--art),
+  .pay-summary:not(.loan-card--paidup):not(.loan-card--art) {
     box-shadow: 0 1px 4px rgba(13,84,45,.12) !important;
   }
+  /* Tighten the gap from the active card to the next section (Past loans /
+     Payment method) now that the halo is gone. */
+  .app-page .loans-stack { gap: 14px; }
+  .app-page .pay-stack { gap: 14px; }
 }
 
 /* ============================================================
@@ -4804,22 +4812,26 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .loan-card-figsub { margin: 4px 0 0; font-size: .92rem; font-weight: 700; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; }
 
 /* Mobile: 2x2 grid — amounts on top (Loan Amount | Current Balance), payment
-   info below (Due Date | Repayment Method). The vertical divider is centred in
-   the gutter (equal padding each side) and a full-width horizontal rule splits
-   the two rows, so the dividers read as a clean cross. */
+   info below (Due Date | Repayment Method). Centre dividers drawn as overlays:
+   a full-height vertical line down the middle (so it always meets the
+   horizontal rule, regardless of cell heights) + a full-width horizontal rule
+   between the two rows. */
 @media (max-width: 899px) {
   .loans-active .loan-card-figures {
     display: grid; grid-template-columns: 1fr 1fr; column-gap: 0; row-gap: 0;
+    position: relative;
   }
-  .loans-active .loan-card-fig { min-width: 0; }
-  /* Centred vertical divider: equal gap on each side of the column boundary.
-     border-left:none on the odd (left-column) cells kills the stray divider the
-     generic `.loan-card-fig + .loan-card-fig` rule would otherwise draw to the
-     left of Due Date. */
-  .loans-active .loan-card-fig:nth-child(odd) { padding-left: 0; padding-right: 18px; border-left: none; }
-  .loans-active .loan-card-fig:nth-child(even) { padding-left: 18px; border-left: 1px solid rgba(255,255,255,.22); }
-  /* Full-width horizontal divider between the two rows (space above + below so
-     the vertical dividers run continuously through it). */
+  /* Full-height vertical divider, centred on the column boundary. As an overlay
+     it spans top-to-bottom and meets the horizontal rule (a cell border-left
+     only spanned its own cell, so it stopped short of the rule). */
+  .loans-active .loan-card-figures::before {
+    content: ''; position: absolute; top: 0; bottom: 0; left: calc(50% - 0.5px);
+    width: 1px; background: rgba(255,255,255,.22);
+  }
+  .loans-active .loan-card-fig { min-width: 0; border-left: none; }
+  .loans-active .loan-card-fig:nth-child(odd) { padding-left: 0; padding-right: 18px; }
+  .loans-active .loan-card-fig:nth-child(even) { padding-left: 18px; }
+  /* Full-width horizontal divider between the two rows. */
   .loans-active .loan-card-fig:nth-child(1),
   .loans-active .loan-card-fig:nth-child(2) { padding-bottom: 16px; }
   .loans-active .loan-card-fig:nth-child(3),
