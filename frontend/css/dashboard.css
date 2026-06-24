@@ -2562,6 +2562,33 @@ button.dash-doc-download:disabled {
   color: var(--cif-muted);
   font-size: .92rem;
 }
+
+/* ── Bank (ACH) payment UX — pending treatment in the app's warning palette ── */
+.pay-ach-note {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+  background: #fff5e6; border: 1px solid #ffd591; color: #5a3300;
+  font-size: .9rem; line-height: 1.5;
+}
+.pay-ach-note svg { flex: 0 0 auto; color: #b76e00; margin-top: 1px; }
+/* "Processing" pill on the active-loan card */
+.pay-pill--pending { background: rgba(255,255,255,.92) !important; color: #8a5a00 !important; }
+/* Estimated-clear strip shown right under the active-loan card */
+.pay-pending-strip {
+  display: flex; gap: 10px; align-items: center;
+  margin: 10px 0 0; padding: 12px 14px; border-radius: 12px;
+  background: #fff5e6; border: 1px solid #ffd591; color: #5a3300;
+  font-size: .9rem; line-height: 1.45;
+}
+.pay-pending-strip svg { flex: 0 0 auto; color: #b76e00; }
+.pay-pending-strip strong { font-weight: 700; }
+/* Pending (ACH) receipt: amber icon + explanatory note */
+.pay-receipt.is-pending .pay-receipt-icon { background: #fff5e6; color: #b76e00; }
+.pay-receipt-note {
+  max-width: 420px; margin: -12px auto 24px; padding: 12px 14px;
+  border-radius: 10px; background: #fff5e6; border: 1px solid #ffd591;
+  color: #5a3300; font-size: .85rem; line-height: 1.5; text-align: left;
+}
 .pay-receipt-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

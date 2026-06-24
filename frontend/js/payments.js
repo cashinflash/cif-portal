@@ -16,6 +16,37 @@
   const TOKEN_KEY = 'cif_id_token';
   const LOGIN_URL = '/login.html';
   const SUCCESS_KEY = 'cif_payment_success';
+  // Bank (ACH) payments are pending for ~5 business days — tracked
+  // separately from the instant card-success banner.
+  const ACH_PENDING_KEY = 'cif_ach_pending';
+
+  // US Federal Reserve / bank holidays — ACH doesn't settle on these or on
+  // weekends. Keep in sync with _US_BANK_HOLIDAYS in handlers/payments.py.
+  const US_BANK_HOLIDAYS = [
+    '2026-01-01', '2026-01-19', '2026-02-16', '2026-05-25', '2026-06-19',
+    '2026-07-03', '2026-09-07', '2026-10-12', '2026-11-11', '2026-11-26',
+    '2026-12-25', '2027-01-01', '2027-01-18', '2027-02-15', '2027-05-31',
+    '2027-06-18', '2027-07-05', '2027-09-06', '2027-10-11', '2027-11-11',
+    '2027-11-25', '2027-12-24',
+  ];
+  function _ymd(d) {
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+  // The date `n` banking days from today (skips weekends + Fed holidays).
+  function addBusinessDays(n) {
+    var d = new Date();
+    var added = 0;
+    while (added < n) {
+      d.setDate(d.getDate() + 1);
+      var dow = d.getDay();
+      if (dow === 0 || dow === 6) continue;
+      if (US_BANK_HOLIDAYS.indexOf(_ymd(d)) !== -1) continue;
+      added++;
+    }
+    return _ymd(d);
+  }
 
   function qs(sel, root) { return (root || document).querySelector(sel); }
 
@@ -149,6 +180,8 @@
         pill.textContent = isPast ? (loan.status || 'Past due') : 'Current';
         pill.classList.toggle('dash-pill--past-due', isPast);
       }
+      // Bank (ACH) payment pending → "Processing" pill + estimated-clear strip.
+      _applyAchPending(card, qs('[data-pay-loan-status]', card), loan);
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
       // matching Home — independent of the pill so it works even if absent.
       var _st = (loan.status || '').toLowerCase();
@@ -773,12 +806,84 @@
     const err = validatePayForm(form);
     if (err) { showError(err); return; }
 
+    // Bank (ACH) gets a confirmation modal first (5-business-day notice +
+    // estimated clear date). Card pays immediately, as before.
+    if (form.kind === 'bank') { openAchConfirm(form); return; }
+    doCharge(form);
+  }
+
+  // ---------- ACH pending indicator (loan card) ----------
+  function _readAchPending(loan) {
+    var pend = null;
+    try { pend = JSON.parse(sessionStorage.getItem(ACH_PENDING_KEY) || 'null'); }
+    catch (e) { pend = null; }
+    if (!pend) return null;
+    if (loan && String(pend.loanId) !== String(loan.id)) return null;
+    // Expire once the estimated clear date has passed (+1 day grace).
+    if (pend.clearsBy) {
+      var exp = new Date(pend.clearsBy + 'T23:59:59').getTime() + 86400000;
+      if (Date.now() > exp) {
+        try { sessionStorage.removeItem(ACH_PENDING_KEY); } catch (e) { /* ignore */ }
+        return null;
+      }
+    }
+    return pend;
+  }
+  function _applyAchPending(card, pill, loan) {
+    var pend = _readAchPending(loan);
+    var strip = document.querySelector('[data-pay-pending-strip]');
+    if (!pend) { if (strip) strip.hidden = true; return; }
+    if (pill) {
+      pill.textContent = 'Processing';
+      pill.classList.remove('dash-pill--past-due');
+      pill.classList.add('pay-pill--pending');
+    }
+    if (card) {
+      if (!strip) {
+        strip = document.createElement('div');
+        strip.setAttribute('data-pay-pending-strip', '');
+        strip.className = 'pay-pending-strip';
+        card.parentNode.insertBefore(strip, card.nextSibling);
+      }
+      strip.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>' +
+        '<span>Bank payment of ' + money(pend.amount) +
+        ' is processing — estimated to clear by <strong>' +
+        formatDate(pend.clearsBy + 'T00:00:00') +
+        '</strong>. Your balance updates once it clears.</span>';
+      strip.hidden = false;
+    }
+  }
+
+  // ---------- ACH confirm modal ----------
+  var _pendingAchForm = null;
+  function openAchConfirm(form) {
+    _pendingAchForm = form;
+    var clears = addBusinessDays(5);
+    setText(qs('#payAchAmount'), money(form.amount));
+    var bankLabel = (form.accountType || 'bank account')
+      + (form.last4 ? ' •• ' + form.last4 : '');
+    setText(qs('#payAchBank'), bankLabel);
+    setText(qs('#payAchClears'), formatDate(clears + 'T00:00:00'));
+    var m = qs('#payAchModal');
+    if (!m) { _pendingAchForm = null; doCharge(form); return; }  // fallback
+    m.hidden = false;
+    requestAnimationFrame(function () { m.classList.add('is-open'); });
+  }
+  function closeAchConfirm() {
+    var m = qs('#payAchModal');
+    if (!m) return;
+    m.classList.remove('is-open');
+    m.hidden = true;
+  }
+
+  function doCharge(form) {
     state.initialBalance = state.loan ? Number(state.loan.balance) : null;
     const btn = qs('#payChargeBtn');
     state.submitting = true;
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Processing payment…';
+      btn.textContent = form.kind === 'bank' ? 'Submitting payment…' : 'Processing payment…';
     }
 
     // Build the request body for the selected tender. Card body is
@@ -818,9 +923,22 @@
             brand:         res.brand || form.brand || (isBank ? 'Bank' : ''),
             transactionId: res.transactionId || res.ledgerId || '',
             when:          Date.now(),
-            pending:       isBank ? true : !!res.achPending,
+            pending:       isBank,
+            clearsBy:      isBank ? (res.estimatedClearDate || addBusinessDays(5)) : null,
           };
-          sessionStorage.setItem(SUCCESS_KEY, JSON.stringify(receipt));
+          if (isBank) {
+            // ACH is pending (~5 business days) — do NOT write the instant
+            // card-success banner or imply the balance dropped. Record a
+            // pending marker the loan cards read instead.
+            try {
+              sessionStorage.setItem(ACH_PENDING_KEY, JSON.stringify({
+                amount: paid, clearsBy: receipt.clearsBy,
+                loanId: form.loanId, when: receipt.when,
+              }));
+            } catch (e2) { /* non-fatal */ }
+          } else {
+            sessionStorage.setItem(SUCCESS_KEY, JSON.stringify(receipt));
+          }
           return loadLoan()
             .catch(function () {})
             .then(function () { showReceipt(receipt); });
@@ -942,14 +1060,47 @@
     const brand  = (receipt && receipt.brand) || '';
     const txId   = (receipt && receipt.transactionId) || '';
     const when   = (receipt && receipt.when) || Date.now();
+    const pending  = !!(receipt && receipt.pending);
+    const clearsBy = receipt && receipt.clearsBy;
 
     qs('#payFormCard').hidden = true;
+
+    // Pending (ACH) vs received (card): swap the headline, subline, icon and
+    // the tender label so we never imply an ACH payment already posted.
+    var rcpt = qs('#payReceipt');
+    var h2 = rcpt && rcpt.querySelector('h2');
+    var subline = rcpt && rcpt.querySelector('.pay-receipt-subline');
+    var icon = rcpt && rcpt.querySelector('.pay-receipt-icon');
+    var firstDt = rcpt && rcpt.querySelector('.pay-receipt-grid dt');
+    var note = rcpt && rcpt.querySelector('[data-receipt-note]');
+    if (rcpt) rcpt.classList.toggle('is-pending', pending);
+    if (pending) {
+      if (h2) h2.textContent = 'Payment submitted';
+      if (subline) subline.textContent = clearsBy
+        ? ('Pending — estimated to clear by ' + formatDate(clearsBy + 'T00:00:00'))
+        : 'Pending — clears in about 5 business days';
+      if (icon) icon.innerHTML = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>';
+      if (firstDt) firstDt.textContent = 'Bank account';
+      if (note) {
+        note.textContent = 'Bank (ACH) payments take about 5 business days to clear. '
+          + 'Your loan balance updates once it clears. If the payment is returned '
+          + '(for example, insufficient funds) we’ll let you know.';
+        note.hidden = false;
+      }
+    } else {
+      if (h2) h2.textContent = 'Payment received';
+      if (subline) subline.textContent = 'applied to your loan';
+      if (icon) icon.innerHTML = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>';
+      if (firstDt) firstDt.textContent = 'Card';
+      if (note) { note.hidden = true; note.textContent = ''; }
+    }
+
     setText(qs('[data-receipt-amount]'),
       amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
 
     let cardLine = '—';
     if (brand && last4) cardLine = brand + ' ending ' + last4;
-    else if (last4)     cardLine = 'Card ending ' + last4;
+    else if (last4)     cardLine = (pending ? 'Bank ending ' : 'Card ending ') + last4;
     else if (brand)     cardLine = brand;
     setText(qs('[data-receipt-card]'), cardLine);
 
@@ -1033,6 +1184,21 @@
     if (addCancel) addCancel.addEventListener('click', closeAddCard);
     const addBackdrop = qs('#payAddCardBackdrop');
     if (addBackdrop) addBackdrop.addEventListener('click', closeAddCard);
+
+    // ACH confirm modal wiring.
+    const achConfirm = qs('#payAchConfirm');
+    if (achConfirm) achConfirm.addEventListener('click', function () {
+      closeAchConfirm();
+      if (_pendingAchForm) { var f = _pendingAchForm; _pendingAchForm = null; doCharge(f); }
+    });
+    const achCancel = qs('#payAchCancel');
+    if (achCancel) achCancel.addEventListener('click', function () {
+      _pendingAchForm = null; closeAchConfirm();
+    });
+    const achBackdrop = qs('#payAchBackdrop');
+    if (achBackdrop) achBackdrop.addEventListener('click', function () {
+      _pendingAchForm = null; closeAchConfirm();
+    });
 
     // Add-bank modal wiring.
     const addBankBtn = qs('#payAddBankBtn');

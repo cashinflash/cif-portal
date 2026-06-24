@@ -798,6 +798,56 @@ def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
 
 
 
+# US Federal Reserve / bank holidays (ACH doesn't settle on these or on
+# weekends). Extend this list each year. Used for the ACH effective date and
+# the customer-facing "clears in 5 business days" estimate.
+_US_BANK_HOLIDAYS = {
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-05-25", "2026-06-19",
+    "2026-07-03", "2026-09-07", "2026-10-12", "2026-11-11", "2026-11-26",
+    "2026-12-25",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-05-31", "2027-06-18",
+    "2027-07-05", "2027-09-06", "2027-10-11", "2027-11-11", "2027-11-25",
+    "2027-12-24",
+}
+
+
+def _pacific_today():
+    """Today's date in US/Pacific (the storefront's business time zone), so
+    a late-afternoon Pacific payment doesn't roll onto the next UTC day."""
+    from datetime import datetime, timezone, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    except Exception:
+        # Fallback if the tz database isn't present: approximate as UTC-8.
+        return (datetime.now(timezone.utc) - timedelta(hours=8)).date()
+
+
+def _is_banking_day(d) -> bool:
+    return d.weekday() < 5 and d.isoformat() not in _US_BANK_HOLIDAYS
+
+
+def _next_banking_day(d):
+    """The next banking day strictly after d (skips weekends + Fed holidays)."""
+    from datetime import timedelta
+    nd = d + timedelta(days=1)
+    while not _is_banking_day(nd):
+        nd += timedelta(days=1)
+    return nd
+
+
+def _add_banking_days(d, n: int):
+    """The date n banking days after d (skips weekends + Fed holidays)."""
+    from datetime import timedelta
+    cur = d
+    added = 0
+    while added < n:
+        cur += timedelta(days=1)
+        if _is_banking_day(cur):
+            added += 1
+    return cur
+
+
 def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
                         account_type: str = ""
                         ) -> Tuple[bool, Optional[str], str, str]:
@@ -825,7 +875,14 @@ def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     iso_now = now.isoformat()
-    eff_date = now.date().isoformat()
+    # Send Date = today (Pacific). Effective (EE) Date = the next BANKING day
+    # (skip weekends + Fed holidays). Vergent derives the Send Date as the
+    # banking day before the effective date, so EE = next-banking-day yields
+    # Send = today (the earlier test set AchEffDate = today, which Vergent
+    # read as the EE date and back-dated Send to yesterday).
+    send_day = _pacific_today()
+    send_date = send_day.isoformat()
+    eff_date = _next_banking_day(send_day).isoformat()
     # NACHA transaction code: 27 = checking debit, 37 = savings debit.
     tran_code = "37" if str(account_type or "").lower().startswith("sav") else "27"
 
@@ -836,7 +893,9 @@ def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
         "BankAcctId":      int(bank_id),
         "Amount":          round(float(amount), 2),
         "AchEffDate":      eff_date,
-        "AchSecCode":      "WEB",      # internet-initiated consumer debit
+        # PPD to match the storefront's manually-scheduled ACH entries
+        # (was WEB — both are consumer debits; PPD keeps the batch uniform).
+        "AchSecCode":      "PPD",
         "AchTranCode":     tran_code,  # 27 checking / 37 savings debit
         "AchTypeFlag":     0,
         "AttemptNum":      1,
@@ -846,7 +905,7 @@ def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
         "Type":            0,
         "AchSchedId":      0,
         "ScheduleId":      0,
-        "SendDate":        iso_now,
+        "SendDate":        send_date,  # today (Pacific), date-only
         "Created":         iso_now,
         "CreatedBy":       "CIF Portal",
     }
@@ -2402,6 +2461,9 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
                 "brand":         "Bank",
                 "resultText":    "Bank payment submitted",
                 "achPending":    True,
+                # ACH settles over ~5 banking days (weekends + Fed holidays
+                # excluded). Authoritative date for the pending UI.
+                "estimatedClearDate": _add_banking_days(_pacific_today(), 5).isoformat(),
                 "loanId":        loan_id_int,
                 "bankId":        bank_id,
                 "ledgerId":      ledger_id,

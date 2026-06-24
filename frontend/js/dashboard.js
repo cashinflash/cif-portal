@@ -721,6 +721,33 @@
         pill.classList.add('dash-pill--ok');
         pill.textContent = 'In good standing';
       }
+      // Bank (ACH) payment pending → override to "Processing" with an ETA.
+      // Set by the payments page; clears itself once the estimate passes.
+      try {
+        var _ap = JSON.parse(sessionStorage.getItem('cif_ach_pending') || 'null');
+        if (_ap && String(_ap.loanId) === String(loan.id) && _ap.clearsBy) {
+          var _exp = new Date(_ap.clearsBy + 'T23:59:59').getTime() + 86400000;
+          if (Date.now() <= _exp) {
+            pill.classList.remove('dash-pill--ok', 'dash-pill--warn', 'dash-pill--past-due');
+            pill.classList.add('dash-pill--warn');
+            pill.textContent = 'Processing';
+            card.classList.remove('is-pastdue', 'is-pastdue-soft');
+            if (note) note.classList.remove('is-pastdue-note');
+            if (noteText) {
+              var _amt = Number(_ap.amount || 0).toLocaleString('en-US', {
+                style: 'currency', currency: 'USD',
+                minimumFractionDigits: 2, maximumFractionDigits: 2,
+              });
+              noteText.textContent = 'Bank payment of ' + _amt
+                + ' is processing — estimated to clear by '
+                + formatDate(_ap.clearsBy + 'T00:00:00')
+                + '. Your balance updates once it clears.';
+            }
+          } else {
+            sessionStorage.removeItem('cif_ach_pending');
+          }
+        }
+      } catch (e) { /* non-fatal */ }
     }
   }
 

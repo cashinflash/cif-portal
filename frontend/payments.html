@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260624l">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260624q">
   <script>
     (function(){
       try {
@@ -474,12 +474,42 @@
             <dd data-receipt-confirmation>&mdash;</dd>
           </div>
         </dl>
+        <p class="pay-receipt-note" data-receipt-note hidden></p>
 
         <div class="pay-actions pay-actions--center">
           <a href="/dashboard.html" class="btn-login">Back to dashboard</a>
           <button type="button" class="btn-apply" id="payAgainBtn">Make another payment</button>
         </div>
       </section>
+
+      <!-- ACH reminder modal — shown before submitting a bank payment. -->
+      <div class="profile-modal" id="payAchModal" hidden>
+        <button type="button" class="profile-modal-backdrop" id="payAchBackdrop" aria-label="Close"></button>
+        <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="payAchTitle">
+          <div class="profile-modal-head">
+            <h3 class="profile-modal-title" id="payAchTitle">Confirm bank payment</h3>
+          </div>
+          <div class="profile-modal-body">
+            <p class="profile-modal-intro">
+              You're paying <strong id="payAchAmount">$0.00</strong> from your bank account
+              <strong id="payAchBank">checking</strong>.
+            </p>
+            <div class="pay-ach-note">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>
+              <div>
+                Bank (ACH) payments take about <strong>5 business days</strong> to clear.
+                We expect this to clear by <strong id="payAchClears">&mdash;</strong>.
+                Your loan balance won't update until it clears, and an ACH payment can be
+                returned (for example, for insufficient funds).
+              </div>
+            </div>
+            <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+              <button type="button" class="btn-login" id="payAchCancel">Cancel</button>
+              <button type="button" class="btn-apply" id="payAchConfirm">Submit payment</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <p class="pay-help-line">
         Need help? Call us at <a href="tel:+18889999859">(888) 999-9859</a> or visit any Cash in Flash location.
@@ -530,6 +560,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/payments.js?v=20260624p"></script>
+  <script src="/js/payments.js?v=20260624q"></script>
 </body>
 </html>
