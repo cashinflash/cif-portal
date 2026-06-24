@@ -145,7 +145,7 @@
         // Match the Home card: "In good standing" for a current loan, red past-due otherwise.
         var st = (loan.status || '').toLowerCase();
         var isPast = st.indexOf('past') !== -1 || st.indexOf('late') !== -1 || st.indexOf('delinq') !== -1;
-        pill.textContent = isPast ? (loan.status || 'Past due') : 'In good standing';
+        pill.textContent = isPast ? (loan.status || 'Past due') : 'Current';
         pill.classList.toggle('dash-pill--past-due', isPast);
       }
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
@@ -249,6 +249,28 @@
     return '<span class="pay-method-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>';
   }
 
+  // Shared "View more (N)" / "Show less" toggle for a method list (cards or
+  // banks). Rows after the first carry .pay-method--hidden; this reveals them.
+  function makeViewMore(list, hiddenCount) {
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'pay-viewmore';
+    more.textContent = 'View more (' + hiddenCount + ')';
+    more.addEventListener('click', function () {
+      var hidden = list.querySelectorAll('.pay-method.pay-method--hidden');
+      if (hidden.length) {
+        hidden.forEach(function (el) { el.classList.remove('pay-method--hidden'); });
+        more.textContent = 'Show less';
+      } else {
+        list.querySelectorAll('.pay-method').forEach(function (el, idx) {
+          if (idx > 0) el.classList.add('pay-method--hidden');
+        });
+        more.textContent = 'View more (' + hiddenCount + ')';
+      }
+    });
+    return more;
+  }
+
   function renderMethods() {
     const list = qs('#paySavedMethods');
     const noCards = qs('#payNoCardsHint');
@@ -292,28 +314,14 @@
       list.appendChild(label);
     });
 
-    // "View more (N)" toggle — reveals the hidden cards. All cards stay
-    // selectable; this is purely a show/hide of rows already in the DOM.
-    if (state.methods.length > 1) {
-      const more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'pay-viewmore';
-      const hiddenCount = state.methods.length - 1;
-      more.textContent = 'View more (' + hiddenCount + ')';
-      more.addEventListener('click', function () {
-        const hidden = list.querySelectorAll('.pay-method.pay-method--hidden');
-        if (hidden.length) {
-          hidden.forEach(function (el) { el.classList.remove('pay-method--hidden'); });
-          more.textContent = 'Show less';
-        } else {
-          // Re-hide every card after the first.
-          list.querySelectorAll('.pay-method').forEach(function (el, idx) {
-            if (idx > 0) el.classList.add('pay-method--hidden');
-          });
-          more.textContent = 'View more (' + hiddenCount + ')';
-        }
-      });
-      list.appendChild(more);
+    // "View more (N)" toggle — rendered into the actions row (left of the
+    // Add button). All cards stay selectable; purely a show/hide of rows.
+    const cardMoreSlot = qs('#payCardViewMore');
+    if (cardMoreSlot) {
+      cardMoreSlot.innerHTML = '';
+      if (state.methods.length > 1) {
+        cardMoreSlot.appendChild(makeViewMore(list, state.methods.length - 1));
+      }
     }
 
     updateRepayLabel();
@@ -402,6 +410,8 @@
     const list = qs('#payBankAccounts');
     if (!list) return;
     list.innerHTML = '';
+    var bankMore = qs('#payBankViewMore');
+    if (bankMore) bankMore.innerHTML = '';
 
     const bankSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="8" y1="10" x2="8" y2="21"/><line x1="12" y1="10" x2="12" y2="21"/><line x1="16" y1="10" x2="16" y2="21"/></svg>';
     const chevron = '<span class="pay-method-bankchev" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span>';
@@ -422,7 +432,7 @@
 
     state.bankAccounts.forEach(function (b, idx) {
       const row = document.createElement('div');
-      row.className = 'pay-method pay-method-bank';
+      row.className = 'pay-method pay-method-bank' + (idx > 0 ? ' pay-method--hidden' : '');
       const acctType = b.accountType || b.type || 'Checking';
       const last4 = b.last4 || b.mask || '';
       const bankName = b.bankName || b.institution || b.name || '';
@@ -439,6 +449,9 @@
       list.appendChild(row);
     });
     wireBankLogos(list);
+    if (bankMore && state.bankAccounts.length > 1) {
+      bankMore.appendChild(makeViewMore(list, state.bankAccounts.length - 1));
+    }
   }
 
   function applyMethodSelection() {

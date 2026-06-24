@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260624j">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260624k">
   <script>
     (function(){
       try {
@@ -203,17 +203,23 @@
               <p id="payNoCardsHint" hidden class="pay-nocards-hint">
                 You don't have a saved card yet &mdash; add a debit card to make a payment.
               </p>
-              <button type="button" id="payAddCardBtn" class="pay-addcard-btn">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Add a debit card
-              </button>
+              <div class="pay-method-actions">
+                <span id="payCardViewMore" class="pay-viewmore-slot"></span>
+                <button type="button" id="payAddCardBtn" class="pay-addcard-btn">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add a debit card
+                </button>
+              </div>
 
               <p class="pay-method-group-label pay-method-group-label--bank">Bank account</p>
               <div id="payBankAccounts"></div>
-              <button type="button" id="payAddBankBtn" class="pay-addcard-btn">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Add a bank account
-              </button>
+              <div class="pay-method-actions">
+                <span id="payBankViewMore" class="pay-viewmore-slot"></span>
+                <button type="button" id="payAddBankBtn" class="pay-addcard-btn">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add a bank account
+                </button>
+              </div>
 
               <div class="pay-fieldrow">
                 <div class="pay-field-amount">
@@ -524,6 +530,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/payments.js?v=20260624j"></script>
+  <script src="/js/payments.js?v=20260624k"></script>
 </body>
 </html>

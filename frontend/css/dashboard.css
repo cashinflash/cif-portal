@@ -4684,6 +4684,11 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
   font-family: inherit;
 }
 .pay-addcard-btn:hover { background: #ecf5fb; border-color: #4a9bd6; }
+/* Cards / Bank: "View more" (left) + Add button (right) on one row. The empty
+   view-more slot keeps its place so space-between pins Add to the right. */
+.pay-method-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.pay-method-actions .pay-addcard-btn { width: auto; margin-top: 0; }
+.pay-method-actions .pay-viewmore { margin: 0; }
 
 .pay-nocards-hint { margin: 8px 0 0; color: #475569; font-size: .9rem; line-height: 1.5; }
 
