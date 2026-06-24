@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260624l">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260624m">
   <script>
     (function(){
       try {
@@ -279,6 +279,35 @@
             Your payment is secure and encrypted.
           </p>
         </form>
+
+        <!-- Schedule for later — SEPARATE from "Pay now" above. Lives
+             outside the charge <form> so it can never trigger the live
+             submit. Reuses the selected card + amount, adds a future
+             date, and POSTs /api/my-payment/schedule (never charges
+             today). -->
+        <div class="app-surface pay-schedule-card" id="payScheduleCard">
+          <div class="pay-schedule-head">
+            <span class="pay-schedule-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </span>
+            <div class="pay-schedule-copy">
+              <h2 class="home-card-title">Schedule for later</h2>
+              <p class="home-card-sub">Pay on a future date with the card and amount you picked above &mdash; we'll charge it automatically that day.</p>
+            </div>
+          </div>
+          <div class="pay-schedule-row">
+            <div class="pay-field-date">
+              <label class="pay-field-label" for="payScheduleDate">Payment date</label>
+              <input type="date" id="payScheduleDate" name="scheduleDate" class="pay-input pay-input--date">
+            </div>
+            <button type="button" class="pay-schedule-btn" id="payScheduleBtn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>
+              <span id="payScheduleBtnLabel">Schedule payment</span>
+            </button>
+          </div>
+          <p class="pay-error" id="payScheduleError" hidden></p>
+          <p class="pay-schedule-ok" id="payScheduleOk" hidden></p>
+        </div>
       </section>
 
       <!-- Add-card modal (saves a debit card to Vergent; never charges).
@@ -530,6 +559,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/payments.js?v=20260624k"></script>
+  <script src="/js/payments.js?v=20260624m"></script>
 </body>
 </html>

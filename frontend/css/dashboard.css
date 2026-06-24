@@ -4743,6 +4743,37 @@ a.app-cta-primary[href*="payments.html"]:hover {
 }
 .pay-secure-line svg { color: #0E8741; flex: 0 0 auto; }
 
+/* ── Schedule for later — future-dated card payment. A calm secondary
+   section below the green "Pay now" CTA, in the brand-blue/green family. ── */
+.pay-schedule-card { margin-top: 16px; }
+.pay-schedule-head { display: flex; align-items: flex-start; gap: 12px; }
+.pay-schedule-icon {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 10px;
+  background: #f3f9fd; color: #1a4d6b; border: 1px solid #d6e9f6;
+}
+.pay-schedule-copy { min-width: 0; }
+.pay-schedule-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.pay-field-date { flex: 1 1 200px; min-width: 0; }
+.pay-input--date { max-width: 100%; }
+.pay-schedule-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 13px 20px; border: 1.5px solid #0E8741; border-radius: 12px;
+  background: #fff; color: #0E8741; font-weight: 700; font-size: .95rem;
+  cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+.pay-schedule-btn:hover { background: #e8f5ee; }
+.pay-schedule-btn:disabled { opacity: .6; cursor: default; }
+.pay-schedule-ok {
+  margin: 14px 0 0; padding: 10px 12px; border-radius: 8px;
+  background: #e8f5ee; color: #1a6b3c; border: 1px solid #bfe6cf;
+  font-size: .9rem; font-weight: 600;
+}
+.pay-schedule-card .pay-error { margin: 14px 0 0; }
+@media (max-width: 560px) {
+  .pay-schedule-btn { width: 100%; flex: 1 1 100%; }
+}
+
 /* Two-up cards once there's room. */
 @media (min-width: 760px) {
   .pay-grid { grid-template-columns: 1fr 1fr; align-items: start; }

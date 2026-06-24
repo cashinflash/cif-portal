@@ -797,6 +797,150 @@ def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
     return False, None, reason, (raw or "")
 
 
+# ─────────────────────────────────────────
+# Scheduled card payments (FUTURE date) — SEPARATE path from the live
+# immediate charge above. _charge_card_auto_v1 / post_charge are left
+# byte-for-byte untouched; scheduling rides the exact same proven v1
+# Card-Auto rail (PostCustomerLoanPayment, service Token, PaymentMethod
+# 10) with the customer's chosen future PaymentDate instead of "now".
+# ─────────────────────────────────────────
+def _interpret_loan_payment_response(
+    status: int, parsed: Any, raw: str
+) -> Tuple[bool, Optional[str], str]:
+    """Interpret a PostCustomerLoanPayment response into
+    (ok, transaction_id, detail).
+
+    This is a faithful copy of the success/decline decision logic inside
+    _charge_card_auto_v1, extracted so the scheduled-payment path can
+    reuse the EXACT same rules. _charge_card_auto_v1 deliberately keeps
+    its own inline copy so the proven live charge path stays untouched —
+    do not refactor the live function to call this.
+    """
+    def _extract_errors(payload: Any) -> list:
+        if isinstance(payload, list):
+            return [str(e).strip() for e in payload if e]
+        if isinstance(payload, dict):
+            arr = payload.get("Errors") or payload.get("errors") or []
+            return [str(e).strip() for e in arr if e]
+        return []
+
+    def _extract_txn(payload: Any) -> Optional[str]:
+        if not isinstance(payload, dict):
+            return None
+        for key in ("TransactionId", "transactionId", "TxnId", "txnId"):
+            v = payload.get(key)
+            if v and str(v) not in ("0", ""):
+                return str(v)
+        return None
+
+    errors = _extract_errors(parsed)
+    txn = _extract_txn(parsed)
+
+    if not errors and not txn and raw:
+        try:
+            reparsed = json.loads(raw)
+            if isinstance(reparsed, str) and reparsed.strip()[:1] in ("[", "{"):
+                reparsed = json.loads(reparsed)
+            errors = _extract_errors(reparsed)
+            if not txn:
+                txn = _extract_txn(reparsed)
+        except (json.JSONDecodeError, ValueError):
+            import re
+            for m in re.findall(r'"([^"\\]{6,400})"', raw):
+                low = m.lower()
+                if ("declin" in low or "insufficient" in low
+                        or "cvv" in low or "expired" in low
+                        or "invalid" in low or "limit" in low):
+                    errors.append(m)
+                    break
+
+    if status in (200, 201) and txn and not errors:
+        return True, txn, f"post:{status}"
+
+    reason = ""
+    if errors:
+        cleaned = [
+            e for e in errors
+            if e and not e.lower().startswith("error processing payment")
+        ]
+        reason = cleaned[-1] if cleaned else errors[-1]
+        if reason.lower().startswith("payment declined: "):
+            reason = reason[len("payment declined: "):]
+    elif raw:
+        reason = ("We couldn't reach the payment processor. "
+                  "Please try again in a moment.")
+    else:
+        reason = "Card declined."
+    return False, None, reason
+
+
+def _validate_future_date(raw: Any) -> Optional[str]:
+    """Parse a customer-supplied date → a normalized ISO-8601 string at
+    midnight ('YYYY-MM-DDT00:00:00', the exact format Vergent's own
+    portal sends for a scheduled card payment) IF it's a valid FUTURE
+    date, else None.
+
+    Accepts 'YYYY-MM-DD' (the <input type=date> wire format) or a longer
+    ISO timestamp (we read the leading date part). Rejects today and the
+    past — "pay now" goes through /charge, not here — and caps the
+    horizon at 90 days out to bound fat-finger far-future schedules.
+    """
+    from datetime import datetime, timezone, timedelta
+    if not raw:
+        return None
+    s = str(raw).strip()
+    try:
+        parsed_date = datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+    today = datetime.now(timezone.utc).date()
+    if parsed_date <= today:
+        return None
+    if parsed_date > today + timedelta(days=90):
+        return None
+    return f"{parsed_date.isoformat()}T00:00:00"
+
+
+def _schedule_card_payment_v1(*, loan_id: int, card_id: int, amount: float,
+                              payment_date: str, source: int = 72
+                              ) -> Tuple[bool, Optional[str], str, str]:
+    """Schedule a saved-card payment for a FUTURE date.
+
+    A deliberate, near-verbatim clone of _charge_card_auto_v1: SAME
+    endpoint (/V1/PostCustomerLoanPayment), SAME auth (v1 service
+    Token), SAME PaymentMethod 10 (Card Auto), SAME body shape. The ONLY
+    differences:
+      • PaymentDate is the customer's chosen FUTURE ISO date, not now.
+      • The Note marks the row as scheduled.
+      • No CardCvv — the customer isn't present at charge time and the
+        card is already tokenized on the Vergent profile.
+
+    The proven immediate-charge function is left completely untouched;
+    scheduling rides the exact same rail, just dated ahead. Whether
+    Vergent itself DEFERS the charge to PaymentDate (native scheduling)
+    vs. charges on receipt is what the first test on a test loan
+    determines — if it charges immediately we move the deferral to our
+    own timer and keep this same call. Returns (ok, txn_id, detail, raw).
+    """
+    body = {
+        "CompanyId":     VERGENT_COMPANY_ID,
+        "StoreId":       0,
+        "UserId":        0,
+        "HeaderId":      int(loan_id),
+        "PaymentDate":   str(payment_date),
+        "PaymentAmount": round(float(amount), 2),
+        "PaymentMethod": 10,            # Card (Auto)
+        "PaymentSource": int(source),   # 72 = Online Portal
+        "CardId":        int(card_id),
+        "Notes":         "[CIF Portal] Scheduled card payment (online portal)",
+    }
+    status, parsed, raw = _v1_request(
+        "POST", "/V1/PostCustomerLoanPayment", body=body)
+    log.info("schedule-card POST status=%s date=%s body_head=%s",
+             status, payment_date, (raw or "")[:600])
+    ok, txn, detail = _interpret_loan_payment_response(status, parsed, raw)
+    return ok, txn, detail, (raw or "")
+
 
 def _luhn_ok(digits: str) -> bool:
     """Checksum-validate a card number. Purely defensive — Vergent will
@@ -2625,6 +2769,111 @@ def _get_repay_rgapi_creds() -> Optional[Dict[str, Any]]:
 # ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
+def post_schedule(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-payment/schedule
+
+    Schedule a saved-card payment for a FUTURE date. This is a SEPARATE
+    path from /charge (the live immediate-charge flow, left untouched).
+    Body:
+        amount      (number, required)
+        cardId      (int,    required) — Vergent card id (from /api/my-cards)
+        paymentDate (string, required) — 'YYYY-MM-DD', must be in the future
+        loanId      (number, optional) — defaults to the active loan
+        last4       (string, optional) — for the ledger row only
+
+    Rides the exact same proven v1 Card-Auto rail as /charge, just with
+    the customer's chosen future PaymentDate. On success returns
+    { success: true, scheduledFor, transactionId, ... }.
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_json"})
+    if not isinstance(body, dict):
+        return _json_response(400, {"error": "invalid_body"})
+
+    # ── Amount — same bounds as the live charge ──
+    try:
+        amount = float(body.get("amount") or 0)
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_amount"})
+    if amount <= 0 or amount > 5000:
+        return _json_response(400, {"error": "amount_out_of_range"})
+
+    # ── Future date (rejects today/past; caps at 90 days out) ──
+    iso_date = _validate_future_date(body.get("paymentDate"))
+    if not iso_date:
+        return _json_response(400, {"error": "invalid_or_past_date"})
+
+    # ── Saved card ──
+    try:
+        card_id = int(body.get("cardId"))
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_card"})
+
+    # ── Loan — explicit if provided, else the active loan ──
+    loan_id = body.get("loanId")
+    if loan_id is None:
+        active = _fetch_active_loan(cid)
+        loan_id = active.get("id") if active else None
+    try:
+        loan_id_int = int(loan_id) if loan_id is not None else 0
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "invalid_loan"})
+    if not loan_id_int or not card_id:
+        return _json_response(400, {"error": "missing_loan_or_card"})
+
+    # ── Ownership — never trust ids from the body. The v1 service token
+    #    can act on ANY customer, so confirm both the card and the loan
+    #    belong to the signed-in customer before scheduling. ──
+    if not _customer_owns_card(cid, card_id):
+        return _json_response(403, {"error": "card_not_owned"})
+    if not _customer_owns_loan(cid, loan_id_int):
+        return _json_response(403, {"error": "loan_not_owned"})
+
+    ok, txn, detail, _raw = _schedule_card_payment_v1(
+        loan_id=loan_id_int, card_id=card_id, amount=amount,
+        payment_date=iso_date,
+    )
+
+    # Ledger row, tagged "Scheduled" so it's distinguishable from a live
+    # charge in our audit trail. Best-effort (never blocks the response).
+    ledger_id = _record_payment_ledger(
+        cid=cid, loan_id=loan_id_int, amount=round(amount, 2),
+        result="0" if ok else "-1", transaction_id=txn,
+        result_text=("Scheduled" if ok else (detail or "")),
+        last4=str(body.get("last4") or ""),
+        error_detail=None if ok else detail,
+    )
+
+    if ok:
+        return _json_response(200, {
+            "success":       True,
+            "via":           "schedule_card_auto",
+            "transactionId": txn,
+            "scheduledFor":  iso_date,
+            "amount":        round(amount, 2),
+            "loanId":        loan_id_int,
+            "cardId":        card_id,
+            "ledgerId":      ledger_id,
+        })
+    # 200 + success:false so the frontend surfaces Vergent's exact
+    # message (mirrors the /charge contract).
+    return _json_response(200, {
+        "success":    False,
+        "via":        "schedule_card_auto",
+        "resultText": detail or "We couldn't schedule that payment.",
+        "loanId":     loan_id_int,
+        "cardId":     card_id,
+        "ledgerId":   ledger_id,
+    })
+
+
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     # Keep-warm ping (EventBridge schedule) — return immediately, no Vergent.
     if isinstance(event, dict) and event.get("warmup"):
@@ -2672,6 +2921,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_loan_summary(event)
         if path.endswith("/my-payment/charge") and method == "POST":
             return post_charge(event)
+        if path.endswith("/my-payment/schedule") and method == "POST":
+            return post_schedule(event)
         if path.endswith("/my-payment-methods") and method == "GET":
             return get_my_payment_methods(event)
         # /api/my-payment-methods/{methodId}

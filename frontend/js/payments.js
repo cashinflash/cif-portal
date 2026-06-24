@@ -793,6 +793,100 @@
       });
   }
 
+  // ---------- Schedule for a future date ----------
+  // SEPARATE from submitPayment (the live "Pay now" path, untouched).
+  // Reuses the selected card + amount, adds a future date, and POSTs
+  // /api/my-payment/schedule. Never charges today.
+  function clearScheduleMsgs() {
+    var e = qs('#payScheduleError'); if (e) { e.hidden = true; e.textContent = ''; }
+    var k = qs('#payScheduleOk');    if (k) { k.hidden = true; k.textContent = ''; }
+  }
+  function showScheduleError(msg) {
+    var el = qs('#payScheduleError');
+    if (!el) return;
+    el.textContent = msg || "We couldn't schedule that payment. Please try again.";
+    el.hidden = false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function setScheduleBtn(label, disabled) {
+    var btn = qs('#payScheduleBtn');
+    if (btn) btn.disabled = !!disabled;
+    var lbl = qs('#payScheduleBtnLabel');
+    if (lbl) lbl.textContent = label;
+  }
+  function submitSchedule() {
+    if (state.submitting) return;
+    clearScheduleMsgs();
+
+    // Same selected card + amount the live charge reads — no CVV needed
+    // for a scheduled charge (card is already tokenized at Vergent).
+    var form = readPayForm();
+    var dateEl = qs('#payScheduleDate');
+    var dateVal = dateEl ? String(dateEl.value || '').trim() : '';
+
+    if (!form.vergentCardId) { showScheduleError('Please choose a saved card, or add one below.'); return; }
+    if (!form.amount || isNaN(form.amount) || form.amount <= 0) { showScheduleError('Please enter a valid amount above.'); return; }
+    if (form.amount > 5000) { showScheduleError('Amount must be $5,000 or less.'); return; }
+    if (!dateVal) { showScheduleError('Please pick a future payment date.'); return; }
+    // Client-side future check; the backend re-validates and is authoritative.
+    var picked = new Date(dateVal + 'T00:00:00');
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    if (isNaN(picked.getTime()) || picked <= today) {
+      showScheduleError('Please pick a date after today.'); return;
+    }
+
+    state.submitting = true;
+    setScheduleBtn('Scheduling…', true);
+
+    api('/api/my-payment/schedule', {
+      method: 'POST',
+      body: {
+        amount:      form.amount,
+        cardId:      form.vergentCardId,
+        paymentDate: dateVal,
+        last4:       form.last4,
+        loanId:      form.loanId,
+      },
+    })
+      .then(function (res) {
+        if (res && res.success === true) {
+          var when = formatDate(res.scheduledFor || (dateVal + 'T00:00:00'));
+          var ok = qs('#payScheduleOk');
+          if (ok) {
+            ok.textContent = 'Scheduled ' + money(res.amount || form.amount) +
+              ' for ' + when +
+              (form.brand ? ' on ' + form.brand : '') +
+              (form.last4 ? ' ••••' + form.last4 : '') + '.';
+            ok.hidden = false;
+            ok.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          if (dateEl) dateEl.value = '';
+        } else {
+          showScheduleError((res && res.resultText) ||
+            "We couldn't schedule that payment.");
+        }
+      })
+      .catch(function (e2) {
+        var errBody = (e2 && e2.body) || {};
+        var code = errBody.error || errBody.code || '';
+        var msgs = {
+          invalid_amount:       'Please enter a valid amount above.',
+          amount_out_of_range:  'Amount must be between $0.01 and $5,000.',
+          invalid_or_past_date: 'Please pick a date after today (within 90 days).',
+          invalid_card:         'Please pick a saved card.',
+          missing_loan_or_card: 'Please pick a saved card.',
+          card_not_owned:       'That card isn’t on your account. Please pick one of your saved cards.',
+          loan_not_owned:       'We couldn’t match that to your loan. Please refresh and try again.',
+        };
+        showScheduleError(msgs[code] || errBody.resultText ||
+          "We couldn't schedule that payment. Please try again.");
+      })
+      .then(function () {
+        state.submitting = false;
+        setScheduleBtn('Schedule payment', false);
+      });
+  }
+
   // ---------- Save a new card (from the modal) ----------
   function saveCard(e) {
     if (e) e.preventDefault();
@@ -947,6 +1041,20 @@
 
     const methodsList = qs('#paySavedMethods');
     if (methodsList) methodsList.addEventListener('change', onMethodChange);
+
+    // Schedule-for-later wiring (separate from the Pay-now submit).
+    const schedBtn = qs('#payScheduleBtn');
+    if (schedBtn) schedBtn.addEventListener('click', submitSchedule);
+    const schedDate = qs('#payScheduleDate');
+    if (schedDate) {
+      // Constrain the native picker to tomorrow … +90 days to mirror
+      // the backend (which rejects today/past and caps at 90 days).
+      const t = new Date();
+      const pad = function (n) { return String(n).padStart(2, '0'); };
+      const ymd = function (d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+      schedDate.min = ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1));
+      schedDate.max = ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + 90));
+    }
 
     // Add-card modal wiring.
     const addBtn = qs('#payAddCardBtn');
