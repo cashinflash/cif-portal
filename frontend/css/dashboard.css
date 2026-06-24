@@ -4706,9 +4706,10 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
   .pay-grid { grid-template-columns: 1fr 1fr; align-items: start; }
 }
 
-/* Desktop: a touch more breathing room, matching the home cards. */
+/* Desktop: match the loans/profile content width (1040px) so the payments
+   page lines up with Home and Loans instead of reading narrower. */
 @media (min-width: 900px) {
-  .pay-stack { gap: 20px; max-width: 800px; }
+  .pay-stack { gap: 20px; max-width: 1040px; }
   .pay-now-btn { max-width: 100%; }
 }
 
