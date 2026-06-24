@@ -129,8 +129,11 @@
       var hasActiveLoan = !!(loan && Number(loan.balance) > 0);
       var bannerActive = document.querySelector('.app-loan-banner');
       if (bannerActive) bannerActive.style.display = hasActiveLoan ? 'none' : '';
-      setText(qs('[data-pay-loan-id]', card), '#' + (loan.publicId || loan.id || '—'));
-      setText(qs('[data-pay-balance]', card), money(loan.balance).replace(/^\$/, ''));
+      setText(qs('[data-pay-loan-id]', card), (loan.publicId || loan.id || '—'));
+      setText(qs('[data-pay-balance]', card), money(loan.balance));
+      var _funded = (loan.principal != null ? loan.principal
+        : (loan.principalBalance != null ? loan.principalBalance : null));
+      setText(qs('[data-pay-funded]', card), _funded != null ? money(_funded) : '—');
       const caption = qs('[data-pay-caption]', card);
       if (caption) {
         // In the redesigned card this value sits under the "Due date" label,

@@ -4138,12 +4138,13 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .home-loan { margin-bottom: 0 !important; }
   .home-mobile { margin-top: 0 !important; }
   .home-mobile > .app-cta-primary { margin-top: 0 !important; }
-  /* Same green-halo cut on the Loans + Payments active cards, so the shadow
-     doesn't read as extra space above the next section. */
+  /* Drop the drop-shadow on the active cards (mobile): its green halo bled
+     below the card and made the gap to the next element read larger than the
+     other 10px gaps. Flat-edged keeps every gap an exact, clean 10px. */
   .home-loan:not(.loan-card--paidup):not(.loan-card--art),
   .loans-active:not(.loan-card--paidup):not(.loan-card--art),
   .pay-summary:not(.loan-card--paidup):not(.loan-card--art) {
-    box-shadow: 0 1px 4px rgba(13,84,45,.12) !important;
+    box-shadow: none !important;
   }
   /* Match the active-card -> next-section gap (Past loans / Payment method) to
      the 10px rhythm between the home CTAs. */
