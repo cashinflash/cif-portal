@@ -2607,31 +2607,45 @@ button.dash-doc-download:disabled {
    card. The pill, the "Review & sign" prompt strip, the in-portal signing
    modal, and the payments block all live here. Trust-blue accent, distinct
    from the amber ACH-processing treatment above. */
-.cif-pill-sign { background: rgba(255,255,255,.95) !important; color: #1e40af !important; }
+.cif-pill-sign { background: rgba(255,255,255,.95) !important; color: #9a5b00 !important; }
 .cif-pill-sign::before { display: none !important; }
 .cif-pill-sign::after {
   content: "" !important; width: 7px !important; height: 7px !important;
   min-width: 0 !important; padding: 0 !important; border-radius: 50% !important;
-  background: #2952cc !important; color: transparent !important; box-shadow: none !important;
+  background: #E8850D !important; color: transparent !important; box-shadow: none !important;
 }
 .cif-esign-strip {
-  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
-  margin: 12px 0 0; padding: 14px 16px; border-radius: 12px;
-  background: #eef3ff; border: 1px solid #cdddff; color: #1e3a8a;
-  font-size: .92rem; line-height: 1.45;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 12px 0 0; padding: 16px 18px; border-radius: 16px;
+  background: #fff; border: 1px solid #e3e8ef; box-shadow: 0 1px 3px rgba(15,23,42,.05);
 }
 .cif-esign-strip[hidden] { display: none !important; }
-.cif-esign-strip svg { flex: 0 0 auto; color: #2952cc; }
-.cif-esign-strip-text { flex: 1 1 200px; }
-.cif-esign-strip strong { font-weight: 700; }
-.cif-esign-cta {
-  flex: 0 0 auto; margin-left: auto; border: none; cursor: pointer;
-  background: #0E8741; color: #fff; font-family: inherit; font-weight: 700;
-  font-size: .85rem; padding: 10px 18px; border-radius: 10px; white-space: nowrap;
-  box-shadow: 0 6px 16px rgba(14,135,65,.24);
+.cif-esign-ico {
+  flex: 0 0 auto; width: 42px; height: 42px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #fff1dd; color: #c2710a;
 }
-.cif-esign-cta:hover { background: #0C7137; }
+.cif-esign-strip-text { flex: 1 1 220px; color: #1a1a2e; font-size: .95rem; line-height: 1.35; }
+.cif-esign-strip-text strong { display: block; font-weight: 700; }
+.cif-esign-strip-text small { display: block; color: #6b7280; font-size: .83rem; margin-top: 2px; }
+.cif-esign-strip .cif-esign-cta {
+  flex: 0 0 auto; margin-left: auto; border: none !important; cursor: pointer;
+  background: #0E8741 !important; color: #fff !important; font-family: inherit; font-weight: 700;
+  font-size: .9rem; padding: 11px 20px; border-radius: 12px; white-space: nowrap;
+  box-shadow: 0 8px 18px rgba(14,135,65,.24);
+}
+.cif-esign-strip .cif-esign-cta:hover { background: #0C7137 !important; }
 .pay-stack > .cif-esign-strip { margin-top: -6px; }
+@media (max-width: 560px) {
+  .cif-esign-strip .cif-esign-cta { margin-left: 0; width: 100%; }
+}
+.cif-esign-legal { margin: 0 0 12px; font-size: .8rem; color: #6b7280; line-height: 1.5; }
+.cif-esign-error.cif-esign-info { color: #1e40af; }
+/* Hide pay CTAs while a signature is pending — even during load (set by the
+   sessionStorage flag + the dashboard preflight, so there's no flash). */
+html.cif-pending-signature .home-pay,
+html.cif-pending-signature [data-show-when-active],
+html.cif-pending-signature a.app-cta-primary[href*="payments.html"] { display: none !important; }
 
 /* Payments page block (reuses .pay-ach-blocked layout). */
 .pay-ach-blocked h3 { margin: 8px 0 6px; color: var(--cif-navy); font-size: 1.08rem; font-weight: 700; }
@@ -4424,6 +4438,8 @@ body.cif-modal-open .app-tabbar { display: none; }
    card recolors (text/pill/note already render white-on-color). */
 .loan-card.is-pastdue-soft { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 12px 30px rgba(217,119,6,.30); }
 .loan-card.is-pastdue { background: linear-gradient(150deg, #EA5559 0%, #CE3439 58%, #B0252B 100%); box-shadow: 0 12px 30px rgba(180,35,24,.32); }
+/* Pending signature → orange "Pending Loan" treatment (loan isn't active yet). */
+.loan-card.is-pending-sign { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 12px 30px rgba(217,119,6,.30); }
 .loan-card.is-pastdue .loan-card-note, .loan-card.is-pastdue-soft .loan-card-note { color: #fff; font-weight: 700; }
 .loan-card .loan-card-note.is-pastdue-note svg { color: rgba(255,255,255,.92); }
 /* Neutral loading state so the hero doesn't flash green → red before the loan

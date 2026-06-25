@@ -1267,6 +1267,7 @@
       if (state.esign) {
         CifEsign.renderStrip(state.esign);
         CifEsign.applyPill(qs('[data-pay-loan-status]', qs('#paySummary')));
+        CifEsign.gateCard(qs('#paySummary'));
         if (formCard) formCard.hidden = true;
         var _ab = qs('#payAchBlocked'); if (_ab) _ab.hidden = true;
         CifEsign.block(state.esign);

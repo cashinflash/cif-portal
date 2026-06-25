@@ -477,6 +477,10 @@
     // the active-only pay CTAs so the Review & sign prompt is the clear action.
     window.__cifActiveLoan = hasActive;
     var _pendingSig = hasActive && data && data.loan && window.CifEsign && CifEsign.isPending(data.loan);
+    // Persist + flag synchronously so the dashboard preflight can hide the pay
+    // CTAs on the NEXT load with no flash (see the inline script in <head>).
+    try { sessionStorage.setItem('cif_pending_signature', String(!!_pendingSig)); } catch (e) { /* ignore */ }
+    document.documentElement.classList.toggle('cif-pending-signature', !!_pendingSig);
     qsa('[data-show-when-active]').forEach(function (el) {
       el.style.display = (hasActive && !_pendingSig) ? '' : 'none';
     });
@@ -760,19 +764,12 @@
         CifEsign.renderStrip(esign);
         if (esign) {
           CifEsign.applyPill(pill);
-          card.classList.remove('is-pastdue', 'is-pastdue-soft');
-          if (note) note.classList.remove('is-pastdue-note');
-          if (noteText) noteText.textContent = 'Sign your loan agreement to receive your funds — it only takes a minute.';
-          var esDue = qs('[data-loan-next-due]', card);
-          if (esDue) esDue.textContent = '—';
+          CifEsign.gateCard(card);
+          // Hide every Make-a-Payment CTA while unsigned (can't pay an unfunded loan).
           var esPay = document.querySelector('.home-pay');
           if (esPay) esPay.style.display = 'none';
           var esCtas = document.querySelectorAll('a.app-cta-primary[href*="payments.html"]');
-          for (var ei = 0; ei < esCtas.length; ei++) {
-            if (esCtas[ei].getAttribute('data-esign-bound')) continue;
-            esCtas[ei].setAttribute('data-esign-bound', '1');
-            esCtas[ei].addEventListener('click', function (e) { e.preventDefault(); CifEsign.openModal(esign); });
-          }
+          for (var ei = 0; ei < esCtas.length; ei++) { esCtas[ei].style.display = 'none'; }
         }
       }
     }

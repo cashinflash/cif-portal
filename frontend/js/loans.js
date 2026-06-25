@@ -233,8 +233,7 @@
       CifEsign.renderStrip(esign);
       if (esign) {
         CifEsign.applyPill(pill);
-        setText(qs('[data-loan-next-due]', card), '—');
-        card.classList.remove('is-pastdue', 'is-pastdue-soft');
+        CifEsign.gateCard(card);
       }
     }
   }

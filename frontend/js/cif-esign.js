@@ -28,6 +28,16 @@
 
   function token() { try { return sessionStorage.getItem('cif_id_token'); } catch (e) { return null; } }
 
+  // Customer's name from the ID token, so signing needs no typing.
+  function _signerName() {
+    try {
+      var t = token(); if (!t) return '';
+      var seg = t.split('.')[1]; if (!seg) return '';
+      var p = JSON.parse(decodeURIComponent(escape(atob(seg.replace(/-/g, '+').replace(/_/g, '/')))));
+      return (p.name || ((p.given_name || '') + ' ' + (p.family_name || '')).trim() || p.given_name || '').trim();
+    } catch (e) { return ''; }
+  }
+
   // GET /api/my-esign/pending (cached). Resolves to an array (never rejects).
   function fetchPending(force) {
     var now = Date.now();
@@ -78,9 +88,9 @@
   }
 
   function _stripHtml() {
-    return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>' +
-      '<span class="cif-esign-strip-text">Your loan agreement is ready — <strong>sign it to receive your funds.</strong></span>' +
+    return '<span class="cif-esign-ico" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>' +
+      '<span class="cif-esign-strip-text"><strong>Your loan agreement is ready to sign</strong><small>Sign it to receive your funds — it only takes a minute.</small></span>' +
       '<button type="button" class="cif-esign-cta" data-esign-open>Review &amp; sign</button>';
   }
   // Fill every [data-esign-slot] anchor (or hide them when not pending).
@@ -117,16 +127,13 @@
           '<p class="cif-esign-loading" data-esign-loading>Loading your documents…</p>' +
         '</div>' +
         '<footer class="cif-esign-foot" data-esign-foot hidden>' +
-          '<label class="cif-esign-field"><span>Type your full name to sign</span>' +
-            '<input type="text" data-esign-name autocomplete="name" placeholder="Your full name"></label>' +
-          '<label class="cif-esign-consent"><input type="checkbox" data-esign-agree>' +
-            '<span>I have reviewed the documents above and agree to sign them electronically. My electronic signature is legally binding.</span></label>' +
+          '<p class="cif-esign-legal">By tapping <strong>Sign &amp; Accept</strong>, I agree to and electronically sign the documents above. My electronic signature is legally binding.</p>' +
           '<p class="cif-esign-error" data-esign-error hidden></p>' +
           '<div class="cif-esign-actions">' +
             '<button type="button" class="cif-esign-cancel" data-esign-close>Cancel</button>' +
-            '<button type="button" class="cif-esign-submit" data-esign-submit disabled>Sign now</button>' +
+            '<button type="button" class="cif-esign-submit" data-esign-submit>Sign &amp; Accept</button>' +
           '</div>' +
-          '<a class="cif-esign-alt" data-esign-hosted href="#" target="_blank" rel="noopener" hidden>Having trouble? Sign on our secure signing page &rarr;</a>' +
+          '<a class="cif-esign-alt" data-esign-hosted href="#" target="_blank" rel="noopener" hidden>Open the secure signing page &rarr;</a>' +
         '</footer>' +
       '</div>';
     document.body.appendChild(wrap);
@@ -206,26 +213,18 @@
 
   function _wireSubmit(esign) {
     var m = _modalEl();
-    var nameEl = m.querySelector('[data-esign-name]');
-    var agreeEl = m.querySelector('[data-esign-agree]');
     var submit = m.querySelector('[data-esign-submit]');
     var errEl = m.querySelector('[data-esign-error]');
     var hosted = m.querySelector('[data-esign-hosted]');
     if (hosted && esign && esign.signingUrl) hosted.href = esign.signingUrl;
-
-    function refresh() { submit.disabled = !(nameEl.value.trim() && agreeEl.checked); }
-    nameEl.oninput = refresh;
-    agreeEl.onchange = refresh;
-    submit.textContent = 'Sign now';
-    submit.disabled = true;
+    submit.textContent = 'Sign & Accept';
+    submit.disabled = false;
 
     submit.onclick = function () {
-      var name = nameEl.value.trim();
-      if (!name || !agreeEl.checked) return;
       submit.disabled = true;
       submit.textContent = 'Signing…';
-      if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
-      var payload = { signerName: name, agreed: true };
+      if (errEl) { errEl.hidden = true; errEl.textContent = ''; errEl.classList.remove('cif-esign-info'); }
+      var payload = { signerName: _signerName(), agreed: true };
       if (esign && esign.id) payload.esignId = esign.id;
       else if (esign && esign.loanId) payload.loanId = esign.loanId;
       fetch('/api/my-esign/sign', {
@@ -236,23 +235,29 @@
       }).then(function (r) {
         return r.json().then(function (d) { return { ok: r.ok, data: d }; }).catch(function () { return { ok: r.ok, data: null }; });
       }).then(function (res) {
-        if (res.ok && res.data && res.data.ok) { _success(name); return; }
-        // In-portal submit failed — surface the secure hosted ceremony as the
-        // reliable path so the customer can always complete the signing.
-        submit.textContent = 'Sign now';
-        submit.disabled = false;
-        if (errEl) {
-          errEl.innerHTML = 'We couldn’t finish signing here. Please use the secure signing page below — your documents are ready there.';
-          errEl.hidden = false;
-        }
-        if (hosted && esign && esign.signingUrl) hosted.hidden = false;
-      }).catch(function () {
-        submit.textContent = 'Sign now';
-        submit.disabled = false;
-        if (errEl) { errEl.textContent = 'Network error. Please try again, or use the secure signing page below.'; errEl.hidden = false; }
-        if (hosted && esign && esign.signingUrl) hosted.hidden = false;
-      });
+        if (res.ok && res.data && res.data.ok) { _success(_signerName()); return; }
+        _handoff(esign, submit, errEl, hosted);
+      }).catch(function () { _handoff(esign, submit, errEl, hosted); });
     };
+  }
+
+  // If in-portal signing can't complete, hand off to Vergent's secure hosted
+  // signing page (new tab). The focus re-check flips the portal to the active
+  // card once they finish there.
+  function _handoff(esign, submit, errEl, hosted) {
+    if (esign && esign.signingUrl) {
+      try { window.open(esign.signingUrl, '_blank', 'noopener'); } catch (e) { /* popup blocked */ }
+      if (hosted) hosted.hidden = false;
+      if (errEl) {
+        errEl.innerHTML = 'Opening our secure signing page in a new tab — finish there, then come back. This page updates automatically once you’re done.';
+        errEl.classList.add('cif-esign-info');
+        errEl.hidden = false;
+      }
+    } else if (errEl) {
+      errEl.textContent = 'Something went wrong. Please try again, or call (888) 999-9859.';
+      errEl.hidden = false;
+    }
+    if (submit) { submit.textContent = 'Sign & Accept'; submit.disabled = false; }
   }
 
   function openModal(esign) {
@@ -263,10 +268,6 @@
     var body = m.querySelector('[data-esign-body]');
     var foot = m.querySelector('[data-esign-foot]');
     var hosted = m.querySelector('[data-esign-hosted]');
-    var nameEl = m.querySelector('[data-esign-name]');
-    var agreeEl = m.querySelector('[data-esign-agree]');
-    if (nameEl) nameEl.value = '';
-    if (agreeEl) agreeEl.checked = false;
     if (hosted) { hosted.hidden = true; if (esign.signingUrl) hosted.href = esign.signingUrl; }
     if (foot) foot.hidden = true;
     if (body) body.innerHTML = '<p class="cif-esign-loading" data-esign-loading>Loading your documents…</p>';
@@ -353,8 +354,26 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _autoSurface);
   else _autoSurface();
 
+  // Make the active-loan card read correctly for an unsigned loan: it's a
+  // "Pending Loan" (orange), the balance is the amount to repay (not owed yet),
+  // and the "pay on time" note is hidden. Keeps loan amount / due / repayment.
+  function gateCard(card) {
+    if (!card) return;
+    card.classList.add('is-pending-sign');
+    card.classList.remove('is-pastdue', 'is-pastdue-soft');
+    var eb = card.querySelector('.loan-card-eyebrow');
+    if (eb) eb.textContent = 'Pending Loan';
+    var balEl = card.querySelector('[data-loan-balance], [data-pay-balance]');
+    var fig = balEl && balEl.closest ? balEl.closest('.loan-card-fig') : null;
+    var lbl = fig ? fig.querySelector('.loan-card-flabel') : null;
+    if (lbl) lbl.textContent = 'Repay amount';
+    var notes = card.querySelectorAll('.loan-card-note');
+    for (var i = 0; i < notes.length; i++) notes[i].style.display = 'none';
+  }
+
   window.CifEsign = {
     fetchPending: fetchPending,
+    gateCard: gateCard,
     infoForLoan: infoForLoan,
     isPending: isPending,
     applyPill: applyPill,
