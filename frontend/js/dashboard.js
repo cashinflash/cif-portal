@@ -728,19 +728,21 @@
         var ach = CifAch.info(loan);
         CifAch.renderStrip(ach);
         if (ach) {
-          CifAch.applyPill(pill);
+          CifAch.applyPill(pill, ach);
           card.classList.remove('is-pastdue', 'is-pastdue-soft');
           if (note) note.classList.remove('is-pastdue-note');
-          // Block a second payment: the "Make a Payment" CTAs open the
-          // "in progress" modal instead of navigating to the pay form.
-          var ctas = document.querySelectorAll('a.app-cta-primary[href*="payments.html"]');
-          for (var ci = 0; ci < ctas.length; ci++) {
-            if (ctas[ci].getAttribute('data-ach-bound')) continue;
-            ctas[ci].setAttribute('data-ach-bound', '1');
-            ctas[ci].addEventListener('click', function (e) {
-              e.preventDefault();
-              CifAch.showBlockedModal(ach);
-            });
+          // Only block a SECOND payment while one is still PENDING. If it was
+          // returned, let them pay again (the CTAs work normally).
+          if (ach.state === 'pending') {
+            var ctas = document.querySelectorAll('a.app-cta-primary[href*="payments.html"]');
+            for (var ci = 0; ci < ctas.length; ci++) {
+              if (ctas[ci].getAttribute('data-ach-bound')) continue;
+              ctas[ci].setAttribute('data-ach-bound', '1');
+              ctas[ci].addEventListener('click', function (e) {
+                e.preventDefault();
+                CifAch.showBlockedModal(ach);
+              });
+            }
           }
         }
       }

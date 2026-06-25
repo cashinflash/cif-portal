@@ -218,7 +218,7 @@
     if (window.CifAch) {
       var ach = CifAch.info(loan);
       CifAch.renderStrip(ach);
-      if (ach) CifAch.applyPill(pill);
+      if (ach) CifAch.applyPill(pill, ach);
     }
     // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching Home.
     var isPastDue = statusPillClass(loan) === 'dash-pill--past-due';

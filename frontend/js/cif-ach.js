@@ -58,17 +58,34 @@
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  // Vergent puts an outstanding loan with a submitted ACH into "ACH Deposit
-  // Hold". _shape_v1_loan forces status="Current" but passes the real text
-  // through subStatus / rawStatus, so look there.
+  // Vergent is the source of truth. _shape_v1_loan forces status="Current"
+  // for any outstanding loan but passes the REAL text through subStatus /
+  // rawStatus, so the ACH lifecycle is read from there:
+  //   • held/processing  → "ACH Deposit Hold"  → pending
+  //   • returned (NSF…)  → "Returned …"        → returned
+  //   • cleared          → "Deposited"/current, balance dropped → none
+  // This is what makes the portal auto-update on clear/return/cancel.
+  function _statusText(loan) {
+    return loan ? ((loan.subStatus || '') + ' ' + (loan.rawStatus || '') + ' ' + (loan.status || '')).toLowerCase() : '';
+  }
   function statusHold(loan) {
-    if (!loan) return false;
-    var s = ((loan.subStatus || '') + ' ' + (loan.rawStatus || '') + ' ' + (loan.status || '')).toLowerCase();
-    if (s.indexOf('deposit hold') !== -1) return true;
-    if (s.indexOf('ach') !== -1 && s.indexOf('hold') !== -1) return true;
-    if (s.indexOf('pending deposit') !== -1) return true;
+    var s = _statusText(loan);
+    return s.indexOf('deposit hold') !== -1 ||
+      (s.indexOf('ach') !== -1 && s.indexOf('hold') !== -1) ||
+      s.indexOf('pending deposit') !== -1;
+  }
+  function statusReturned(loan) {
+    var s = _statusText(loan);
+    if (s.indexOf('nsf') !== -1) return true;
+    if (s.indexOf('returned') !== -1) return true;
+    if (s.indexOf('return') !== -1 && (s.indexOf('ach') !== -1 || s.indexOf('deposit') !== -1 ||
+      s.indexOf('insufficient') !== -1 || s.indexOf('fund') !== -1)) return true;
     return false;
   }
+  // Per-session "I just submitted" marker — bridges the gap between submit and
+  // Vergent reflecting the hold. Per-SESSION (sessionStorage) on purpose: it
+  // self-clears in a fresh session, so a manually-cancelled (unapproved) ACH
+  // stops showing pending as soon as the customer reopens the app.
   function readSession(loan) {
     var p = null;
     try { p = JSON.parse(sessionStorage.getItem(KEY) || 'null'); } catch (e) { p = null; }
@@ -80,30 +97,40 @@
     }
     return p;
   }
-  // Returns {pending, amount, clearsBy, source} or null.
+  // Returns { state: 'pending' | 'returned', amount, clearsBy } or null.
   function info(loan) {
+    if (statusReturned(loan)) {
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }  // clear stale marker
+      return { state: 'returned', amount: null, clearsBy: null };
+    }
     var sp = readSession(loan);
-    var hold = statusHold(loan);
-    if (!sp && !hold) return null;
-    return {
-      pending: true,
-      amount: sp ? sp.amount : null,
-      clearsBy: sp ? sp.clearsBy : null,
-      source: sp ? 'session' : 'status'
-    };
+    if (statusHold(loan)) return { state: 'pending', amount: sp ? sp.amount : null, clearsBy: sp ? sp.clearsBy : null };
+    if (sp) return { state: 'pending', amount: sp.amount, clearsBy: sp.clearsBy };
+    return null;
   }
   function setPending(obj) { try { sessionStorage.setItem(KEY, JSON.stringify(obj)); } catch (e) { /* ignore */ } }
 
-  // Consistent amber "Processing" pill on every active-loan card.
-  function applyPill(pill) {
+  // Consistent status pill on every active-loan card: amber "Processing"
+  // while pending, red "Payment returned" if it bounced.
+  function applyPill(pill, inf) {
     if (!pill) return;
     pill.classList.remove('dash-pill--ok', 'dash-pill--warn', 'dash-pill--past-due',
-      'dash-pill--closed', 'pay-pill--pending');
-    pill.classList.add('cif-pill-processing');
-    pill.textContent = 'Processing';
+      'dash-pill--closed', 'pay-pill--pending', 'cif-pill-processing', 'cif-pill-returned');
+    if (inf && inf.state === 'returned') {
+      pill.classList.add('cif-pill-returned');
+      pill.textContent = 'Payment returned';
+    } else {
+      pill.classList.add('cif-pill-processing');
+      pill.textContent = 'Processing';
+    }
   }
 
   function _stripHtml(inf) {
+    if (inf && inf.state === 'returned') {
+      var ra = (inf.amount != null) ? (' of <strong>' + money(inf.amount) + '</strong>') : '';
+      return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' +
+        '<span>Your recent bank payment' + ra + ' was <strong>returned</strong> (often for insufficient funds), so your balance wasn’t reduced. Please make a payment to keep your loan current.</span>';
+    }
     var amt = (inf && inf.amount != null) ? (' of <strong>' + money(inf.amount) + '</strong>') : '';
     var by = (inf && inf.clearsBy)
       ? (' — estimated to clear by <strong>' + fmtDate(inf.clearsBy) + '</strong>')
@@ -113,14 +140,14 @@
       '. Your balance updates once it clears.</span>';
   }
   // Fill every [data-ach-strip-slot] anchor (or hide them when not pending).
-  // Preserves each slot's existing classes (e.g. u-mobile / u-desktop) so
-  // viewport visibility still works.
+  // Preserves each slot's existing classes (u-mobile / u-desktop).
   function renderStrip(inf) {
     var slots = document.querySelectorAll('[data-ach-strip-slot]');
     for (var i = 0; i < slots.length; i++) {
       var slot = slots[i];
-      if (!inf) { slot.hidden = true; slot.innerHTML = ''; continue; }
+      if (!inf) { slot.hidden = true; slot.innerHTML = ''; slot.classList.remove('is-returned'); continue; }
       if (!slot.classList.contains('cif-ach-strip')) slot.classList.add('cif-ach-strip');
+      slot.classList.toggle('is-returned', inf.state === 'returned');
       slot.innerHTML = _stripHtml(inf);
       slot.hidden = false;
     }
@@ -159,8 +186,8 @@
     var by = inf.clearsBy ? (' It’s estimated to clear by <strong>' + fmtDate(inf.clearsBy) + '</strong>.') : '';
     if (txt) {
       txt.innerHTML = 'Your bank payment ' + amt + 'is still processing.' + by +
-        ' Bank (ACH) payments take about <strong>5 business days</strong> to clear. ' +
-        'To avoid paying twice, you can make another payment once this one finishes.';
+        ' Bank (ACH) payments take about <strong>5 business days</strong> to clear, ' +
+        'and your balance updates once it does.';
     }
     m.hidden = false;
     requestAnimationFrame(function () { m.classList.add('is-open'); });
@@ -177,13 +204,20 @@
   // bottom tab bar, so on mobile the tab bar paints over the sheet and cuts
   // off its buttons. Fix it once, portal-wide: whenever any modal is open,
   // add body.cif-modal-open (CSS hides the tab bar + locks scroll).
-  function _anyModalOpen() {
-    var ms = document.querySelectorAll('.profile-modal, .app-modal');
-    for (var i = 0; i < ms.length; i++) { if (!ms[i].hidden) return true; }
-    return false;
-  }
   function _syncModalState() {
-    document.body.classList.toggle('cif-modal-open', _anyModalOpen());
+    var ms = document.querySelectorAll('.profile-modal, .app-modal');
+    var anyOpen = false;
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i];
+      if (!m.hidden) {
+        anyOpen = true;
+        // Hoist the open modal to <body> so it escapes any page stacking
+        // context that sits below the fixed footer/tab bar — that's what made
+        // the footer text bleed through the sheet. At <body> its z-index wins.
+        if (m.parentNode !== document.body) document.body.appendChild(m);
+      }
+    }
+    document.body.classList.toggle('cif-modal-open', anyOpen);
   }
   var _modalObserver = null;
   function _watchModals() {

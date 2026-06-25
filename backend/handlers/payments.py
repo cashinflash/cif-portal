@@ -849,7 +849,7 @@ def _add_banking_days(d, n: int):
 
 
 def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
-                        account_type: str = ""
+                        account_type: str = "", store_id: int = 0
                         ) -> Tuple[bool, Optional[str], str, str]:
     """Real-time ACH debit on a loan via v1 ``PostCustomerLoanACH/{loanId}``.
 
@@ -889,12 +889,10 @@ def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
     body = {
         "HeaderId":        int(loan_id),
         "companyId":       VERGENT_COMPANY_ID,
-        # StoreId 0 = the value that Vergent ACCEPTED in the working tests.
-        # Forcing StoreId=1 (to make the admin "Store" column read 1) made
-        # Vergent REJECT the submission, so it's reverted. The right
-        # store-id-that-also-displays-1 is a follow-up with Vergent; getting
-        # the ACH to post is the priority.
-        "StoreId":         0,
+        # The loan's own store id (passed in). Hardcoding 1 made Vergent
+        # reject the submission; the loan's actual store is valid and makes
+        # the admin "Store" column display correctly. 0 = fallback/default.
+        "StoreId":         int(store_id or 0),
         "BankAcctId":      int(bank_id),
         "Amount":          round(float(amount), 2),
         "AchEffDate":      eff_date,
@@ -2445,9 +2443,22 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
         if not _customer_owns_loan(cid, loan_id_int):
             return _json_response(403, {"error": "loan_not_owned"})
 
+        # Use the loan's OWN store id. The admin "Store" column shows the
+        # store NUMBER; the API wants that store's id. Hardcoding StoreId=1
+        # made Vergent REJECT the submission — the loan's actual store is the
+        # valid value (and displays the right store). Falls back to 0.
+        store_id = 0
+        _active = _fetch_active_loan(cid)
+        if _active:
+            try:
+                store_id = int(_active.get("storeId") or 0)
+            except (TypeError, ValueError):
+                store_id = 0
+
         ok, ref, detail, raw = _charge_loan_ach_v1(
             loan_id=loan_id_int, bank_id=bank_id, amount=amount,
             account_type=str(body.get("accountType") or ""),
+            store_id=store_id,
         )
         ledger_id = _record_payment_ledger(
             cid=cid, loan_id=loan_id_int, amount=round(amount, 2),

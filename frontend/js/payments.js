@@ -160,7 +160,7 @@
       if (window.CifAch) {
         var _ach = CifAch.info(loan);
         CifAch.renderStrip(_ach);
-        if (_ach) CifAch.applyPill(qs('[data-pay-loan-status]', card));
+        if (_ach) CifAch.applyPill(qs('[data-pay-loan-status]', card), _ach);
       }
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
       // matching Home — independent of the pill so it works even if absent.
@@ -1145,6 +1145,9 @@
     var ach = window.CifAch ? CifAch.info(loan) : null;
     var formCard = qs('#payFormCard');
     var blocked = qs('#payAchBlocked');
+    // Only BLOCK while a payment is still pending. A returned ACH must let the
+    // customer pay again (the strip explains what happened).
+    if (ach && ach.state !== 'pending') ach = null;
     if (ach) {
       if (formCard) formCard.hidden = true;
       if (blocked) {

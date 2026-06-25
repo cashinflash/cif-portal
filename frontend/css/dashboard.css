@@ -2595,9 +2595,21 @@ button.dash-doc-download:disabled {
 .cif-ach-strip[hidden] { display: none !important; }
 .cif-ach-strip svg { flex: 0 0 auto; color: #b76e00; }
 .cif-ach-strip strong { font-weight: 700; }
-/* Inside the payments stack (gap:16px) the strip needs no extra top margin —
-   keeps it as snug to the card above as it is to the section below. */
-.pay-stack > .cif-ach-strip { margin-top: 0; }
+/* Returned (bounced) ACH — red variant of the strip. */
+.cif-ach-strip.is-returned { background: #fde7e7; border-color: #f5b8b0; color: #5a0d0d; }
+.cif-ach-strip.is-returned svg { color: #c0392b; }
+/* Inside the payments stack (gap:16px) pull the strip up so it sits snug to
+   the card above instead of a full gap-plus-gap. */
+.pay-stack > .cif-ach-strip { margin-top: -6px; }
+
+/* Red "Payment returned" pill (same shape as the amber Processing pill). */
+.cif-pill-returned { background: rgba(255,255,255,.95) !important; color: #b42318 !important; }
+.cif-pill-returned::before { display: none !important; }
+.cif-pill-returned::after {
+  content: "" !important; width: 7px !important; height: 7px !important;
+  min-width: 0 !important; padding: 0 !important; border-radius: 50% !important;
+  background: #c0392b !important; color: transparent !important; box-shadow: none !important;
+}
 
 /* Payments page: "payment in progress" panel shown in place of the pay form
    while an ACH is pending (blocks a second payment). */
@@ -3906,29 +3918,22 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
    keyboard can't trap the submit button below the fold. */
 .profile-modal-card { max-height: calc(100dvh - 64px); }
 
-/* Full bottom-sheet up to tablet width (was <=600px only). */
+/* Mobile: a regular CENTERED popup (not a bottom sheet), with breathing room
+   from the screen edges and an internal scroll if the form is tall. */
 @media (max-width: 768px) {
-  .profile-modal { align-items: flex-end; }
+  .profile-modal { align-items: center; padding: 16px; }
   .profile-modal-card {
     width: 100%;
-    border-radius: 22px 22px 0 0;
-    align-self: flex-end;
-    max-height: 90dvh;
-    box-shadow: 0 -10px 44px rgba(2, 6, 23, .30);
-    /* Clear the iOS home indicator so the action buttons are reachable. */
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  /* Grab handle so the sheet reads as a proper modal, not a bland panel. */
-  .profile-modal-card::before {
-    content: ""; flex: 0 0 auto;
-    width: 40px; height: 4px; border-radius: 999px;
-    background: #d8dee7; margin: 10px auto 2px;
+    max-width: 460px;
+    border-radius: 18px;
+    max-height: 86dvh;
+    box-shadow: 0 24px 60px rgba(2, 6, 23, .35);
   }
 }
 
-/* While ANY modal is open, hide the bottom tab bar (otherwise its buttons get
-   cut off behind it — the modal lives inside a stacking context below the
-   fixed tab bar) and lock background scroll. Applied portal-wide by cif-ach.js. */
+/* While ANY modal is open, hide the bottom tab bar and lock background scroll
+   (cif-ach.js also hoists the open modal to <body> so it can't bleed under the
+   footer). Applied portal-wide. */
 body.cif-modal-open { overflow: hidden; }
 body.cif-modal-open .app-tabbar { display: none; }
 
