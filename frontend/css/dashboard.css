@@ -4662,13 +4662,13 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    keep the standard solid-green primary style. !important on color beats the
    `.app-cta-primary { color:#fff !important }` rule above. */
 a.app-cta-primary[href*="payments.html"] {
-  background: linear-gradient(135deg, #45E06A 0%, #22B94F 100%);
-  color: #062316 !important;
+  background: linear-gradient(135deg, #F6A609 0%, #E08A00 100%);
+  color: #1a1a2e !important;
   font-weight: 800;
-  box-shadow: 0 14px 28px rgba(16, 185, 85, 0.22);
+  box-shadow: 0 14px 28px rgba(224, 138, 0, 0.28);
 }
 a.app-cta-primary[href*="payments.html"]:hover {
-  background: linear-gradient(135deg, #3BD561 0%, #1FA948 100%);
+  background: linear-gradient(135deg, #EE9F08 0%, #CC7D00 100%);
 }
 
 /* Sidebar help card (desktop only). */

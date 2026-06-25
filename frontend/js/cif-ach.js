@@ -97,14 +97,30 @@
     }
     return p;
   }
+  // Cleared: Vergent posts the ACH ("Deposited") and the loan balance drops.
+  // Distinct from "ACH Deposit Hold" (which contains "hold", caught above).
+  function statusDeposited(loan) {
+    var s = _statusText(loan);
+    return s.indexOf('deposited') !== -1 && s.indexOf('hold') === -1;
+  }
   // Returns { state: 'pending' | 'returned', amount, clearsBy } or null.
+  // Vergent's status is AUTHORITATIVE: once it says Deposited (cleared) or
+  // Returned, that overrides our per-session "just submitted" marker so the
+  // portal never shows a stale "processing" after the payment resolves.
   function info(loan) {
     if (statusReturned(loan)) {
-      try { sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }  // clear stale marker
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }
       return { state: 'returned', amount: null, clearsBy: null };
     }
+    if (statusHold(loan)) {
+      var sp1 = readSession(loan);
+      return { state: 'pending', amount: sp1 ? sp1.amount : null, clearsBy: sp1 ? sp1.clearsBy : null };
+    }
+    if (statusDeposited(loan)) {
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }  // cleared → done
+      return null;
+    }
     var sp = readSession(loan);
-    if (statusHold(loan)) return { state: 'pending', amount: sp ? sp.amount : null, clearsBy: sp ? sp.clearsBy : null };
     if (sp) return { state: 'pending', amount: sp.amount, clearsBy: sp.clearsBy };
     return null;
   }

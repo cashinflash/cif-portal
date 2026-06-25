@@ -1035,8 +1035,7 @@
       if (firstDt) firstDt.textContent = 'Bank account';
       if (note) {
         note.textContent = 'Bank (ACH) payments take about 5 business days to clear. '
-          + 'Your loan balance updates once it clears. If the payment is returned '
-          + '(for example, insufficient funds) we’ll let you know.';
+          + 'Your loan balance updates once it clears.';
         note.hidden = false;
       }
     } else {
