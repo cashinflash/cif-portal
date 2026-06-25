@@ -1130,6 +1130,12 @@
     const note = qs('#payCardAddedNote'); if (note) { note.hidden = true; note.textContent = ''; }
     // If a bank (ACH) payment is now pending, don't reopen the form — block a
     // second payment and show the "in progress" panel instead.
+    if (state.esign) {
+      var _ec = qs('#payFormCard'); if (_ec) _ec.hidden = true;
+      CifEsign.block(state.esign);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     if (applyAchGate(state.loan)) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -1251,9 +1257,22 @@
     const loanP = loadLoan();
     const methodsP = loadMethods();
     loadBankAccounts();
-    Promise.all([loanP, methodsP]).then(function (results) {
+    const esignP = window.CifEsign ? CifEsign.fetchPending() : Promise.resolve([]);
+    Promise.all([loanP, methodsP, esignP]).then(function (results) {
       const loan = results[0];
       const formCard = qs('#payFormCard');
+      // Awaiting e-signature → there's nothing to pay until the loan is signed
+      // and funded. Block the form and show the Review & sign prompt instead.
+      state.esign = (loan && window.CifEsign) ? CifEsign.infoForLoan(loan, results[2] || []) : null;
+      if (state.esign) {
+        CifEsign.renderStrip(state.esign);
+        CifEsign.applyPill(qs('[data-pay-loan-status]', qs('#paySummary')));
+        if (formCard) formCard.hidden = true;
+        var _ab = qs('#payAchBlocked'); if (_ab) _ab.hidden = true;
+        CifEsign.block(state.esign);
+        document.body.classList.remove('pay-noloan');
+        return;
+      }
       // Bank (ACH) payment pending → block a SECOND payment (card or bank)
       // until it clears. Robust chokepoint: applies no matter how the customer
       // reached this page (home CTA, tab bar, or direct URL).

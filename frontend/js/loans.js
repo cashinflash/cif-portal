@@ -226,6 +226,17 @@
     var soft = isPastDue && dpd >= 1 && dpd <= 4;
     card.classList.toggle('is-pastdue-soft', soft);
     card.classList.toggle('is-pastdue', isPastDue && !soft);
+    // Awaiting e-signature → show the "Awaiting signature" pill + the Review &
+    // sign prompt instead of a healthy active card (shared module, portal-wide).
+    if (window.CifEsign) {
+      var esign = CifEsign.infoForLoan(loan);
+      CifEsign.renderStrip(esign);
+      if (esign) {
+        CifEsign.applyPill(pill);
+        setText(qs('[data-loan-next-due]', card), '—');
+        card.classList.remove('is-pastdue', 'is-pastdue-soft');
+      }
+    }
   }
 
   // Whole days a loan is past its due date (0 if not past due / unknown).

@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260624y">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260624z">
   <script>
     (function(){
       try {
@@ -179,6 +179,9 @@
         </div>
       </section>
 
+      <!-- Awaiting-signature prompt (under the active-loan card). Filled by cif-esign.js. -->
+      <div class="cif-esign-strip" data-esign-slot hidden></div>
+
       <!-- Pending-ACH strip (under the active-loan card). Filled by cif-ach.js. -->
       <div class="cif-ach-strip" data-ach-strip-slot hidden></div>
 
@@ -203,6 +206,10 @@
            card natively as Card. "Add a debit card" opens the modal below.
            #payFormCard is shown/hidden by the JS based on whether there's a
            loan; the form wraps #payAmount, #payCvv and #payChargeBtn. -->
+      <!-- Shown in place of the pay form while the loan is awaiting the
+           customer's e-signature (can't pay an unfunded loan). Filled by cif-esign.js. -->
+      <div data-esign-block-slot hidden></div>
+
       <section id="payFormCard" hidden>
         <form id="payChargeForm" autocomplete="off" novalidate>
           <div class="pay-grid">
@@ -578,7 +585,8 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/cif-ach.js?v=20260624y"></script>
-  <script src="/js/payments.js?v=20260624y"></script>
+  <script src="/js/cif-ach.js?v=20260624z"></script>
+  <script src="/js/cif-esign.js?v=20260624z"></script>
+  <script src="/js/payments.js?v=20260624z"></script>
 </body>
 </html>

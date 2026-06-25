@@ -2602,6 +2602,104 @@ button.dash-doc-download:disabled {
    the card above instead of a full gap-plus-gap. */
 .pay-stack > .cif-ach-strip { margin-top: -6px; }
 
+/* ── E-sign: awaiting-signature treatment (shared, portal-wide) ─────────
+   A loan created but not yet signed must never read as a healthy "Current"
+   card. The pill, the "Review & sign" prompt strip, the in-portal signing
+   modal, and the payments block all live here. Trust-blue accent, distinct
+   from the amber ACH-processing treatment above. */
+.cif-pill-sign { background: rgba(255,255,255,.95) !important; color: #1e40af !important; }
+.cif-pill-sign::before { display: none !important; }
+.cif-pill-sign::after {
+  content: "" !important; width: 7px !important; height: 7px !important;
+  min-width: 0 !important; padding: 0 !important; border-radius: 50% !important;
+  background: #2952cc !important; color: transparent !important; box-shadow: none !important;
+}
+.cif-esign-strip {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  margin: 12px 0 0; padding: 14px 16px; border-radius: 12px;
+  background: #eef3ff; border: 1px solid #cdddff; color: #1e3a8a;
+  font-size: .92rem; line-height: 1.45;
+}
+.cif-esign-strip[hidden] { display: none !important; }
+.cif-esign-strip svg { flex: 0 0 auto; color: #2952cc; }
+.cif-esign-strip-text { flex: 1 1 200px; }
+.cif-esign-strip strong { font-weight: 700; }
+.cif-esign-cta {
+  flex: 0 0 auto; margin-left: auto; border: none; cursor: pointer;
+  background: #0E8741; color: #fff; font-family: inherit; font-weight: 700;
+  font-size: .85rem; padding: 10px 18px; border-radius: 10px; white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(14,135,65,.24);
+}
+.cif-esign-cta:hover { background: #0C7137; }
+.pay-stack > .cif-esign-strip { margin-top: -6px; }
+
+/* Payments page block (reuses .pay-ach-blocked layout). */
+.pay-ach-blocked h3 { margin: 8px 0 6px; color: var(--cif-navy); font-size: 1.08rem; font-weight: 700; }
+.pay-ach-blocked > svg { color: #2952cc; }
+.pay-ach-blocked .app-cta-primary { max-width: 280px; margin-left: auto; margin-right: auto; }
+
+/* In-portal signing modal. */
+.cif-esign-modal { position: fixed; inset: 0; z-index: 1000; display: none; }
+.cif-esign-modal:not([hidden]) { display: block; }
+.cif-esign-backdrop {
+  position: absolute; inset: 0; border: none; padding: 0; cursor: pointer;
+  background: rgba(15,23,42,.55); opacity: 0; transition: opacity .18s ease;
+}
+.cif-esign-modal.is-open .cif-esign-backdrop { opacity: 1; }
+.cif-esign-card {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -48%);
+  width: min(720px, calc(100vw - 32px)); max-height: 90vh; display: flex; flex-direction: column;
+  background: #fff; border-radius: 18px; overflow: hidden; opacity: 0;
+  box-shadow: 0 24px 60px rgba(15,23,42,.32); transition: opacity .18s ease, transform .18s ease;
+}
+.cif-esign-modal.is-open .cif-esign-card { opacity: 1; transform: translate(-50%, -50%); }
+.cif-esign-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 18px 20px; border-bottom: 1px solid #eef1f4;
+}
+.cif-esign-head h3 { margin: 0; font-size: 1.08rem; font-weight: 800; color: var(--cif-navy); }
+.cif-esign-x { border: none; background: none; cursor: pointer; color: #6b7280; padding: 4px; line-height: 0; border-radius: 8px; }
+.cif-esign-x:hover { background: #f3f4f6; color: #1a1a2e; }
+.cif-esign-body { padding: 16px 20px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.cif-esign-loading { color: var(--cif-muted); font-size: .92rem; text-align: center; padding: 28px 0; }
+.cif-esign-doc-name { font-weight: 700; color: var(--cif-navy); font-size: .9rem; margin: 14px 0 6px; }
+.cif-esign-doc-name:first-child { margin-top: 0; }
+.cif-esign-doc-frame { width: 100%; height: 420px; border: 1px solid #e5e9ee; border-radius: 10px; background: #fff; }
+.cif-esign-foot { padding: 16px 20px; border-top: 1px solid #eef1f4; background: #fafbfc; }
+.cif-esign-field { display: block; margin-bottom: 12px; }
+.cif-esign-field span { display: block; font-size: .82rem; font-weight: 600; color: var(--cif-navy); margin-bottom: 5px; }
+.cif-esign-field input {
+  width: 100%; box-sizing: border-box; padding: 11px 13px; border: 1px solid #d7dde3;
+  border-radius: 10px; font-size: .95rem; font-family: inherit;
+}
+.cif-esign-field input:focus { outline: none; border-color: #0E8741; box-shadow: 0 0 0 3px rgba(14,135,65,.12); }
+.cif-esign-consent { display: flex; gap: 10px; align-items: flex-start; font-size: .85rem; color: #475569; line-height: 1.5; cursor: pointer; }
+.cif-esign-consent input { margin-top: 3px; flex: 0 0 auto; width: 16px; height: 16px; accent-color: #0E8741; }
+.cif-esign-error { display: none; margin: 10px 0 0; color: #b42318; font-size: .85rem; line-height: 1.5; }
+.cif-esign-error:not([hidden]) { display: block; }
+.cif-esign-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+.cif-esign-cancel {
+  border: 1px solid #d7dde3; background: #fff; color: #475569; font-family: inherit;
+  font-weight: 600; font-size: .9rem; padding: 11px 18px; border-radius: 10px; cursor: pointer;
+}
+.cif-esign-cancel:hover { background: #f3f4f6; }
+.cif-esign-submit {
+  border: none; background: #0E8741; color: #fff; font-family: inherit; font-weight: 700;
+  font-size: .9rem; padding: 11px 22px; border-radius: 10px; cursor: pointer;
+}
+.cif-esign-submit:hover:not(:disabled) { background: #0C7137; }
+.cif-esign-submit:disabled { opacity: .5; cursor: not-allowed; }
+.cif-esign-alt { display: block; margin-top: 12px; font-size: .85rem; color: #2952cc; text-align: center; font-weight: 600; }
+.cif-esign-alt[hidden] { display: none; }
+.cif-esign-done { text-align: center; padding: 24px 8px; }
+.cif-esign-done svg { color: #0E8741; }
+.cif-esign-done h4 { margin: 10px 0 6px; font-size: 1.15rem; font-weight: 800; color: var(--cif-navy); }
+.cif-esign-done p { margin: 0 auto; max-width: 380px; color: var(--cif-muted); font-size: .92rem; line-height: 1.55; }
+@media (max-width: 560px) {
+  .cif-esign-card { width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; }
+  .cif-esign-doc-frame { height: 340px; }
+}
+
 /* Red "Payment returned" pill (same shape as the amber Processing pill). */
 .cif-pill-returned { background: rgba(255,255,255,.95) !important; color: #b42318 !important; }
 .cif-pill-returned::before { display: none !important; }

@@ -489,6 +489,7 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "nextDueAmount": next_due,
         "originationDate": _format_iso(hdr.get("OriginationDate")),
         "loanDate": _format_iso(hdr.get("LoanDate")),
+        "fundingDate": _format_iso(hdr.get("FundingDate")),
         "storeId": hdr.get("StoreId"),
         "storeName": detail.get("StoreName") or hdr.get("StoreName"),
         "daysLate": detail.get("DaysLate"),
@@ -1925,6 +1926,49 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
     return out
 
 
+def _attach_pending_signature(cid: str, loan: Optional[Dict[str, Any]]) -> None:
+    """An outstanding loan that hasn't funded yet may be waiting on the
+    customer's e-signature. The v1 loan record can't tell us that on its own
+    (the signing flags live on the CustomerPortal API our service token can't
+    reach), so cross-reference the e-sign pending queue — it's authoritative
+    and carries the hosted `signingUrl`. On a match we flag the loan so the
+    portal shows a "sign your agreement" state (and blocks payment) instead of
+    a normal active-loan card; the moment Vergent drops it from the queue
+    (i.e. the customer signed) the flag clears and the loan reads as active —
+    no waiting on the slower Pending->Held customer-status change.
+
+    Mutates `loan` in place. Best-effort: any failure leaves it as active.
+    Gated on fundingDate being empty so funded loans skip the extra call.
+    """
+    if not loan:
+        return
+    if loan.get("fundingDate"):
+        loan["lifecycle"] = "active"
+        return
+    try:
+        pending = _fetch_pending_esign(cid)
+    except Exception:
+        pending = []
+    lid = str(loan.get("id"))
+    pid = loan.get("publicId")
+    match = next(
+        (p for p in pending
+         if str(p.get("loanId")) == lid
+         or (p.get("publicLoanId") and pid and str(p.get("publicLoanId")) == str(pid))),
+        None,
+    )
+    if match:
+        loan["pendingSignature"] = True
+        loan["lifecycle"] = "pending_signature"
+        loan["esign"] = {
+            "id": match.get("id"),
+            "signingUrl": match.get("signingUrl"),
+            "documentName": match.get("documentName"),
+        }
+    else:
+        loan["lifecycle"] = "active"
+
+
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -1952,6 +1996,9 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     # is still surfaced via allLoans for the My Loans list and page.
     outstanding = [l for l in shaped if l.get("isOutstanding")]
     active = outstanding[0] if outstanding else None
+    # Flag the active loan if it's still awaiting the customer's e-signature
+    # (so the dashboard/loans pages can show a "sign" state, not a healthy card).
+    _attach_pending_signature(cid, active)
     return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
 
 

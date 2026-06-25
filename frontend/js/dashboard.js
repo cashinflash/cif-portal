@@ -149,7 +149,10 @@
     renderProfileFromClaims();   // instant render from JWT claims (legacy selectors safe to call when missing)
     loadProfileFromApi();         // hydrate with Vergent data (account status, phone hint, text-messaging flag)
     loadActiveLoan();
-    loadPendingEsign();           // amber banner when Vergent has a doc waiting on the customer's signature
+    // E-sign is now handled portal-wide by cif-esign.js (the "Awaiting
+    // signature" card state + Review & sign prompt/modal), driven off the
+    // active-loan response. The legacy amber banner is retired to avoid a
+    // duplicate prompt; loadPendingEsign() is kept below but no longer called.
   });
 
   // ---------- One-shot "payment received" banner ----------
@@ -470,9 +473,12 @@
     }
 
     // App layout: record state + toggle the active-only "Make a payment" CTA.
+    // While the loan is awaiting signature, treat it as not-yet-payable — hide
+    // the active-only pay CTAs so the Review & sign prompt is the clear action.
     window.__cifActiveLoan = hasActive;
+    var _pendingSig = hasActive && data && data.loan && window.CifEsign && CifEsign.isPending(data.loan);
     qsa('[data-show-when-active]').forEach(function (el) {
-      el.style.display = hasActive ? '' : 'none';
+      el.style.display = (hasActive && !_pendingSig) ? '' : 'none';
     });
 
     // Stats grid (always visible if we got a successful response)
@@ -743,6 +749,29 @@
                 CifAch.showBlockedModal(ach);
               });
             }
+          }
+        }
+      }
+      // Awaiting e-signature → never present an unsigned, unfunded loan as a
+      // healthy "Current" card. Show the "Awaiting signature" pill + the
+      // Review & sign prompt, and route Make-a-Payment taps to signing.
+      if (window.CifEsign) {
+        var esign = CifEsign.infoForLoan(loan);
+        CifEsign.renderStrip(esign);
+        if (esign) {
+          CifEsign.applyPill(pill);
+          card.classList.remove('is-pastdue', 'is-pastdue-soft');
+          if (note) note.classList.remove('is-pastdue-note');
+          if (noteText) noteText.textContent = 'Sign your loan agreement to receive your funds — it only takes a minute.';
+          var esDue = qs('[data-loan-next-due]', card);
+          if (esDue) esDue.textContent = '—';
+          var esPay = document.querySelector('.home-pay');
+          if (esPay) esPay.style.display = 'none';
+          var esCtas = document.querySelectorAll('a.app-cta-primary[href*="payments.html"]');
+          for (var ei = 0; ei < esCtas.length; ei++) {
+            if (esCtas[ei].getAttribute('data-esign-bound')) continue;
+            esCtas[ei].setAttribute('data-esign-bound', '1');
+            esCtas[ei].addEventListener('click', function (e) { e.preventDefault(); CifEsign.openModal(esign); });
           }
         }
       }
