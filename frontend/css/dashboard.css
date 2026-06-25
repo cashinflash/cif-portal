@@ -2571,17 +2571,40 @@ button.dash-doc-download:disabled {
   font-size: .9rem; line-height: 1.5;
 }
 .pay-ach-note svg { flex: 0 0 auto; color: #b76e00; margin-top: 1px; }
-/* "Processing" pill on the active-loan card */
-.pay-pill--pending { background: rgba(255,255,255,.92) !important; color: #8a5a00 !important; }
-/* Estimated-clear strip shown right under the active-loan card */
-.pay-pending-strip {
+
+/* Consistent amber "Processing" pill on EVERY active-loan card (home,
+   loans, payments). Overrides the card-pill red/green so it never reads as
+   past-due or paid: white chip, amber text, a single amber status dot. */
+.cif-pill-processing { background: rgba(255,255,255,.95) !important; color: #b76e00 !important; }
+.cif-pill-processing::before { display: none !important; }
+.cif-pill-processing::after {
+  content: "" !important; width: 7px !important; height: 7px !important;
+  min-width: 0 !important; padding: 0 !important; border-radius: 50% !important;
+  background: #f59e0b !important; color: transparent !important; box-shadow: none !important;
+}
+
+/* Estimated-clear strip shown right under the active-loan card, portal-wide. */
+.cif-ach-strip {
   display: flex; gap: 10px; align-items: center;
-  margin: 10px 0 0; padding: 12px 14px; border-radius: 12px;
+  margin: 12px 0 0; padding: 12px 14px; border-radius: 12px;
   background: #fff5e6; border: 1px solid #ffd591; color: #5a3300;
   font-size: .9rem; line-height: 1.45;
 }
-.pay-pending-strip svg { flex: 0 0 auto; color: #b76e00; }
-.pay-pending-strip strong { font-weight: 700; }
+.cif-ach-strip svg { flex: 0 0 auto; color: #b76e00; }
+.cif-ach-strip strong { font-weight: 700; }
+/* Inside the payments stack (gap:16px) the strip needs no extra top margin —
+   keeps it as snug to the card above as it is to the section below. */
+.pay-stack > .cif-ach-strip { margin-top: 0; }
+
+/* Payments page: "payment in progress" panel shown in place of the pay form
+   while an ACH is pending (blocks a second payment). */
+.pay-ach-blocked { text-align: center; padding: 32px 24px; }
+.pay-ach-blocked .pay-receipt-icon { background: #fff5e6; color: #b76e00; }
+.pay-ach-blocked h2 { margin: 0 0 6px; color: var(--cif-navy); font-size: 1.05rem; font-weight: 600; }
+.pay-ach-blocked p { margin: 0 auto 6px; color: var(--cif-muted); font-size: .92rem; max-width: 440px; line-height: 1.55; }
+.pay-ach-blocked .pay-ach-blocked-date { color: var(--cif-navy); font-weight: 700; }
+.pay-ach-blocked .pay-actions { margin-top: 18px; }
+
 /* Pending (ACH) receipt: amber icon + explanatory note */
 .pay-receipt.is-pending .pay-receipt-icon { background: #fff5e6; color: #b76e00; }
 .pay-receipt-note {

@@ -889,7 +889,7 @@ def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
     body = {
         "HeaderId":        int(loan_id),
         "companyId":       VERGENT_COMPANY_ID,
-        "StoreId":         0,
+        "StoreId":         1,
         "BankAcctId":      int(bank_id),
         "Amount":          round(float(amount), 2),
         "AchEffDate":      eff_date,

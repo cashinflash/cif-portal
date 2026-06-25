@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623p">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260624q">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260624r">
   <script>
     (function(){
       try {
@@ -178,6 +178,9 @@
           </div>
         </div>
       </section>
+
+      <!-- Pending-ACH strip (under the active-loan card). Filled by cif-ach.js. -->
+      <div class="cif-ach-strip" data-ach-strip-slot hidden></div>
 
       <!-- ============ PAST LOANS ============ -->
       <section class="loans-past">
@@ -350,6 +353,7 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/loans.js?v=20260624h"></script>
+  <script src="/js/cif-ach.js?v=20260624r"></script>
+  <script src="/js/loans.js?v=20260624r"></script>
 </body>
 </html>

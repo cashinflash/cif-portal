@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260624q">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260624r">
   <script>
     (function(){
       try {
@@ -176,6 +176,26 @@
               </a>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- Pending-ACH strip (under the active-loan card). Filled by cif-ach.js. -->
+      <div class="cif-ach-strip" data-ach-strip-slot hidden></div>
+
+      <!-- Shown in place of the pay form while a bank (ACH) payment is still
+           processing — blocks a second payment until it clears. -->
+      <section class="app-surface pay-ach-blocked" id="payAchBlocked" hidden>
+        <div class="pay-receipt-icon" aria-hidden="true">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>
+        </div>
+        <h2>Your payment is processing</h2>
+        <p>Your bank payment is on its way. Bank (ACH) payments take about
+           <strong>5 business days</strong> to clear &mdash; estimated
+           <span class="pay-ach-blocked-date" data-ach-blocked-date>in about 5 business days</span>.</p>
+        <p>Your balance updates once it clears. To avoid paying twice, you can
+           make another payment after this one finishes.</p>
+        <div class="pay-actions pay-actions--center">
+          <a href="/dashboard.html" class="btn-login">Back to dashboard</a>
         </div>
       </section>
 
@@ -560,6 +580,7 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/payments.js?v=20260624q"></script>
+  <script src="/js/cif-ach.js?v=20260624r"></script>
+  <script src="/js/payments.js?v=20260624r"></script>
 </body>
 </html>

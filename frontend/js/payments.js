@@ -16,36 +16,11 @@
   const TOKEN_KEY = 'cif_id_token';
   const LOGIN_URL = '/login.html';
   const SUCCESS_KEY = 'cif_payment_success';
-  // Bank (ACH) payments are pending for ~5 business days — tracked
-  // separately from the instant card-success banner.
-  const ACH_PENDING_KEY = 'cif_ach_pending';
-
-  // US Federal Reserve / bank holidays — ACH doesn't settle on these or on
-  // weekends. Keep in sync with _US_BANK_HOLIDAYS in handlers/payments.py.
-  const US_BANK_HOLIDAYS = [
-    '2026-01-01', '2026-01-19', '2026-02-16', '2026-05-25', '2026-06-19',
-    '2026-07-03', '2026-09-07', '2026-10-12', '2026-11-11', '2026-11-26',
-    '2026-12-25', '2027-01-01', '2027-01-18', '2027-02-15', '2027-05-31',
-    '2027-06-18', '2027-07-05', '2027-09-06', '2027-10-11', '2027-11-11',
-    '2027-11-25', '2027-12-24',
-  ];
-  function _ymd(d) {
-    return d.getFullYear() + '-' +
-      String(d.getMonth() + 1).padStart(2, '0') + '-' +
-      String(d.getDate()).padStart(2, '0');
-  }
-  // The date `n` banking days from today (skips weekends + Fed holidays).
+  // Pending-ACH detection, dates, pill, strip, and modal live in the shared
+  // cif-ach.js module (window.CifAch) so they stay identical on every page.
+  const ACH_PENDING_KEY = (window.CifAch && window.CifAch.KEY) || 'cif_ach_pending';
   function addBusinessDays(n) {
-    var d = new Date();
-    var added = 0;
-    while (added < n) {
-      d.setDate(d.getDate() + 1);
-      var dow = d.getDay();
-      if (dow === 0 || dow === 6) continue;
-      if (US_BANK_HOLIDAYS.indexOf(_ymd(d)) !== -1) continue;
-      added++;
-    }
-    return _ymd(d);
+    return window.CifAch ? window.CifAch.addBusinessDays(n) : '';
   }
 
   function qs(sel, root) { return (root || document).querySelector(sel); }
@@ -180,8 +155,13 @@
         pill.textContent = isPast ? (loan.status || 'Past due') : 'Current';
         pill.classList.toggle('dash-pill--past-due', isPast);
       }
-      // Bank (ACH) payment pending → "Processing" pill + estimated-clear strip.
-      _applyAchPending(card, qs('[data-pay-loan-status]', card), loan);
+      // Bank (ACH) payment pending → consistent "Processing" pill + strip
+      // (shared module; identical to the home + loans cards).
+      if (window.CifAch) {
+        var _ach = CifAch.info(loan);
+        CifAch.renderStrip(_ach);
+        if (_ach) CifAch.applyPill(qs('[data-pay-loan-status]', card));
+      }
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
       // matching Home — independent of the pill so it works even if absent.
       var _st = (loan.status || '').toLowerCase();
@@ -812,49 +792,6 @@
     doCharge(form);
   }
 
-  // ---------- ACH pending indicator (loan card) ----------
-  function _readAchPending(loan) {
-    var pend = null;
-    try { pend = JSON.parse(sessionStorage.getItem(ACH_PENDING_KEY) || 'null'); }
-    catch (e) { pend = null; }
-    if (!pend) return null;
-    if (loan && String(pend.loanId) !== String(loan.id)) return null;
-    // Expire once the estimated clear date has passed (+1 day grace).
-    if (pend.clearsBy) {
-      var exp = new Date(pend.clearsBy + 'T23:59:59').getTime() + 86400000;
-      if (Date.now() > exp) {
-        try { sessionStorage.removeItem(ACH_PENDING_KEY); } catch (e) { /* ignore */ }
-        return null;
-      }
-    }
-    return pend;
-  }
-  function _applyAchPending(card, pill, loan) {
-    var pend = _readAchPending(loan);
-    var strip = document.querySelector('[data-pay-pending-strip]');
-    if (!pend) { if (strip) strip.hidden = true; return; }
-    if (pill) {
-      pill.textContent = 'Processing';
-      pill.classList.remove('dash-pill--past-due');
-      pill.classList.add('pay-pill--pending');
-    }
-    if (card) {
-      if (!strip) {
-        strip = document.createElement('div');
-        strip.setAttribute('data-pay-pending-strip', '');
-        strip.className = 'pay-pending-strip';
-        card.parentNode.insertBefore(strip, card.nextSibling);
-      }
-      strip.innerHTML =
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>' +
-        '<span>Bank payment of ' + money(pend.amount) +
-        ' is processing — estimated to clear by <strong>' +
-        formatDate(pend.clearsBy + 'T00:00:00') +
-        '</strong>. Your balance updates once it clears.</span>';
-      strip.hidden = false;
-    }
-  }
-
   // ---------- ACH confirm modal ----------
   var _pendingAchForm = null;
   function openAchConfirm(form) {
@@ -1158,9 +1095,36 @@
     const cvv = qs('#payCvv');    if (cvv) cvv.value = '';
     const err = qs('#payError'); if (err) { err.hidden = true; err.textContent = ''; }
     const note = qs('#payCardAddedNote'); if (note) { note.hidden = true; note.textContent = ''; }
+    // If a bank (ACH) payment is now pending, don't reopen the form — block a
+    // second payment and show the "in progress" panel instead.
+    if (applyAchGate(state.loan)) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     qs('#payFormCard').hidden = false;
     loadMethods();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // Show the "payment in progress" panel instead of the pay form while an ACH
+  // is pending (returns true if blocked). Single chokepoint used by init +
+  // "make another payment".
+  function applyAchGate(loan) {
+    var ach = window.CifAch ? CifAch.info(loan) : null;
+    var formCard = qs('#payFormCard');
+    var blocked = qs('#payAchBlocked');
+    if (ach) {
+      if (formCard) formCard.hidden = true;
+      if (blocked) {
+        var dEl = blocked.querySelector('[data-ach-blocked-date]');
+        if (dEl) dEl.textContent = ach.clearsBy
+          ? ('by ' + CifAch.fmtDate(ach.clearsBy)) : 'in about 5 business days';
+        blocked.hidden = false;
+      }
+      return true;
+    }
+    if (blocked) blocked.hidden = true;
+    return false;
   }
 
   // ---------- Boot ----------
@@ -1254,6 +1218,13 @@
     Promise.all([loanP, methodsP]).then(function (results) {
       const loan = results[0];
       const formCard = qs('#payFormCard');
+      // Bank (ACH) payment pending → block a SECOND payment (card or bank)
+      // until it clears. Robust chokepoint: applies no matter how the customer
+      // reached this page (home CTA, tab bar, or direct URL).
+      if (applyAchGate(loan)) {
+        document.body.classList.remove('pay-noloan');
+        return;
+      }
       // Keep the payment-method manager visible even with no active loan (so
       // customers can add/update a card before their next loan). The .pay-noloan
       // body class hides the pay-action parts (amount/CVV/breakdown/Pay button).

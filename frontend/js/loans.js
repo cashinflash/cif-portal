@@ -213,6 +213,13 @@
       pill.className = 'loan-card-pill ' + statusPillClass(loan);
       pill.textContent = statusPillText(loan);
     }
+    // Bank (ACH) payment pending → consistent "Processing" pill + strip under
+    // the card (shared module; identical on home + payments).
+    if (window.CifAch) {
+      var ach = CifAch.info(loan);
+      CifAch.renderStrip(ach);
+      if (ach) CifAch.applyPill(pill);
+    }
     // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching Home.
     var isPastDue = statusPillClass(loan) === 'dash-pill--past-due';
     var dpd = isPastDue ? daysPastDue(loan) : 0;
