@@ -4589,7 +4589,7 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    exactly like the example. */
 .home-pay { display: flex; flex-direction: column; }
 .home-pay-top { flex: 0 0 auto; }
-.home-pay-figs { display: flex; gap: 0; margin-top: 16px; }
+.home-pay-figs { display: flex; justify-content: center; gap: 0; margin-top: 16px; }
 .home-pay-figs > div + div { border-left: 1px solid #e5e9ee; padding-left: 20px; margin-left: 20px; }
 .home-pay-actions { display: flex; flex-direction: column; gap: 12px; }
 .home-pay-actions .app-cta-primary, .home-pay-actions .app-cta-outline { margin-top: 0; }
@@ -4925,10 +4925,18 @@ a.app-cta-primary[href*="payments.html"]:hover {
   /* Centre each figure (label + value) within its half. */
   .loans-active .loan-card-fig {
     min-width: 0; border-left: none; text-align: center;
-    padding-left: 12px; padding-right: 12px;
+    padding-left: 8px; padding-right: 8px;
   }
+  /* Keep "Due Date" and "Repayment Method" on one line even when the account
+     type is long (e.g. "Checking •• 5688" was wrapping to two lines). Drop the
+     small value icon on mobile to free the width — the label above already
+     says what it is. */
   .loans-active .loan-card-due,
-  .loans-active .loan-card-method { justify-content: center; }
+  .loans-active .loan-card-method {
+    justify-content: center; white-space: nowrap; gap: 0; font-size: .92rem;
+  }
+  .loans-active .loan-card-due svg,
+  .loans-active .loan-card-method svg { display: none; }
   /* Full-width horizontal divider between the two rows. */
   .loans-active .loan-card-fig:nth-child(1),
   .loans-active .loan-card-fig:nth-child(2) { padding-bottom: 16px; }
