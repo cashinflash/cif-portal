@@ -763,8 +763,7 @@
         var esign = CifEsign.infoForLoan(loan);
         CifEsign.renderStrip(esign);
         if (esign) {
-          CifEsign.applyPill(pill);
-          CifEsign.gateCard(card);
+          CifEsign.gateCard(card, loan);
           // Hide every Make-a-Payment CTA while unsigned (can't pay an unfunded loan).
           var esPay = document.querySelector('.home-pay');
           if (esPay) esPay.style.display = 'none';

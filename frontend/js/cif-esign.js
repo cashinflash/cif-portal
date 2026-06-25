@@ -354,21 +354,40 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _autoSurface);
   else _autoSurface();
 
-  // Make the active-loan card read correctly for an unsigned loan: it's a
-  // "Pending Loan" (orange), the balance is the amount to repay (not owed yet),
-  // and the "pay on time" note is hidden. Keeps loan amount / due / repayment.
-  function gateCard(card) {
+  function _money(n) { return (window.CifAch && CifAch.money) ? (CifAch.money(n) || '$0.00') : ('$' + Number(n || 0).toFixed(2)); }
+  function _date(iso) { var d = (window.CifAch && CifAch.fmtDate) ? CifAch.fmtDate(iso) : iso; return d || '—'; }
+  function _fig(label, value, cls) {
+    return '<div class="loan-card-fig"><p class="loan-card-flabel">' + label + '</p>' +
+      '<p class="loan-card-figval' + (cls ? (' ' + cls) : '') + '">' + value + '</p></div>';
+  }
+
+  // Make the active-loan card read correctly for an unsigned loan — IDENTICALLY
+  // on every page. It's a "Pending Loan" (orange), the top pill moves into a
+  // Status field, the balance shows as "Repay amount" (nothing owed until it
+  // funds), loan amount + due date stay, repayment method is dropped, and the
+  // "pay on time" note is hidden. The figure grid is rebuilt so the home, loans
+  // and payments cards match exactly.
+  function gateCard(card, loan) {
     if (!card) return;
-    card.classList.add('is-pending-sign');
+    card.classList.add('is-pending-sign', 'loans-active');
     card.classList.remove('is-pastdue', 'is-pastdue-soft');
     var eb = card.querySelector('.loan-card-eyebrow');
     if (eb) eb.textContent = 'Pending Loan';
-    var balEl = card.querySelector('[data-loan-balance], [data-pay-balance]');
-    var fig = balEl && balEl.closest ? balEl.closest('.loan-card-fig') : null;
-    var lbl = fig ? fig.querySelector('.loan-card-flabel') : null;
-    if (lbl) lbl.textContent = 'Repay amount';
-    var notes = card.querySelectorAll('.loan-card-note');
-    for (var i = 0; i < notes.length; i++) notes[i].style.display = 'none';
+    var topPill = card.querySelector('[data-loan-status], [data-pay-loan-status]');
+    if (topPill) topPill.style.display = 'none';
+    var figs = card.querySelector('.loan-card-figures');
+    if (figs && loan) {
+      var amt = (loan.principal != null) ? loan.principal : loan.loanAmount;
+      var repay = (loan.balance != null) ? loan.balance : loan.payoffAmount;
+      figs.innerHTML =
+        _fig('Loan Amount', _money(amt)) +
+        _fig('Repay amount', _money(repay)) +
+        _fig('Due Date', _date(loan.nextDueDate), 'loan-card-figval--date') +
+        '<div class="loan-card-fig"><p class="loan-card-flabel">Status</p>' +
+          '<p class="loan-card-method"><span class="cif-esign-statuschip">Awaiting signature</span></p></div>';
+    }
+    var hide = card.querySelectorAll('.loan-card-note, .loan-card-foot');
+    for (var i = 0; i < hide.length; i++) hide[i].style.display = 'none';
   }
 
   window.CifEsign = {

@@ -232,8 +232,7 @@
       var esign = CifEsign.infoForLoan(loan);
       CifEsign.renderStrip(esign);
       if (esign) {
-        CifEsign.applyPill(pill);
-        CifEsign.gateCard(card);
+        CifEsign.gateCard(card, loan);
       }
     }
   }

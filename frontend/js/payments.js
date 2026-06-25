@@ -1265,9 +1265,7 @@
       // and funded. Block the form and show the Review & sign prompt instead.
       state.esign = (loan && window.CifEsign) ? CifEsign.infoForLoan(loan, results[2] || []) : null;
       if (state.esign) {
-        CifEsign.renderStrip(state.esign);
-        CifEsign.applyPill(qs('[data-pay-loan-status]', qs('#paySummary')));
-        CifEsign.gateCard(qs('#paySummary'));
+        CifEsign.gateCard(qs('#paySummary'), loan);
         if (formCard) formCard.hidden = true;
         var _ab = qs('#payAchBlocked'); if (_ab) _ab.hidden = true;
         CifEsign.block(state.esign);

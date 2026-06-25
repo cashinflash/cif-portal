@@ -2640,6 +2640,13 @@ button.dash-doc-download:disabled {
   .cif-esign-strip .cif-esign-cta { margin-left: 0; width: 100%; }
 }
 .cif-esign-legal { margin: 0 0 12px; font-size: .8rem; color: #6b7280; line-height: 1.5; }
+/* Status chip shown in the pending card's "Status" figure (the relocated pill). */
+.cif-esign-statuschip {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 2px;
+  background: rgba(255,255,255,.95); color: #9a5b00;
+  font-size: .82rem; font-weight: 700; padding: 6px 12px; border-radius: 999px;
+}
+.cif-esign-statuschip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #E8850D; }
 .cif-esign-error.cif-esign-info { color: #1e40af; }
 /* Hide pay CTAs while a signature is pending — even during load (set by the
    sessionStorage flag + the dashboard preflight, so there's no flash). */
