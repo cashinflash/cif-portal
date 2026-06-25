@@ -1861,11 +1861,81 @@ def change_password(event: Dict[str, Any]) -> Dict[str, Any]:
     return _json_response(200, {"ok": True})
 
 
+def _debug_signing(cid: str) -> Dict[str, Any]:
+    """TEMPORARY Step-0 diagnostic for the e-sign feature. PII-SAFE: only
+    surfaces status/signing/funding-shaped scalar fields from the raw v1
+    loan records, the e-sign pending list, and a reachability probe of the
+    CustomerPortal 'Full' endpoint. No names/SSN/address ever leave here.
+    Remove once the pending-signature detection fields are confirmed."""
+    out: Dict[str, Any] = {}
+
+    # 1) Raw v1 loan records — scrub to status/signing/funding-ish scalars.
+    raw_loans: List[Any] = []
+    used_path = None
+    for path in (f"/V1/{cid}/loans/all",
+                 f"/V1/{cid}/loans?includePrevious=true&numresults=200",
+                 f"/V1/{cid}/loans"):
+        st, body = _v1_get(path)
+        if st == 200 and isinstance(body, list):
+            raw_loans = body
+            used_path = path
+            break
+    key_tokens = ("status", "sign", "fund", "outstanding", "sub", "stage",
+                  "workflow", "rescind", "hdrid", "loanid", "publicid",
+                  "publicloanid", "class", "approved", "sent", "complete",
+                  "pending")
+
+    def scrub(rec: Dict[str, Any]) -> Dict[str, Any]:
+        hdr = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
+        flat: Dict[str, Any] = {}
+        for k, v in hdr.items():
+            if v is not None and not isinstance(v, (str, int, float, bool)):
+                continue
+            if any(t in k.lower() for t in key_tokens):
+                flat[k] = v
+        return flat
+
+    out["rawLoansPath"] = used_path
+    out["loanCount"] = len(raw_loans)
+    out["loanFields"] = [scrub(r) for r in raw_loans if isinstance(r, dict)]
+    if raw_loans and isinstance(raw_loans[0], dict):
+        first = raw_loans[0].get("LoanHeader") if isinstance(raw_loans[0].get("LoanHeader"), dict) else raw_loans[0]
+        out["allKeysFirstRecord"] = sorted(first.keys())
+
+    # 2) E-sign pending list (ids + doc name + date + signingUrl — PII-light).
+    out["esignPending"] = _fetch_pending_esign(cid)
+
+    # 3) Reachability probe — can the SERVICE token reach CustomerPortal/Full
+    #    (the only place isSigningPending/isSigningComplete are documented)?
+    probe: Dict[str, Any] = {}
+    try:
+        st, body, raw = _http(f"{V1_BASE}/CustomerPortal/Customer/Loans/Full",
+                              "GET", headers={"Token": _get_v1_token() or ""})
+        probe["status"] = st
+        if isinstance(body, list) and body and isinstance(body[0], dict):
+            h = body[0]
+            probe["sample"] = {k: h.get(k) for k in (
+                "isSigningPending", "isSigningComplete", "isFundingApproved",
+                "isFundingSent", "loanSubStatus", "loanSubStatusId") if k in h}
+        else:
+            probe["bodySnippet"] = (raw or "")[:160]
+    except Exception as exc:  # best-effort probe — never break the diagnostic
+        probe["error"] = str(exc)[:120]
+    out["customerPortalFullProbe"] = probe
+    return out
+
+
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
+
+    # TEMP Step-0 diagnostic (e-sign field discovery). PII-safe; scoped to the
+    # caller's own JWT customer id. Remove after fields are confirmed.
+    qs = event.get("queryStringParameters") or {}
+    if qs.get("debug") == "signing":
+        return _json_response(200, {"debug": _debug_signing(cid)})
 
     shaped = _fetch_all_loans(cid)
     if not shaped:

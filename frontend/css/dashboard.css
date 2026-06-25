@@ -4588,8 +4588,8 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
    capped at 3 rows so this card defines the row height and stays compact,
    exactly like the example. */
 .home-pay { display: flex; flex-direction: column; }
-.home-pay-top { flex: 0 0 auto; }
-.home-pay-figs { display: flex; justify-content: center; gap: 0; margin-top: 16px; }
+.home-pay-top { flex: 1 1 auto; display: flex; flex-direction: column; }
+.home-pay-figs { display: flex; justify-content: center; gap: 0; margin: auto 0; }
 .home-pay-figs > div + div { border-left: 1px solid #e5e9ee; padding-left: 20px; margin-left: 20px; }
 .home-pay-actions { display: flex; flex-direction: column; gap: 12px; }
 .home-pay-actions .app-cta-primary, .home-pay-actions .app-cta-outline { margin-top: 0; }
@@ -4600,7 +4600,7 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-pay-countdown { display: block; margin-top: 5px; padding-left: 21px; font-size: .78rem; font-weight: 700; color: #6b7280; }
 .home-pay-countdown.is-soon { color: #b45309; }
 .home-pay-countdown.is-late { color: #b42318; }
-.home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0; margin-top: auto; }
+.home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0; }
 
 /* Recent-activity card. */
 .home-activity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
