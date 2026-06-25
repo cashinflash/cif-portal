@@ -4343,6 +4343,7 @@ body.cif-modal-open .app-tabbar { display: none; }
 /* CTAs */
 .app-cta-primary {
   display: flex; align-items: center; justify-content: center; gap: 10px;
+  box-sizing: border-box; min-height: 62px;
   width: 100%; margin-top: 16px; padding: 17px 22px; border: none;
   background: #0E8741; color: #fff; font-weight: 700; font-size: 1.02rem;
   font-family: inherit; text-decoration: none; border-radius: 16px; cursor: pointer;
@@ -4352,6 +4353,7 @@ body.cif-modal-open .app-tabbar { display: none; }
 .app-cta-primary .app-cta-chev { position: absolute; right: 20px; }
 .app-cta-outline {
   display: flex; align-items: center; justify-content: center; gap: 10px;
+  box-sizing: border-box; min-height: 62px;
   width: 100%; margin-top: 12px; padding: 16px 22px; cursor: pointer;
   background: #fff; color: #0E8741; font-weight: 700; font-size: 1.02rem;
   font-family: inherit; border: 2px solid #15C15D; border-radius: 16px; position: relative;
@@ -4359,7 +4361,7 @@ body.cif-modal-open .app-tabbar { display: none; }
 .app-cta-outline:hover { border-color: #0E8741; background: #f4faf6; }
 .app-cta-outline small { color: #6b7280; font-weight: 600; font-size: .82rem; }
 .app-cta-outline .app-cta-chev { position: absolute; right: 20px; color: #94a3b8; }
-.app-cta-icon { width: 28px; height: 28px; object-fit: contain; flex: 0 0 auto; }
+.app-cta-icon { width: 24px; height: 24px; object-fit: contain; flex: 0 0 auto; }
 /* `.dashboard-page button { border:none }` (L53) outranks `.app-cta-outline`; restore the outline with higher specificity. */
 .dashboard-page .app-cta-outline { border: 2px solid #15C15D; }
 .dashboard-page .app-cta-outline:hover { border-color: #0E8741; }
@@ -4598,7 +4600,7 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-pay-countdown { display: block; margin-top: 5px; padding-left: 21px; font-size: .78rem; font-weight: 700; color: #6b7280; }
 .home-pay-countdown.is-soon { color: #b45309; }
 .home-pay-countdown.is-late { color: #b42318; }
-.home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0; }
+.home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0; margin-top: auto; }
 
 /* Recent-activity card. */
 .home-activity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }

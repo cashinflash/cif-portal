@@ -719,7 +719,7 @@
         pill.textContent = loan.isInRescindPeriod ? 'Rescind period' : loan.status;
       } else {
         pill.classList.add('dash-pill--ok');
-        pill.textContent = 'In good standing';
+        pill.textContent = 'Current';
       }
       // Bank (ACH) payment pending → consistent "Processing" pill + the strip
       // under the card (shared module; identical on payments + loans). Also

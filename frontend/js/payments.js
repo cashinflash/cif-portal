@@ -458,8 +458,6 @@
     }
 
     state.bankAccounts.forEach(function (b, idx) {
-      const row = document.createElement('div');
-      row.className = 'pay-method pay-method-bank' + (idx > 0 ? ' pay-method--hidden' : '');
       const acctType = b.accountType || b.type || 'Checking';
       const last4 = b.last4 || b.mask || '';
       const bankName = b.bankName || b.institution || b.name || '';
@@ -469,6 +467,10 @@
       // charge. Banks without an id (loan-fallback) stay display-only.
       const bid = parseInt(b.id, 10);
       const selectable = !isNaN(bid) && bid > 0;
+      // Selectable rows are <label> so a tap ANYWHERE on the row toggles its
+      // radio (matches the cards list); display-only rows stay a plain <div>.
+      const row = document.createElement(selectable ? 'label' : 'div');
+      row.className = 'pay-method pay-method-bank' + (idx > 0 ? ' pay-method--hidden' : '');
       row.innerHTML =
         (selectable
           ? '<input type="radio" name="payMethod" value="bank:' + bid + '">'
