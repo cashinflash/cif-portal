@@ -164,8 +164,43 @@
     }
     m.hidden = false;
     requestAnimationFrame(function () { m.classList.add('is-open'); });
+    _syncModalState();
   }
-  function hideModal() { if (_modal) { _modal.classList.remove('is-open'); _modal.hidden = true; } }
+  function hideModal() {
+    if (_modal) { _modal.classList.remove('is-open'); _modal.hidden = true; }
+    _syncModalState();
+  }
+
+  // ── Mobile modal helper ──────────────────────────────────────────────
+  // Every modal in the portal (.profile-modal / .app-modal, incl. the one
+  // above) lives inside a page stacking context that sits BELOW the fixed
+  // bottom tab bar, so on mobile the tab bar paints over the sheet and cuts
+  // off its buttons. Fix it once, portal-wide: whenever any modal is open,
+  // add body.cif-modal-open (CSS hides the tab bar + locks scroll).
+  function _anyModalOpen() {
+    var ms = document.querySelectorAll('.profile-modal, .app-modal');
+    for (var i = 0; i < ms.length; i++) { if (!ms[i].hidden) return true; }
+    return false;
+  }
+  function _syncModalState() {
+    document.body.classList.toggle('cif-modal-open', _anyModalOpen());
+  }
+  var _modalObserver = null;
+  function _watchModals() {
+    if (typeof MutationObserver === 'undefined') return;
+    if (_modalObserver) _modalObserver.disconnect();
+    _modalObserver = new MutationObserver(_syncModalState);
+    var ms = document.querySelectorAll('.profile-modal, .app-modal');
+    for (var i = 0; i < ms.length; i++) {
+      _modalObserver.observe(ms[i], { attributes: true, attributeFilter: ['hidden', 'class'] });
+    }
+    _syncModalState();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _watchModals);
+  } else {
+    _watchModals();
+  }
 
   window.CifAch = {
     KEY: KEY,

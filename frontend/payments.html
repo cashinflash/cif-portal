@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260624r">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260624s">
   <script>
     (function(){
       try {
@@ -420,8 +420,8 @@
             <line x1="9"  y1="9"  x2="15" y2="15"></line>
           </svg>
         </div>
-        <h2 style="margin:14px 0 4px;color:#1a1a2e">Payment not completed</h2>
-        <p style="margin:0 0 4px;color:#777;font-size:0.95rem">
+        <h2 data-decline-title style="margin:14px 0 4px;color:#1a1a2e">Payment not completed</h2>
+        <p data-decline-sub style="margin:0 0 4px;color:#777;font-size:0.95rem">
           Your card was <strong style="color:#c0392b">declined</strong>.
           Nothing has been applied to your loan.
         </p>
@@ -430,7 +430,7 @@
              style="margin:18px auto 0;max-width:480px;background:#fdf2f2;
                     border:1px solid #f5b8b0;border-radius:10px;padding:14px 16px;
                     text-align:left">
-          <div style="font-size:11px;font-weight:700;color:#9c2a1f;
+          <div data-decline-reason-label style="font-size:11px;font-weight:700;color:#9c2a1f;
                       letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px">
             Reason from your card issuer
           </div>
@@ -442,7 +442,7 @@
 
         <dl class="pay-receipt-grid" style="margin-top:18px">
           <div>
-            <dt>Card</dt>
+            <dt data-decline-card-label>Card</dt>
             <dd data-decline-card>&mdash;</dd>
           </div>
           <div>
@@ -451,7 +451,7 @@
           </div>
         </dl>
 
-        <p style="margin:14px auto 0;max-width:520px;color:#475569;
+        <p data-decline-advice style="margin:14px auto 0;max-width:520px;color:#475569;
                   line-height:1.5;font-size:0.9rem">
           Try a different debit card, or call the number on the back of your card
           to confirm it's active and has available funds. Then come back and try again.
@@ -580,7 +580,7 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/cif-ach.js?v=20260624r"></script>
-  <script src="/js/payments.js?v=20260624r"></script>
+  <script src="/js/cif-ach.js?v=20260624s"></script>
+  <script src="/js/payments.js?v=20260624s"></script>
 </body>
 </html>

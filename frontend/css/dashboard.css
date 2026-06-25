@@ -2590,6 +2590,9 @@ button.dash-doc-download:disabled {
   background: #fff5e6; border: 1px solid #ffd591; color: #5a3300;
   font-size: .9rem; line-height: 1.45;
 }
+/* Without this the display:flex above overrides [hidden], so an empty slot
+   shows as a blank amber box. */
+.cif-ach-strip[hidden] { display: none !important; }
 .cif-ach-strip svg { flex: 0 0 auto; color: #b76e00; }
 .cif-ach-strip strong { font-weight: 700; }
 /* Inside the payments stack (gap:16px) the strip needs no extra top margin —
@@ -3908,11 +3911,26 @@ html.cif-has-active-loan .dash-sidebar-link[href="/request-loan.html"] {
   .profile-modal { align-items: flex-end; }
   .profile-modal-card {
     width: 100%;
-    border-radius: 16px 16px 0 0;
+    border-radius: 22px 22px 0 0;
     align-self: flex-end;
-    max-height: 92dvh;
+    max-height: 90dvh;
+    box-shadow: 0 -10px 44px rgba(2, 6, 23, .30);
+    /* Clear the iOS home indicator so the action buttons are reachable. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Grab handle so the sheet reads as a proper modal, not a bland panel. */
+  .profile-modal-card::before {
+    content: ""; flex: 0 0 auto;
+    width: 40px; height: 4px; border-radius: 999px;
+    background: #d8dee7; margin: 10px auto 2px;
   }
 }
+
+/* While ANY modal is open, hide the bottom tab bar (otherwise its buttons get
+   cut off behind it — the modal lives inside a stacking context below the
+   fixed tab bar) and lock background scroll. Applied portal-wide by cif-ach.js. */
+body.cif-modal-open { overflow: hidden; }
+body.cif-modal-open .app-tabbar { display: none; }
 
 /* 44x44 minimum tap targets on touch devices; mouse desktops stay compact. */
 @media (pointer: coarse) {

@@ -664,8 +664,17 @@
           const el = qs(s); if (el) el.value = '';
         });
         return loadBankAccounts().then(function () {
+          // Bring the just-added bank account to the #1 spot.
+          var nl4 = (bank.accountNumber || '').slice(-4);
+          var arr = state.bankAccounts || [];
+          var mi = -1;
+          for (var i = 0; i < arr.length; i++) {
+            if (arr[i] && String(arr[i].last4) === String(nl4)) { mi = i; break; }
+          }
+          if (mi > 0) { arr.unshift(arr.splice(mi, 1)[0]); }
+          renderBankAccounts();
           closeAddBank();
-          showBankAdded(bank.accountNumber.slice(-4));
+          showBankAdded(nl4);
         });
       })
       .catch(function (e2) {
@@ -955,8 +964,14 @@
           var match = (methods || []).find(function (m) {
             return newLast4 && m.last4 === newLast4;
           });
+          // Bring the just-added card to the #1 spot (and select it).
+          if (match) {
+            state.methods = [match].concat(
+              (state.methods || []).filter(function (m) { return m !== match; }));
+          }
           state.selectedMethodId = match ? match.methodId
-            : (methods && methods.length ? methods[0].methodId : null);
+            : (state.methods && state.methods.length ? state.methods[0].methodId : null);
+          state.selectedBankId = null;
           renderMethods();
           closeAddCard();
           showCardAdded(newLast4);
@@ -1062,12 +1077,29 @@
   // a fake success, and reassures the customer their loan was NOT charged.
   function showDecline(info) {
     info = info || {};
-    var reason = String(info.reason || 'Card declined.').trim();
+    var isBank = !!info.isBank || info.brand === 'Bank';
+    var reason = String(info.reason || (isBank ? 'Bank payment was not accepted.' : 'Card declined.')).trim();
     var html = reason.split(/\s*;\s+/)
       .map(function (line) { return escapeHtml(line); })
       .join('<br>');
     var reasonEl = qs('#payDeclineReason');
     if (reasonEl) reasonEl.innerHTML = html;
+
+    // Bank (ACH) wording vs card wording — a bank payment must never say
+    // "card declined / card issuer / try a different card".
+    var sub = qs('[data-decline-sub]');
+    if (sub) {
+      sub.innerHTML = isBank
+        ? 'We couldn’t submit your bank payment, so it was <strong style="color:#c0392b">not scheduled</strong>. Nothing has been applied to your loan.'
+        : 'Your card was <strong style="color:#c0392b">declined</strong>. Nothing has been applied to your loan.';
+    }
+    setText(qs('[data-decline-reason-label]'), isBank ? 'What happened' : 'Reason from your card issuer');
+    setText(qs('[data-decline-card-label]'), isBank ? 'Bank account' : 'Card');
+    setText(qs('[data-decline-advice]'), isBank
+      ? 'Please try again in a moment, or pay with a debit card instead. If it keeps happening, give us a call and we’ll help.'
+      : "Try a different debit card, or call the number on the back of your card to confirm it's active and has available funds. Then come back and try again.");
+    var tryBtn = qs('#payTryAgainBtn');
+    if (tryBtn) tryBtn.textContent = isBank ? 'Try again' : 'Try a different card';
 
     var brand = info.brand || 'Card';
     var last4 = info.last4 || '';

@@ -889,7 +889,12 @@ def _charge_loan_ach_v1(*, loan_id: int, bank_id: int, amount: float,
     body = {
         "HeaderId":        int(loan_id),
         "companyId":       VERGENT_COMPANY_ID,
-        "StoreId":         1,
+        # StoreId 0 = the value that Vergent ACCEPTED in the working tests.
+        # Forcing StoreId=1 (to make the admin "Store" column read 1) made
+        # Vergent REJECT the submission, so it's reverted. The right
+        # store-id-that-also-displays-1 is a follow-up with Vergent; getting
+        # the ACH to post is the priority.
+        "StoreId":         0,
         "BankAcctId":      int(bank_id),
         "Amount":          round(float(amount), 2),
         "AchEffDate":      eff_date,
