@@ -2636,6 +2636,10 @@ button.dash-doc-download:disabled {
 }
 .cif-esign-strip .cif-esign-cta:hover { background: #0C7137 !important; }
 .pay-stack > .cif-esign-strip { margin-top: -6px; }
+/* In the loans stack the gap already spaces the strip; drop its own top margin
+   (and pull up a touch on desktop) so it sits close under the loan card. */
+.loans-stack > .cif-esign-strip { margin-top: 0; }
+@media (min-width: 900px) { .loans-stack > .cif-esign-strip { margin-top: -8px; } }
 @media (max-width: 560px) {
   .cif-esign-strip .cif-esign-cta { margin-left: 0; width: 100%; }
 }
@@ -2652,7 +2656,16 @@ button.dash-doc-download:disabled {
    sessionStorage flag + the dashboard preflight, so there's no flash). */
 html.cif-pending-signature .home-pay,
 html.cif-pending-signature [data-show-when-active],
-html.cif-pending-signature a.app-cta-primary[href*="payments.html"] { display: none !important; }
+html.cif-pending-signature a.app-cta-primary[href*="payments.html"],
+html.cif-pending-signature .home-needloan,
+html.cif-pending-signature #requestLoanBtnMobile { display: none !important; }
+/* Payments: for a known-pending customer, paint the card orange the moment it
+   leaves the loading (gray) state — never the default green — so there's no
+   green flash before the JS gates it. */
+html.cif-pending-signature #paySummary:not([aria-busy="true"]) {
+  background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%) !important;
+  box-shadow: 0 12px 30px rgba(217,119,6,.30) !important;
+}
 
 /* Payments page block (reuses .pay-ach-blocked layout). */
 .pay-ach-blocked h3 { margin: 8px 0 6px; color: var(--cif-navy); font-size: 1.08rem; font-weight: 700; }
@@ -2705,10 +2718,10 @@ html.cif-pending-signature a.app-cta-primary[href*="payments.html"] { display: n
 }
 .cif-esign-cancel:hover { background: #f3f4f6; }
 .cif-esign-submit {
-  border: none; background: #0E8741; color: #fff; font-family: inherit; font-weight: 700;
+  border: none !important; background: #0E8741 !important; color: #fff !important; font-family: inherit; font-weight: 700;
   font-size: .9rem; padding: 11px 22px; border-radius: 10px; cursor: pointer;
 }
-.cif-esign-submit:hover:not(:disabled) { background: #0C7137; }
+.cif-esign-submit:hover:not(:disabled) { background: #0C7137 !important; }
 .cif-esign-submit:disabled { opacity: .5; cursor: not-allowed; }
 .cif-esign-alt { display: block; margin-top: 12px; font-size: .85rem; color: #2952cc; text-align: center; font-weight: 600; }
 .cif-esign-alt[hidden] { display: none; }
@@ -4447,6 +4460,19 @@ body.cif-modal-open .app-tabbar { display: none; }
 .loan-card.is-pastdue { background: linear-gradient(150deg, #EA5559 0%, #CE3439 58%, #B0252B 100%); box-shadow: 0 12px 30px rgba(180,35,24,.32); }
 /* Pending signature → orange "Pending Loan" treatment (loan isn't active yet). */
 .loan-card.is-pending-sign { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 12px 30px rgba(217,119,6,.30); }
+/* While the loan card is still loading, show a neutral gray placeholder — never
+   the green (or orange) card behind the skeleton, on any page. */
+.loan-card[aria-busy="true"] { background: #e9edf2 !important; box-shadow: none !important; }
+/* Desktop: center the pending card's figures + status pill so the 4-up row is
+   balanced (mobile already centers via the .loans-active 2x2 grid). */
+@media (min-width: 900px) {
+  .loan-card.is-pending-sign .loan-card-fig { text-align: center; padding: 0 16px; }
+  .loan-card.is-pending-sign .loan-card-method { justify-content: center; }
+}
+/* Home: don't stretch the pending card to the neighbor's height (it has less
+   content with the rule/note hidden) — size to content so there's no empty
+   orange below the figures. */
+.home-loan.is-pending-sign { align-self: start; height: auto; }
 .loan-card.is-pastdue .loan-card-note, .loan-card.is-pastdue-soft .loan-card-note { color: #fff; font-weight: 700; }
 .loan-card .loan-card-note.is-pastdue-note svg { color: rgba(255,255,255,.92); }
 /* Neutral loading state so the hero doesn't flash green → red before the loan

@@ -386,7 +386,7 @@
         '<div class="loan-card-fig"><p class="loan-card-flabel">Status</p>' +
           '<p class="loan-card-method"><span class="cif-esign-statuschip">Awaiting signature</span></p></div>';
     }
-    var hide = card.querySelectorAll('.loan-card-note, .loan-card-foot');
+    var hide = card.querySelectorAll('.loan-card-note, .loan-card-foot, .loan-card-rule');
     for (var i = 0; i < hide.length; i++) hide[i].style.display = 'none';
   }
 
