@@ -2638,19 +2638,22 @@ button.dash-doc-download:disabled {
 .pay-stack > .cif-esign-strip { margin-top: -6px; }
 /* In the loans stack the gap already spaces the strip; drop its own top margin
    (and pull up a touch on desktop) so it sits close under the loan card. */
-.loans-stack > .cif-esign-strip { margin-top: 0; }
-@media (min-width: 900px) { .loans-stack > .cif-esign-strip { margin-top: -8px; } }
+.loans-stack > .cif-esign-strip { margin-top: -6px; }
+@media (min-width: 900px) { .loans-stack > .cif-esign-strip { margin-top: -12px; } }
 @media (max-width: 560px) {
   .cif-esign-strip .cif-esign-cta { margin-left: 0; width: 100%; }
 }
 .cif-esign-legal { margin: 0 0 12px; font-size: .8rem; color: #6b7280; line-height: 1.5; }
 /* Status chip shown in the pending card's "Status" figure (the relocated pill). */
 .cif-esign-statuschip {
-  display: inline-flex; align-items: center; gap: 6px; margin-top: 2px;
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; white-space: nowrap;
   background: rgba(255,255,255,.95); color: #9a5b00;
-  font-size: .82rem; font-weight: 700; padding: 6px 12px; border-radius: 999px;
+  font-size: .76rem; font-weight: 700; padding: 5px 11px; border-radius: 999px;
 }
-.cif-esign-statuschip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #E8850D; }
+.cif-esign-statuschip::before { content: ''; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: #E8850D; }
+/* Center the Status pill in its figure cell on every device (it sat cramped
+   against the divider line). */
+.loan-card.is-pending-sign .loan-card-method { justify-content: center; }
 .cif-esign-error.cif-esign-info { color: #1e40af; }
 /* Hide pay CTAs while a signature is pending — even during load (set by the
    sessionStorage flag + the dashboard preflight, so there's no flash). */
@@ -4853,6 +4856,20 @@ a.app-cta-primary[href*="payments.html"]:hover {
   .home-pay      { grid-area: pay; }
   .home-activity { grid-area: act; }
   .home-tiles    { grid-area: tiles; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  /* Pending signature: the need + pay cards are hidden, which left the e-sign
+     strip auto-placing into an empty grid cell (broken desktop layout). Reflow
+     to a clean stack: full-width pending card, full-width Review & sign prompt,
+     then recent activity + tiles. */
+  html.cif-pending-signature .home-grid {
+    grid-template-areas:
+      "loan loan loan loan loan"
+      "sign sign sign sign sign"
+      "act  act  act  act  act"
+      "tiles tiles tiles tiles tiles";
+  }
+  html.cif-pending-signature .cif-esign-strip.u-desktop { grid-area: sign; }
+  html.cif-pending-signature .home-loan { height: auto; }
 
   /* Force each paired card to fill its row track so the two cards in a row
      are always the exact same height (align-items:stretch alone wasn't

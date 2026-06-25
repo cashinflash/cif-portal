@@ -190,6 +190,13 @@
         const preset = Number(loan.nextDueAmount || loan.balance || 0);
         if (preset > 0) amountInput.value = preset.toFixed(2);
       }
+      // If this customer is awaiting signature (known synchronously from the
+      // preflight flag), rebuild the card to the pending layout NOW — same
+      // synchronous tick that rendered the default summary — so the old version
+      // never paints before the async e-sign gate runs.
+      if (document.documentElement.classList.contains('cif-pending-signature') && window.CifEsign) {
+        CifEsign.gateCard(card, loan);
+      }
       return loan;
     });
   }
