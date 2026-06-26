@@ -148,12 +148,20 @@
         caption.textContent = loan.nextDueDate ? formatDate(loan.nextDueDate) : '—';
       }
       const pill = qs('[data-pay-loan-status]', card);
+      // Past-due detection IDENTICAL to Home + Loans (statusPillClass): the
+      // status string alone doesn't always say "past due" — Vergent flags it via
+      // the daysLate field, so we check both (that's why this card used to stay
+      // green on a past-due loan).
+      var _status = (loan.status || '').toLowerCase();
+      var _daysLate = (loan.daysLate || '').toLowerCase();
+      var _past = !!loan.isOutstanding && (
+        _status.indexOf('past') !== -1 || _status.indexOf('delinquent') !== -1 ||
+        (_daysLate && _daysLate !== 'not late'));
+      var _dpd = _past ? daysPastDue(loan) : 0;
+      var _soft = _past && _dpd >= 1 && _dpd <= 4;
       if (pill) {
-        // Match the Home card: "In good standing" for a current loan, red past-due otherwise.
-        var st = (loan.status || '').toLowerCase();
-        var isPast = st.indexOf('past') !== -1 || st.indexOf('late') !== -1 || st.indexOf('delinq') !== -1;
-        pill.textContent = isPast ? (loan.status || 'Past due') : 'Current';
-        pill.classList.toggle('dash-pill--past-due', isPast);
+        pill.textContent = _past ? 'Past due' : 'Current';
+        pill.classList.toggle('dash-pill--past-due', _past);
       }
       // Bank (ACH) payment pending → consistent "Processing" pill + strip
       // (shared module; identical to the home + loans cards).
@@ -164,10 +172,6 @@
       }
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
       // matching Home — independent of the pill so it works even if absent.
-      var _st = (loan.status || '').toLowerCase();
-      var _past = _st.indexOf('past') !== -1 || _st.indexOf('late') !== -1 || _st.indexOf('delinq') !== -1;
-      var _dpd = _past ? daysPastDue(loan) : 0;
-      var _soft = _past && _dpd >= 1 && _dpd <= 4;
       card.classList.toggle('is-pastdue-soft', _soft);
       card.classList.toggle('is-pastdue', _past && !_soft);
       // Payment breakdown (defensive — every element is optional). Total is

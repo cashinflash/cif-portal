@@ -4318,7 +4318,7 @@ body.cif-modal-open .app-tabbar { display: none; }
 }
 .loan-card-pill::after { content: "\2713"; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: #16a34a; color: #fff; font-size: .62rem; font-weight: 800; }
 .loan-card-pill.dash-pill--past-due, .loan-card-pill.dash-pill--warn { background: rgba(255,255,255,.92); color: #b42318; }
-.loan-card-pill.dash-pill--past-due::after, .loan-card-pill.dash-pill--warn::after { content: ""; }
+.loan-card-pill.dash-pill--past-due::after, .loan-card-pill.dash-pill--warn::after { content: "!"; background: #dc2626; }
 /* Mobile: balance + due wrap two-up, repayment drops below — no vertical
    dividers (they only read in a single row). Desktop adds the 3-up row
    with dividers in the min-width:900px block. */
@@ -4509,7 +4509,7 @@ body.cif-modal-open .app-tabbar { display: none; }
 /* Past-due active-loan hero: amber for 1–4 days, red for 5+ days. The whole
    card recolors (text/pill/note already render white-on-color). */
 .loan-card.is-pastdue-soft { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 12px 30px rgba(217,119,6,.30); }
-.loan-card.is-pastdue { background: linear-gradient(150deg, #EA5559 0%, #CE3439 58%, #B0252B 100%); box-shadow: 0 12px 30px rgba(180,35,24,.32); }
+.loan-card.is-pastdue { background: linear-gradient(150deg, #D23636 0%, #B12525 58%, #8F1B1B 100%); box-shadow: 0 12px 30px rgba(150,28,28,.30); }
 /* Pending signature → orange "Pending Loan" treatment (loan isn't active yet). */
 .loan-card.is-pending-sign { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 8px 20px rgba(217,119,6,.20); }
 /* While the loan card is still loading, show a neutral gray placeholder — never
@@ -4518,13 +4518,19 @@ body.cif-modal-open .app-tabbar { display: none; }
 /* Desktop: center the pending card's figures + status pill so the 4-up row is
    balanced (mobile already centers via the .loans-active 2x2 grid). */
 @media (min-width: 900px) {
-  .loan-card.is-pending-sign .loan-card-fig { text-align: center; padding: 0 16px; }
-  .loan-card.is-pending-sign .loan-card-method { justify-content: center; }
+  .loan-card.is-pending-sign .loan-card-fig,
+  .loan-card.is-pastdue .loan-card-fig,
+  .loan-card.is-pastdue-soft .loan-card-fig { text-align: center; padding: 0 16px; }
+  .loan-card.is-pending-sign .loan-card-method,
+  .loan-card.is-pastdue .loan-card-method,
+  .loan-card.is-pastdue-soft .loan-card-method { justify-content: center; }
 }
-/* Home: don't stretch the pending card to the neighbor's height (it has less
-   content with the rule/note hidden) — size to content so there's no empty
-   orange below the figures. */
-.home-loan.is-pending-sign { align-self: start; height: auto; }
+/* Home: don't stretch the pending / past-due card to the neighbor's height (it
+   has less content) — size to content so there's no empty colored band below
+   the figures + note. */
+.home-loan.is-pending-sign,
+.home-loan.is-pastdue,
+.home-loan.is-pastdue-soft { align-self: start; height: auto; }
 .loan-card.is-pastdue .loan-card-note, .loan-card.is-pastdue-soft .loan-card-note { color: #fff; font-weight: 700; }
 .loan-card .loan-card-note.is-pastdue-note svg { color: rgba(255,255,255,.92); }
 /* Neutral loading state so the hero doesn't flash green → red before the loan
@@ -5150,7 +5156,7 @@ a.app-cta-primary[href*="payments.html"]:hover {
      says what it is. */
   .loans-active .loan-card-due,
   .loans-active .loan-card-method {
-    justify-content: center; white-space: nowrap; gap: 0; font-size: .92rem;
+    justify-content: center; white-space: nowrap; gap: 0; font-size: 1.2rem; font-weight: 800;
   }
   .loans-active .loan-card-due svg,
   .loans-active .loan-card-method svg { display: none; }
@@ -5159,7 +5165,7 @@ a.app-cta-primary[href*="payments.html"]:hover {
   .loans-active .loan-card-fig:nth-child(2) { padding-bottom: 16px; }
   .loans-active .loan-card-fig:nth-child(3),
   .loans-active .loan-card-fig:nth-child(4) { padding-top: 16px; border-top: 1px solid rgba(255,255,255,.22); }
-  .loans-active .loan-card-figval { font-size: 1.35rem; }
+  .loans-active .loan-card-figval { font-size: 1.2rem; }
   /* Drop the divider above the "Make your payment on time..." note. */
   .loans-active .loan-card-rule { display: none; }
   .loans-active .loan-card-note { margin-top: 18px; }
