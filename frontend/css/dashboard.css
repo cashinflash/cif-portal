@@ -4275,7 +4275,10 @@ body.cif-modal-open .app-tabbar { display: none; }
    right column so the bar stays balanced with the hamburger gone. */
 #menu-toggle { display: none; }
 .app-topbar-logo { grid-column: 2; }
-.app-avatar-btn { grid-column: 3; }
+/* Hide the top-right profile icon on mobile — it just links to Profile, which
+   is already in the bottom tab bar. The grid column stays reserved so the
+   centered logo doesn't shift. (Desktop uses the sidebar, not this bar.) */
+.app-avatar-btn { grid-column: 3; display: none; }
 #moreTab { display: none; }
 
 /* Main column */
