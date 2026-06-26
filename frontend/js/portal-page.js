@@ -118,9 +118,11 @@
       if (soM) soM.addEventListener('click', signOut);
     }
 
-    // Vergent handoff for "Open Vergent portal" + "Request a new loan" buttons.
+    // Vergent handoff for "Open Vergent portal" buttons only. "Request a
+    // new loan" (data-action="new-loan") now navigates to the native
+    // in-portal Fast Re-Apply flow at /request-loan.html — no handoff.
     var handoffButtons = document.querySelectorAll(
-      '[data-action="open-vergent-portal"], [data-action="new-loan"]'
+      '[data-action="open-vergent-portal"]'
     );
     Array.prototype.forEach.call(handoffButtons, function (btn) {
       btn.addEventListener('click', function (ev) {

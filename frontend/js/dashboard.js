@@ -354,36 +354,11 @@
       .catch(function () { /* non-critical — profile already has Cognito data */ });
   }
 
-  // ---------- Request a new loan: hand off to Vergent apply portal ----------
-  function wireNewLoanButton() {
-    // Convert any <a href="/request-loan.html"> into handoff triggers.
-    qsa('a[href="/request-loan.html"], a[href="/request-loan.html#new"], [data-action="new-loan"]').forEach(function (a) {
-      a.addEventListener('click', function (ev) {
-        ev.preventDefault();
-        const orig = a.textContent;
-        a.style.pointerEvents = 'none';
-        a.textContent = 'Starting…';
-        fetch('/api/my-loan/new', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
-        }).then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data && data.url) {
-              window.location.href = data.url;
-              return;
-            }
-            a.textContent = orig;
-            a.style.pointerEvents = '';
-            alert('Could not start a new loan request. Please try again or call (888) 999-9859.');
-          })
-          .catch(function () {
-            a.textContent = orig;
-            a.style.pointerEvents = '';
-            alert('Network error. Please try again.');
-          });
-      });
-    });
-  }
+  // ---------- Request a new loan ----------
+  // Fast Re-Apply: "Request a new loan" now opens the native in-portal
+  // flow at /request-loan.html. The old Vergent-handoff click-hijack was
+  // removed so these links/buttons navigate normally.
+  function wireNewLoanButton() { /* no-op: native /request-loan.html flow */ }
 
   function formatPhone(raw) {
     const digits = String(raw).replace(/\D/g, '');
@@ -905,7 +880,7 @@
   // ---------- Sign out ----------
   // ---------- App layout actions (re-loan gating, modal, More tab) ----------
   function wireAppActions() {
-    var APPLY_URL = 'https://apply.cashinflash.com';
+    var APPLY_URL = '/request-loan.html';  // Fast Re-Apply: native in-portal flow
     var modal = qs('#reloanModal');
     function requestLoan() {
       var active = window.__cifActiveLoan;
