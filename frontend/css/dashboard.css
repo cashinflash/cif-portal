@@ -4858,19 +4858,20 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .app-page .app-cta-primary { background: #0E8741; }
 .app-page .app-cta-primary:hover { background: #0C7137; }
 
-/* "Make a Payment" CTA restyle — navy-blue gradient + white text. Targeted by
-   href (links to /payments.html) so the Request-loan and Pay-now buttons keep
-   the standard solid-green primary style. Navy sets "pay" apart from the green
-   brand actions without making everything green (and reads cleaner than the
-   old orange, which fought the green theme). */
+/* "Make a Payment" CTA restyle — refined deep-amber gradient + dark text.
+   Targeted by href (links to /payments.html) so the Request-loan and Pay-now
+   buttons keep the standard solid-green primary style. The deeper amber keeps
+   the warm, high-contrast "tap me" pull of the old orange but reads as
+   intentional/premium (the neon orange fought the green; navy was too heavy
+   dark-on-dark under the green card). */
 a.app-cta-primary[href*="payments.html"] {
-  background: linear-gradient(180deg, #2A5685 0%, #1C3F62 100%);
-  color: #fff !important;
+  background: linear-gradient(180deg, #F59E0B 0%, #E07C02 100%);
+  color: #1a1a2e !important;
   font-weight: 800;
-  box-shadow: 0 14px 28px rgba(28, 63, 98, 0.34);
+  box-shadow: 0 14px 28px rgba(224, 124, 2, 0.30);
 }
 a.app-cta-primary[href*="payments.html"]:hover {
-  background: linear-gradient(180deg, #244B76 0%, #173655 100%);
+  background: linear-gradient(180deg, #EC9408 0%, #CE7002 100%);
 }
 
 /* Sidebar help card (desktop only). */

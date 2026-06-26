@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Set up your portal · Cash in Flash</title>
+  <link rel="icon" type="image/png" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <style>
+    :root { --green:#0E8741; --green-dark:#0C7137; --navy:#1a1a2e; --muted:#6b7280; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; padding:0; }
+    body { font-family:Inter,system-ui,-apple-system,sans-serif; background:#eef1f5; color:var(--navy);
+      min-height:100vh; min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .ob-card { width:100%; max-width:420px; background:#fff; border:1px solid #e7ebf0; border-radius:20px;
+      box-shadow:0 20px 50px rgba(15,23,42,.10); padding:30px 26px; }
+    .ob-logo { display:block; margin:0 auto 22px; height:26px; width:auto; }
+    .ob-h1 { margin:0 0 6px; font-size:1.4rem; font-weight:800; letter-spacing:-.01em; text-align:center; }
+    .ob-sub { margin:0 0 22px; color:var(--muted); font-size:.95rem; line-height:1.5; text-align:center; }
+    .ob-sub strong { color:var(--navy); }
+    .ob-field { display:block; margin-bottom:14px; }
+    .ob-field span { display:block; font-size:.85rem; font-weight:600; margin-bottom:6px; }
+    .ob-input { width:100%; padding:13px 14px; border:1px solid #d7dde3; border-radius:12px; font-size:1rem;
+      font-family:inherit; }
+    .ob-input:focus { outline:none; border-color:var(--green); box-shadow:0 0 0 3px rgba(14,135,65,.12); }
+    .ob-reqs { margin:2px 0 16px; padding-left:18px; color:var(--muted); font-size:.8rem; line-height:1.7; }
+    .ob-reqs li.ok { color:var(--green); }
+    .ob-btn { width:100%; border:none; background:var(--green); color:#fff; font-family:inherit; font-weight:700;
+      font-size:1rem; padding:14px; border-radius:12px; cursor:pointer; }
+    .ob-btn:hover:not(:disabled) { background:var(--green-dark); }
+    .ob-btn:disabled { opacity:.55; cursor:not-allowed; }
+    .ob-err { display:none; margin:0 0 14px; color:#b42318; font-size:.88rem; line-height:1.5;
+      background:#fde7e7; border-radius:10px; padding:10px 12px; }
+    .ob-err.show { display:block; }
+    .ob-center { text-align:center; }
+    .ob-spinner { width:34px; height:34px; border:3px solid rgba(14,135,65,.2); border-top-color:var(--green);
+      border-radius:50%; animation:obspin .8s linear infinite; margin:30px auto; }
+    @keyframes obspin { to { transform:rotate(360deg); } }
+    .ob-foot { margin-top:18px; text-align:center; font-size:.85rem; color:var(--muted); }
+    .ob-foot a { color:var(--green); font-weight:600; text-decoration:none; }
+    [hidden] { display:none !important; }
+  </style>
+</head>
+<body>
+  <main class="ob-card">
+    <img class="ob-logo" src="/images/Get-Fast-Cash-Loans-Cash-in-Flash.png" alt="Cash in Flash" width="180" height="26">
+
+    <!-- Loading -->
+    <div id="obLoading">
+      <div class="ob-spinner" aria-label="Loading"></div>
+      <p class="ob-sub">Checking your invite…</p>
+    </div>
+
+    <!-- Invalid / expired -->
+    <div id="obInvalid" hidden>
+      <h1 class="ob-h1">This link can't be used</h1>
+      <p class="ob-sub">Your setup link is invalid or has expired. Please use the most recent email we sent, or sign in if you've already set a password.</p>
+      <a class="ob-btn" href="/login.html" style="display:block;text-align:center;text-decoration:none;line-height:1.4">Go to sign in</a>
+      <p class="ob-foot">Need help? <a href="https://cashinflash.com/contact/">Contact support</a></p>
+    </div>
+
+    <!-- Set password -->
+    <form id="obForm" hidden autocomplete="on">
+      <h1 class="ob-h1" id="obGreeting">Set up your portal</h1>
+      <p class="ob-sub">Create a password for <strong id="obEmail">your account</strong> to finish setting up your Cash in Flash portal.</p>
+      <div class="ob-err" id="obError" role="alert"></div>
+      <label class="ob-field">
+        <span>Create password</span>
+        <input class="ob-input" type="password" id="obPw" autocomplete="new-password" required>
+      </label>
+      <ul class="ob-reqs" id="obReqs">
+        <li data-req="len">At least 10 characters</li>
+        <li data-req="upper">An uppercase letter</li>
+        <li data-req="lower">A lowercase letter</li>
+        <li data-req="digit">A number</li>
+        <li data-req="sym">A symbol (!?@#…)</li>
+      </ul>
+      <label class="ob-field">
+        <span>Confirm password</span>
+        <input class="ob-input" type="password" id="obPw2" autocomplete="new-password" required>
+      </label>
+      <button class="ob-btn" type="submit" id="obSubmit">Set password &amp; continue</button>
+      <p class="ob-foot">Already set up? <a href="/login.html">Sign in</a></p>
+    </form>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+      var $ = function (id) { return document.getElementById(id); };
+      // Token comes in the URL fragment (#t=…) so it never hits server logs or
+      // the Referer header. Support a bare "#<token>" too.
+      function getToken() {
+        var h = (location.hash || '').replace(/^#/, '');
+        if (!h) return '';
+        var m = h.match(/(?:^|&)t=([^&]+)/);
+        return decodeURIComponent(m ? m[1] : h);
+      }
+      var token = getToken();
+      function show(id) { ['obLoading', 'obInvalid', 'obForm'].forEach(function (x) { $(x).hidden = (x !== id); }); }
+      function fail() { show('obInvalid'); }
+
+      if (!token) { fail(); return; }
+
+      fetch('/api/auth/onboard/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token })
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !d.ok) { fail(); return; }
+          if (d.firstName) $('obGreeting').textContent = 'Welcome, ' + d.firstName + '!';
+          $('obEmail').textContent = d.masked || 'your account';
+          show('obForm');
+        }).catch(fail);
+
+      // Live password-requirement checklist.
+      var reqs = { len: function (p) { return p.length >= 10; }, upper: function (p) { return /[A-Z]/.test(p); },
+        lower: function (p) { return /[a-z]/.test(p); }, digit: function (p) { return /[0-9]/.test(p); },
+        sym: function (p) { return /[^A-Za-z0-9]/.test(p); } };
+      function pwOk(p) { return reqs.len(p) && reqs.upper(p) && reqs.lower(p) && reqs.digit(p) && reqs.sym(p); }
+      $('obPw').addEventListener('input', function () {
+        var p = this.value;
+        Array.prototype.forEach.call($('obReqs').querySelectorAll('li'), function (li) {
+          li.classList.toggle('ok', !!reqs[li.getAttribute('data-req')](p));
+        });
+      });
+
+      function err(msg) { var e = $('obError'); e.textContent = msg; e.classList.add('show'); }
+
+      $('obForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        $('obError').classList.remove('show');
+        var p = $('obPw').value, p2 = $('obPw2').value;
+        if (!pwOk(p)) { err('Please meet all the password requirements above.'); return; }
+        if (p !== p2) { err('The two passwords don’t match.'); return; }
+        var btn = $('obSubmit'); btn.disabled = true; btn.textContent = 'Setting up…';
+        fetch('/api/auth/onboard/complete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token, password: p })
+        }).then(function (r) {
+          return r.json().then(function (d) { return { ok: r.ok, d: d }; }).catch(function () { return { ok: r.ok, d: null }; });
+        }).then(function (res) {
+          var d = res.d || {};
+          if (res.ok && d.ok && d.autoLogin && d.idToken) {
+            try {
+              sessionStorage.setItem('cif_id_token', d.idToken);
+              if (d.accessToken) sessionStorage.setItem('cif_access_token', d.accessToken);
+              if (d.refreshToken) sessionStorage.setItem('cif_refresh_token', d.refreshToken);
+            } catch (e2) { /* ignore */ }
+            window.location.replace('/dashboard.html');
+            return;
+          }
+          if (res.ok && d.ok) {
+            // Account set up but auto-login unavailable — send them to sign in.
+            window.location.replace('/login.html?reason=registered');
+            return;
+          }
+          if (d.error === 'already_registered') {
+            err('You’re already set up. Please sign in instead.');
+          } else if (d.error === 'invalid_or_expired') {
+            fail();
+          } else if (d.error === 'invalid_password') {
+            err('Please choose a stronger password that meets all the requirements.');
+          } else {
+            err('Something went wrong. Please try again, or call (888) 999-9859.');
+          }
+          btn.disabled = false; btn.textContent = 'Set password & continue';
+        }).catch(function () {
+          err('Something went wrong. Please try again, or call (888) 999-9859.');
+          btn.disabled = false; btn.textContent = 'Set password & continue';
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

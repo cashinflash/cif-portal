@@ -1,0 +1,166 @@
+name: Provision Auth — Onboarding magic-link
+
+# Sets up the one-click onboarding flow on the auth-mfa Lambda:
+#   - creates a Secrets Manager secret holding the HMAC signing key
+#   - grants the Lambda role secretsmanager:GetSecretValue on it
+#   - sets ONBOARD_SECRET_ARN on the Lambda (merging, never clobbering env)
+#   - creates the two unauthenticated HttpApi routes:
+#       POST /api/auth/onboard/verify
+#       POST /api/auth/onboard/complete
+#
+# The Lambda already has AdminCreateUser / AdminSetUserPassword /
+# AdminUpdateUserAttributes / AdminGetUser / AdminInitiateAuth from the login +
+# signup provisioners, which /complete reuses.
+#
+# Auto-runs on push when this file changes (path-filtered); also runnable from
+# the Actions tab. Idempotent.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - '.github/workflows/provision-auth-onboard.yml'
+
+env:
+  AWS_REGION: us-east-1
+  HTTP_API_ID: anh066l1wf
+  FN: cif-portal-auth-mfa-dev
+  SECRET_NAME: cif-portal/onboard-signing-secret
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create signing secret (if absent) + resolve ARN
+        id: secret
+        run: |
+          set -e
+          if aws secretsmanager describe-secret --secret-id "$SECRET_NAME" >/dev/null 2>&1; then
+            echo "Secret already exists."
+          else
+            RAND=$(openssl rand -base64 48 | tr -d '\n')
+            aws secretsmanager create-secret --name "$SECRET_NAME" \
+              --description "HMAC key for portal onboarding magic-link tokens" \
+              --secret-string "{\"secret\":\"$RAND\"}" --no-cli-pager
+            echo "Created secret $SECRET_NAME."
+          fi
+          ARN=$(aws secretsmanager describe-secret --secret-id "$SECRET_NAME" \
+            --query 'ARN' --output text)
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Grant GetSecretValue to auth-mfa role
+        run: |
+          set -e
+          ROLE_ARN=$(aws lambda get-function-configuration --function-name "$FN" \
+            --query 'Role' --output text)
+          ROLE_NAME="${ROLE_ARN##*/}"
+          POLICY_DOC=$(cat <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "OnboardSecretRead",
+                "Effect": "Allow",
+                "Action": ["secretsmanager:GetSecretValue"],
+                "Resource": "${{ steps.secret.outputs.arn }}"
+              }
+            ]
+          }
+          EOF
+          )
+          aws iam put-role-policy --role-name "$ROLE_NAME" \
+            --policy-name auth-mfa-onboard --policy-document "$POLICY_DOC" --no-cli-pager
+          echo "Inline policy auth-mfa-onboard attached to $ROLE_NAME."
+
+      - name: Set ONBOARD_SECRET_ARN env (merge, with retry)
+        run: |
+          set -e
+          ARN="${{ steps.secret.outputs.arn }}"
+          for attempt in 1 2 3 4 5; do
+            aws lambda wait function-updated --function-name "$FN" 2>/dev/null || true
+            CURRENT=$(aws lambda get-function-configuration --function-name "$FN" \
+              --query 'Environment.Variables' --output json)
+            ENVJSON=$(echo "$CURRENT" | jq -c --arg arn "$ARN" \
+              '{Variables: (. + {ONBOARD_SECRET_ARN: $arn})}')
+            if aws lambda update-function-configuration --function-name "$FN" \
+                --environment "$ENVJSON" --no-cli-pager >/dev/null 2>&1; then
+              echo "ONBOARD_SECRET_ARN set."
+              break
+            fi
+            echo "update attempt $attempt failed (likely concurrent update); retrying…"
+            sleep $((attempt * 5))
+          done
+          aws lambda wait function-updated --function-name "$FN" 2>/dev/null || true
+
+      - name: Wire HttpApi routes (unauthenticated)
+        run: |
+          set -e
+          FN_ARN=$(aws lambda get-function --function-name "$FN" \
+            --query 'Configuration.FunctionArn' --output text)
+          INTEG_ID=$(aws apigatewayv2 get-integrations --api-id "$HTTP_API_ID" \
+            --query "Items[?IntegrationUri=='$FN_ARN'].IntegrationId | [0]" \
+            --output text 2>/dev/null || echo "")
+          if [ -z "$INTEG_ID" ] || [ "$INTEG_ID" = "None" ]; then
+            INTEG_ID=$(aws apigatewayv2 create-integration --api-id "$HTTP_API_ID" \
+              --integration-type AWS_PROXY --integration-uri "$FN_ARN" \
+              --payload-format-version 2.0 --query IntegrationId --output text)
+            echo "Created integration $INTEG_ID"
+          else
+            echo "Reusing integration $INTEG_ID"
+          fi
+
+          ROUTES=(
+            "POST /api/auth/onboard/verify"
+            "POST /api/auth/onboard/complete"
+            "OPTIONS /api/auth/onboard/verify"
+            "OPTIONS /api/auth/onboard/complete"
+          )
+          for RK in "${ROUTES[@]}"; do
+            RID=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
+              --query "Items[?RouteKey=='$RK'].RouteId" --output text 2>/dev/null \
+              | tr '\t' '\n' | grep -viE '^(none)?$' | head -n1)
+            if [ -n "$RID" ]; then
+              aws apigatewayv2 update-route --api-id "$HTTP_API_ID" --route-id "$RID" \
+                --target "integrations/$INTEG_ID" --authorization-type NONE --no-cli-pager >/dev/null
+              echo "Ensured route '$RK' ($RID)"
+            else
+              aws apigatewayv2 create-route --api-id "$HTTP_API_ID" --route-key "$RK" \
+                --target "integrations/$INTEG_ID" --authorization-type NONE --no-cli-pager >/dev/null
+              echo "Created route '$RK'"
+            fi
+          done
+
+          STMT_ID=apigateway-invoke-auth-onboard
+          ACCT=$(aws sts get-caller-identity --query Account --output text)
+          EXISTING_SIDS=$(aws lambda get-policy --function-name "$FN" 2>/dev/null \
+            | jq -r '.Policy | fromjson | .Statement[].Sid' 2>/dev/null || true)
+          if echo "$EXISTING_SIDS" | grep -qxF "$STMT_ID"; then
+            echo "Invoke permission $STMT_ID already present"
+          else
+            aws lambda add-permission --function-name "$FN" --statement-id "$STMT_ID" \
+              --action lambda:InvokeFunction --principal apigateway.amazonaws.com \
+              --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCT:$HTTP_API_ID/*/*/api/auth/onboard/*" \
+              --no-cli-pager
+            echo "Added invoke permission $STMT_ID"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Auth onboarding magic-link provisioning"
+            echo ""
+            echo "- Lambda: \`$FN\`"
+            echo "- Secret: \`$SECRET_NAME\`"
+            echo "- Env: \`ONBOARD_SECRET_ARN\` (merged)"
+            echo "- Routes (auth NONE): \`POST /api/auth/onboard/verify\`, \`POST /api/auth/onboard/complete\`"
+          } >> "$GITHUB_STEP_SUMMARY"

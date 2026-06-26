@@ -39,6 +39,7 @@ IAM: cognito AdminInitiateAuth/AdminGetUser on the pool,
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -1230,6 +1231,161 @@ def _signup_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────
+# Onboarding magic-link (one-click portal registration)
+#
+#   POST /api/auth/onboard/verify    {token}            -> {masked, firstName}
+#   POST /api/auth/onboard/complete  {token, password}  -> tokens (auto-login)
+#
+# A signed, self-contained token is delivered in the customer's onboarding
+# email. Holding it proves they control that inbox, so they skip the 6-digit
+# code and go straight to setting a password. Token format:
+#   base64url(payload) + "." + base64url(hmac_sha256(payload, secret))
+# payload = {"cid","email","fn","ln","exp"}. The HMAC secret lives in Secrets
+# Manager (ONBOARD_SECRET_ARN). Single-use is implicit: /complete refuses once
+# the account is CONFIRMED, so a replayed link can't reset a real customer's
+# password. Tokens minted by scripts/mint_onboarding_links.py (admin/offline).
+# ─────────────────────────────────────────
+ONBOARD_SECRET_ARN = os.environ.get("ONBOARD_SECRET_ARN", "")
+_onboard_secret_cache: Optional[bytes] = None
+
+
+def _onboard_secret() -> Optional[bytes]:
+    global _onboard_secret_cache
+    if _onboard_secret_cache is not None:
+        return _onboard_secret_cache
+    if not ONBOARD_SECRET_ARN:
+        return None
+    try:
+        r = _secrets.get_secret_value(SecretId=ONBOARD_SECRET_ARN)
+        raw = r.get("SecretString") or ""
+        val = raw
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                val = obj.get("secret") or obj.get("value") or ""
+        except Exception:
+            pass
+        _onboard_secret_cache = (val or "").encode("utf-8")
+        return _onboard_secret_cache
+    except Exception as e:
+        log.warning("onboard secret read failed: %s", e)
+        return None
+
+
+def _b64u(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
+
+
+def _b64u_dec(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + ("=" * (-len(s) % 4)))
+
+
+def _verify_onboard(token: str) -> Optional[Dict[str, Any]]:
+    secret = _onboard_secret()
+    if not secret or not token or "." not in token:
+        return None
+    body, _, sig = token.partition(".")
+    expected = _b64u(hmac.new(secret, body.encode("ascii"), hashlib.sha256).digest())
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        payload = json.loads(_b64u_dec(body))
+    except Exception:
+        return None
+    exp = int(payload.get("exp") or 0)
+    if exp and exp < int(time.time()):
+        return None
+    return payload
+
+
+def _onboard_verify(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = _parse(event)
+    p = _verify_onboard((body.get("token") or "").strip())
+    if not p:
+        return _resp(400, {"error": "invalid_or_expired"})
+    return _resp(200, {
+        "ok": True,
+        "masked": _mask_email((p.get("email") or "").strip().lower()),
+        "firstName": p.get("fn") or "",
+    })
+
+
+def _onboard_complete(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = _parse(event)
+    p = _verify_onboard((body.get("token") or "").strip())
+    if not p:
+        return _resp(400, {"error": "invalid_or_expired"})
+    password = body.get("password") or ""
+    if not _password_ok(password):
+        return _resp(400, {"error": "invalid_password"})
+
+    email = (p.get("email") or "").strip().lower()
+    vcid = str(p.get("cid") or "").strip()
+    first = (p.get("fn") or "").strip()
+    last = (p.get("ln") or "").strip()
+    if not email or "@" not in email or not vcid:
+        return _resp(400, {"error": "invalid_token_payload"})
+
+    status = _user_status(email)
+    if status and status not in ("FORCE_CHANGE_PASSWORD", "UNCONFIRMED"):
+        # Already fully registered — a magic link must never reset an existing
+        # password (that's what /auth/forgot is for). This also makes the link
+        # effectively single-use.
+        return _resp(409, {"error": "already_registered"})
+
+    if not status:
+        attrs = [
+            {"Name": "email", "Value": email},
+            {"Name": "custom:vergentCustomerId", "Value": vcid},
+        ]
+        if first:
+            attrs.append({"Name": "given_name", "Value": first})
+        if last:
+            attrs.append({"Name": "family_name", "Value": last})
+        try:
+            cognito.admin_create_user(
+                UserPoolId=USER_POOL_ID, Username=email,
+                MessageAction="SUPPRESS", TemporaryPassword=_temp_password(),
+                UserAttributes=attrs,
+            )
+        except ClientError as e:
+            cn = e.response.get("Error", {}).get("Code", "")
+            if cn != "UsernameExistsException":
+                log.warning("onboard create failed: %s", cn)
+                return _resp(500, {"error": "signup_failed"})
+
+    try:
+        cognito.admin_set_user_password(
+            UserPoolId=USER_POOL_ID, Username=email, Password=password, Permanent=True,
+        )
+        cognito.admin_update_user_attributes(
+            UserPoolId=USER_POOL_ID, Username=email,
+            UserAttributes=[{"Name": "email_verified", "Value": "true"}],
+        )
+    except ClientError as e:
+        cn = e.response.get("Error", {}).get("Code", "")
+        if cn == "InvalidPasswordException":
+            return _resp(400, {"error": "invalid_password"})
+        log.warning("onboard set-password failed: %s", cn)
+        return _resp(500, {"error": "confirm_failed"})
+
+    # Auto-login: the link already proved email ownership, so issue tokens
+    # directly (no second MFA round). If that step fails the account is still
+    # set up — the page falls back to the normal login screen.
+    tokens, err = _admin_initiate_password_auth(email, password)
+    if err or not tokens:
+        log.warning("onboard auto-login failed for %s: %s", _mask_email(email), err)
+        return _resp(200, {"ok": True, "autoLogin": False})
+    return _resp(200, {
+        "ok": True,
+        "autoLogin": True,
+        "idToken": tokens.get("IdToken"),
+        "accessToken": tokens.get("AccessToken"),
+        "refreshToken": tokens.get("RefreshToken"),
+    })
+
+
+# ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -1257,6 +1413,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _signup_start(event)
         if path.endswith("/auth/signup/confirm"):
             return _signup_confirm(event)
+        if path.endswith("/auth/onboard/verify"):
+            return _onboard_verify(event)
+        if path.endswith("/auth/onboard/complete"):
+            return _onboard_complete(event)
         return _resp(404, {"error": "not_found"})
     except Exception as exc:
         log.exception("auth_mfa unexpected error: %s", exc)
