@@ -111,6 +111,9 @@
       }).then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (!d || !d.ok) { fail(); return; }
+          // Smart link: existing customers don't set a password — send them to
+          // sign in instead.
+          if (d.alreadyRegistered) { window.location.replace('/login.html'); return; }
           if (d.firstName) $('obGreeting').textContent = 'Welcome, ' + d.firstName + '!';
           $('obEmail').textContent = d.masked || 'your account';
           show('obForm');

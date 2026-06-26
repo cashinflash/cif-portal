@@ -40,18 +40,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Create signing secret (if absent) + resolve ARN
+      - name: Create signing secret + apiKey (if absent) + resolve ARN
         id: secret
         run: |
           set -e
           if aws secretsmanager describe-secret --secret-id "$SECRET_NAME" >/dev/null 2>&1; then
-            echo "Secret already exists."
+            echo "Secret exists — ensuring the apiKey field is present."
+            CUR=$(aws secretsmanager get-secret-value --secret-id "$SECRET_NAME" \
+              --query SecretString --output text)
+            if [ "$(echo "$CUR" | jq -r 'has("apiKey")')" != "true" ]; then
+              KEY=$(openssl rand -hex 32)
+              NEW=$(echo "$CUR" | jq -c --arg k "$KEY" '. + {apiKey:$k}')
+              aws secretsmanager put-secret-value --secret-id "$SECRET_NAME" \
+                --secret-string "$NEW" --no-cli-pager
+              echo "Added apiKey to existing secret."
+            else
+              echo "apiKey already present."
+            fi
           else
             RAND=$(openssl rand -base64 48 | tr -d '\n')
+            KEY=$(openssl rand -hex 32)
             aws secretsmanager create-secret --name "$SECRET_NAME" \
-              --description "HMAC key for portal onboarding magic-link tokens" \
-              --secret-string "{\"secret\":\"$RAND\"}" --no-cli-pager
-            echo "Created secret $SECRET_NAME."
+              --description "HMAC signing key + email-system apiKey for portal onboarding links" \
+              --secret-string "{\"secret\":\"$RAND\",\"apiKey\":\"$KEY\"}" --no-cli-pager
+            echo "Created secret $SECRET_NAME with signing key + apiKey."
           fi
           ARN=$(aws secretsmanager describe-secret --secret-id "$SECRET_NAME" \
             --query 'ARN' --output text)
@@ -121,8 +133,10 @@ jobs:
           ROUTES=(
             "POST /api/auth/onboard/verify"
             "POST /api/auth/onboard/complete"
+            "POST /api/auth/onboard/mint-link"
             "OPTIONS /api/auth/onboard/verify"
             "OPTIONS /api/auth/onboard/complete"
+            "OPTIONS /api/auth/onboard/mint-link"
           )
           for RK in "${ROUTES[@]}"; do
             RID=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \

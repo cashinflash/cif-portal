@@ -1246,6 +1246,7 @@ def _signup_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
 # password. Tokens minted by scripts/mint_onboarding_links.py (admin/offline).
 # ─────────────────────────────────────────
 ONBOARD_SECRET_ARN = os.environ.get("ONBOARD_SECRET_ARN", "")
+ONBOARD_TTL_DAYS = int(os.environ.get("ONBOARD_TTL_DAYS", "14"))
 _onboard_secret_cache: Optional[bytes] = None
 
 
@@ -1280,6 +1281,38 @@ def _b64u_dec(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + ("=" * (-len(s) % 4)))
 
 
+def _sign_onboard(payload: Dict[str, Any]) -> Optional[str]:
+    """Mint a signed onboarding token — mirrors _verify_onboard + the offline
+    mint script exactly: base64url(payload) + "." + base64url(hmac_sha256)."""
+    secret = _onboard_secret()
+    if not secret:
+        return None
+    body = _b64u(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    sig = _b64u(hmac.new(secret, body.encode("ascii"), hashlib.sha256).digest())
+    return body + "." + sig
+
+
+_onboard_apikey_cache: Optional[str] = None
+
+
+def _onboard_api_key() -> Optional[str]:
+    """Shared key the email system presents (X-Api-Key) to mint links. Stored
+    alongside the signing key in the onboard secret."""
+    global _onboard_apikey_cache
+    if _onboard_apikey_cache is not None:
+        return _onboard_apikey_cache
+    if not ONBOARD_SECRET_ARN:
+        return None
+    try:
+        r = _secrets.get_secret_value(SecretId=ONBOARD_SECRET_ARN)
+        obj = json.loads(r.get("SecretString") or "{}")
+        _onboard_apikey_cache = (obj.get("apiKey") or "") if isinstance(obj, dict) else ""
+        return _onboard_apikey_cache
+    except Exception as e:
+        log.warning("onboard apiKey read failed: %s", e)
+        return None
+
+
 def _verify_onboard(token: str) -> Optional[Dict[str, Any]]:
     secret = _onboard_secret()
     if not secret or not token or "." not in token:
@@ -1298,10 +1331,8 @@ def _verify_onboard(token: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
-def _vergent_email_for_cid(cid: str) -> Optional[str]:
-    """Vergent's on-file email (EmailAddr) for a customer, or None if the
-    lookup fails. Lets /onboard/complete key the new account to the verified
-    address so it always clears the PreSignUp email-match guard."""
+def _vergent_get_customer(cid: str) -> Optional[Dict[str, Any]]:
+    """Raw Vergent V1 GetCustomer record for a customer id (or None)."""
     if not cid:
         return None
     tok = _get_v1_token()
@@ -1314,9 +1345,15 @@ def _vergent_email_for_cid(cid: str) -> Optional[str]:
         tok = _get_v1_token()
         if tok:
             st, b2, _r = _http(f"{V1_BASE}/V1/GetCustomer/{cid}", "GET", headers={"Token": tok})
-    if st != 200 or not isinstance(b2, dict):
-        return None
-    return (b2.get("EmailAddr") or "").strip()
+    return b2 if (st == 200 and isinstance(b2, dict)) else None
+
+
+def _vergent_email_for_cid(cid: str) -> Optional[str]:
+    """Vergent's on-file email (EmailAddr) for a customer, or None. Lets
+    /onboard/complete key the new account to the verified address so it always
+    clears the PreSignUp email-match guard."""
+    c = _vergent_get_customer(cid)
+    return (c.get("EmailAddr") or "").strip() if c else None
 
 
 def _onboard_verify(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1324,11 +1361,57 @@ def _onboard_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     p = _verify_onboard((body.get("token") or "").strip())
     if not p:
         return _resp(400, {"error": "invalid_or_expired"})
+    email = (p.get("email") or "").strip().lower()
+    # Smart link: if they already have a usable login, the page sends them to
+    # the sign-in screen instead of the set-password flow.
+    status = _user_status(email)
+    already = bool(status) and status not in ("FORCE_CHANGE_PASSWORD", "UNCONFIRMED")
     return _resp(200, {
         "ok": True,
-        "masked": _mask_email((p.get("email") or "").strip().lower()),
+        "masked": _mask_email(email),
         "firstName": p.get("fn") or "",
+        "alreadyRegistered": already,
     })
+
+
+def _onboard_mint_link(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/auth/onboard/mint-link   (server-to-server; X-Api-Key header)
+
+    Body: {"email": "..."}  or  {"customerId": "..."}
+    Returns {url, masked, alreadyRegistered}. Lets the Resend email system fetch
+    a ready onboarding link per customer at send time — no CSV needed.
+    """
+    headers = {(k or "").lower(): v for k, v in (event.get("headers") or {}).items()}
+    provided = (headers.get("x-api-key") or "").strip()
+    expected = _onboard_api_key()
+    if not expected or not provided or not hmac.compare_digest(provided, expected):
+        return _resp(401, {"error": "unauthorized"})
+
+    body = _parse(event)
+    cid = str(body.get("customerId") or "").strip()
+    email_in = (body.get("email") or "").strip().lower()
+    if not cid and email_in:
+        cid = (_find_vergent_customer_id_by_email(email_in) or "").strip()
+    if not cid:
+        return _resp(404, {"error": "customer_not_found"})
+
+    cust = _vergent_get_customer(cid)
+    v_email = ((cust or {}).get("EmailAddr") or email_in or "").strip().lower()
+    if not v_email or "@" not in v_email:
+        return _resp(422, {"error": "no_email_on_file"})
+    first = ((cust or {}).get("FirstName") or (cust or {}).get("First")
+             or (cust or {}).get("FName") or "").strip()
+
+    status = _user_status(v_email)
+    already = bool(status) and status not in ("FORCE_CHANGE_PASSWORD", "UNCONFIRMED")
+
+    exp = int(time.time()) + ONBOARD_TTL_DAYS * 86400
+    token = _sign_onboard({"cid": cid, "email": v_email, "fn": first, "ln": "", "exp": exp})
+    if not token:
+        return _resp(500, {"error": "mint_unavailable"})
+    url = ALLOWED_ORIGIN.rstrip("/") + "/onboard.html#t=" + token
+    log.info("onboard mint-link cid=%s already=%s to=%s", cid, already, _mask_email(v_email))
+    return _resp(200, {"url": url, "masked": _mask_email(v_email), "alreadyRegistered": already})
 
 
 def _onboard_complete(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1448,6 +1531,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _onboard_verify(event)
         if path.endswith("/auth/onboard/complete"):
             return _onboard_complete(event)
+        if path.endswith("/auth/onboard/mint-link"):
+            return _onboard_mint_link(event)
         return _resp(404, {"error": "not_found"})
     except Exception as exc:
         log.exception("auth_mfa unexpected error: %s", exc)
