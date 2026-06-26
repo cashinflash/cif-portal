@@ -42,6 +42,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260620b">
   <link rel="stylesheet" href="/css/dashboard.css?v=20260626j">
+  <!-- Plaid Link SDK (same as dashboard.html) -->
+  <script async src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
   <script>
     (function(){
       try {
@@ -51,6 +53,89 @@
       } catch(e){}
     })();
   </script>
+  <style>
+    /* Fast Re-Apply wizard — scoped .rl-* so it never clashes with portal css */
+    .rl-main { padding-bottom: 48px; }
+    .rl-loading { text-align:center; padding:60px 0; color:#6b7280; }
+    .rl-spinner { width:36px; height:36px; margin:0 auto 16px; border:3px solid rgba(14,135,65,.2);
+      border-top-color:#0E8741; border-radius:50%; animation:rlspin .8s linear infinite; }
+    @keyframes rlspin { to { transform:rotate(360deg); } }
+
+    .rl-steps { display:flex; gap:8px; list-style:none; padding:0; margin:0 0 18px;
+      max-width:560px; }
+    .rl-dot { flex:1; display:flex; align-items:center; gap:8px; font-size:.82rem; font-weight:600;
+      color:#9aa3af; }
+    .rl-dot span { width:24px; height:24px; flex:none; border-radius:50%; background:#e7ebf0;
+      color:#9aa3af; display:flex; align-items:center; justify-content:center; font-size:.8rem;
+      font-weight:700; }
+    .rl-dot.is-active { color:#1a1a2e; }
+    .rl-dot.is-active span { background:#0E8741; color:#fff; }
+    .rl-dot.is-done span { background:#0E8741; color:#fff; }
+    .rl-dot.is-done span::before { content:"✓"; }
+    .rl-dot.is-done span { font-size:0; }
+    .rl-dot.is-done span::before { font-size:.8rem; }
+
+    .rl-card { background:#fff; border:1px solid #e7ebf0; border-radius:18px;
+      box-shadow:0 12px 32px rgba(15,23,42,.06); padding:26px 24px; max-width:560px; }
+    .rl-card h2 { margin:0 0 4px; font-size:1.3rem; font-weight:800; letter-spacing:-.01em; color:#1a1a2e; }
+    .rl-sub { margin:0 0 18px; color:#6b7280; font-size:.92rem; line-height:1.5; }
+    .rl-muted { color:#6b7280; font-size:.9rem; line-height:1.5; margin:0 0 6px; }
+
+    .rl-id { display:flex; align-items:center; gap:12px; background:#f3faf6; border:1px solid #d7eede;
+      border-radius:12px; padding:12px 14px; margin-bottom:18px; }
+    .rl-id-name { font-weight:700; color:#1a1a2e; font-size:.98rem; }
+    .rl-id-email { color:#6b7280; font-size:.85rem; }
+
+    .rl-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .rl-field { display:flex; flex-direction:column; }
+    .rl-field.rl-col2 { grid-column:1 / -1; }
+    .rl-field > span { font-size:.8rem; font-weight:600; color:#374151; margin-bottom:5px; }
+    .rl-input { width:100%; padding:12px 13px; border:1px solid #d7dde3; border-radius:11px;
+      font-size:1rem; font-family:inherit; color:#1a1a2e; background:#fff; }
+    .rl-input:focus { outline:none; border-color:#0E8741; box-shadow:0 0 0 3px rgba(14,135,65,.12); }
+
+    .rl-banklist { display:flex; flex-direction:column; gap:10px; margin-bottom:12px; }
+    .rl-bank { display:flex; align-items:center; gap:12px; border:1.5px solid #e0e5ea; border-radius:13px;
+      padding:13px 14px; cursor:pointer; transition:border-color .15s, background .15s; }
+    .rl-bank.is-sel { border-color:#0E8741; background:#f3faf6; }
+    .rl-bank input { accent-color:#0E8741; width:18px; height:18px; flex:none; }
+    .rl-bank-ico { color:#0E8741; display:flex; }
+    .rl-bank-body { display:flex; flex-direction:column; }
+    .rl-bank-name { font-weight:700; color:#1a1a2e; font-size:.95rem; }
+    .rl-bank-meta { color:#6b7280; font-size:.82rem; }
+    .rl-link { background:none; border:none; color:#0E8741; font-weight:700; font-size:.9rem;
+      font-family:inherit; cursor:pointer; padding:4px 0; }
+
+    .rl-amount { text-align:center; margin:6px 0 4px; }
+    .rl-amount-val { font-size:3rem; font-weight:800; color:#0E8741; letter-spacing:-.02em; line-height:1; }
+    .rl-slider { width:100%; margin:14px 0 4px; accent-color:#0E8741; }
+    .rl-amtrange { display:flex; justify-content:space-between; color:#9aa3af; font-size:.78rem; margin-bottom:14px; }
+    .rl-chips { display:flex; gap:8px; margin-bottom:18px; }
+    .rl-chip { flex:1; padding:10px 0; border:1.5px solid #e0e5ea; border-radius:11px; background:#fff;
+      font-family:inherit; font-weight:700; font-size:.92rem; color:#1a1a2e; cursor:pointer; }
+    .rl-chip.is-sel { border-color:#0E8741; background:#f3faf6; color:#0C7137; }
+    .rl-fineprint { color:#9aa3af; font-size:.76rem; line-height:1.5; margin:0 0 16px; }
+
+    .rl-actions { margin-top:8px; }
+    .rl-actions-split { display:flex; gap:12px; align-items:center; }
+    .rl-btn { min-width:160px; }
+    .rl-actions-split .rl-btn { flex:1; }
+    .rl-back { background:#fff; border:1.5px solid #d7dde3; border-radius:12px; padding:12px 18px;
+      font-family:inherit; font-weight:700; font-size:.95rem; color:#374151; cursor:pointer; }
+    .btn-apply:disabled { opacity:.5; cursor:not-allowed; }
+
+    .rl-done { text-align:center; }
+    .rl-done .rl-done-ico { width:64px; height:64px; margin:4px auto 16px; border-radius:50%;
+      background:#e8f5ee; color:#0E8741; display:flex; align-items:center; justify-content:center; }
+    .rl-done h2 { font-size:1.5rem; }
+    .rl-done p { color:#4b5563; font-size:.96rem; line-height:1.6; max-width:420px; margin:0 auto 22px; }
+
+    @media (max-width:560px) {
+      .rl-grid { grid-template-columns:1fr; }
+      .rl-field.rl-half { display:inline-flex; }
+      .rl-amount-val { font-size:2.6rem; }
+    }
+  </style>
 </head>
 <body class="dashboard-page has-sidebar">
 
@@ -143,35 +228,97 @@
     <div class="dash-hero-blob dash-hero-blob-2" aria-hidden="true"></div>
     <div class="container dash-hero-inner">
       <p class="dash-eyebrow">Returning customer</p>
-      <h1 class="dash-title" id="requestHeading">Ready for another loan? We've got you.</h1>
-      <p class="dash-sub">Since you're already a customer, we'll pre-fill your info and fast-track your decision. Starts a new application in our secure portal.</p>
+      <h1 class="dash-title">Ready for another loan? We've got you.</h1>
+      <p class="dash-sub">Since you're already a customer, we'll pre-fill your info and fast-track your decision — right here, no re-entering everything.</p>
     </div>
   </section>
 
-  <main class="container dash-main">
-    <section class="dash-card">
-      <div class="dash-card-head">
-        <h2>Start a new loan application</h2>
-      </div>
-      <div style="padding: 20px 0;">
-        <p style="color:#333; font-size:1rem; margin-bottom:20px;">Click the button below and we'll hand you off to our secure application portal with your identity already loaded. No re-entering details.</p>
-        <button type="button" class="btn-apply btn-lg" data-action="new-loan" id="startBtn" style="min-width: 220px;">Start application</button>
-        <p style="color:#6b7280; font-size:.85rem; margin-top:16px;">You'll be redirected to <strong>cashinflash.apply.vergentlms.com</strong> — our California-licensed loan servicing portal.</p>
-      </div>
-    </section>
+  <main class="container dash-main rl-main">
 
-    <section class="dash-help">
-      <div class="dash-help-inner">
-        <div>
-          <h3>Prefer to apply in person?</h3>
-          <p>Walk into any Cash in Flash store. Returning customers usually get approved in under 15 minutes.</p>
-        </div>
-        <div class="dash-help-actions">
-          <a href="https://cashinflash.com/locations/" class="btn-apply">Find a store</a>
-          <a href="tel:+18889999859" class="btn-login">Call us</a>
-        </div>
+    <div id="rlLoading" class="rl-loading">
+      <div class="rl-spinner" aria-label="Loading"></div>
+      <p>Loading your details…</p>
+    </div>
+
+    <div id="rlError" class="rl-card" hidden>
+      <h2>We hit a snag</h2>
+      <p class="rl-sub">We couldn't load your details right now. Please refresh and try again, or call us at (888) 999-9859 and we'll take your application over the phone.</p>
+      <a class="btn-apply rl-btn" href="/dashboard.html" style="display:inline-block;text-align:center;text-decoration:none;">Back to dashboard</a>
+    </div>
+
+    <div id="rlDone" class="rl-card rl-done" hidden>
+      <div class="rl-done-ico" aria-hidden="true">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
       </div>
-    </section>
+      <h2>Application submitted!</h2>
+      <p>We've received your request for <strong id="rlDoneAmount">$255</strong>. Our team is reviewing it now — we'll reach out by email or text with your decision, usually within a few minutes during business hours.</p>
+      <a class="btn-apply rl-btn" href="/dashboard.html" style="display:inline-block;text-align:center;text-decoration:none;">Back to dashboard</a>
+    </div>
+
+    <div id="rlWizard" hidden>
+      <ol class="rl-steps">
+        <li class="rl-dot is-active" data-dot="1"><span>1</span>Your details</li>
+        <li class="rl-dot" data-dot="2"><span>2</span>Your bank</li>
+        <li class="rl-dot" data-dot="3"><span>3</span>Amount</li>
+      </ol>
+
+      <!-- Step 1: confirm details -->
+      <section class="rl-card rl-step" data-step="1">
+        <h2>Confirm your details</h2>
+        <p class="rl-sub">We've pre-filled what we have on file. Update anything that's changed.</p>
+        <div class="rl-id">
+          <div>
+            <div class="rl-id-name" id="rlName">—</div>
+            <div class="rl-id-email" id="rlEmail"></div>
+          </div>
+        </div>
+        <div class="rl-grid">
+          <label class="rl-field rl-col2"><span>Street address</span><input id="rlAddress" class="rl-input" type="text" autocomplete="address-line1"></label>
+          <label class="rl-field rl-col2"><span>Apt / Unit (optional)</span><input id="rlAddress2" class="rl-input" type="text" autocomplete="address-line2"></label>
+          <label class="rl-field rl-col2"><span>City</span><input id="rlCity" class="rl-input" type="text" autocomplete="address-level2"></label>
+          <label class="rl-field"><span>State</span><input id="rlState" class="rl-input" type="text" maxlength="2" autocomplete="address-level1"></label>
+          <label class="rl-field"><span>ZIP</span><input id="rlZip" class="rl-input" type="text" inputmode="numeric" autocomplete="postal-code"></label>
+          <label class="rl-field rl-col2"><span>Employer</span><input id="rlEmployer" class="rl-input" type="text"></label>
+          <label class="rl-field rl-col2"><span>Mobile phone</span><input id="rlPhone" class="rl-input" type="tel" autocomplete="tel"></label>
+        </div>
+        <div class="rl-actions">
+          <button class="btn-apply rl-btn" id="rlStep1Continue" type="button">Continue</button>
+        </div>
+      </section>
+
+      <!-- Step 2: bank -->
+      <section class="rl-card rl-step" data-step="2" hidden>
+        <h2>Your bank</h2>
+        <p class="rl-sub">We securely review your most recent bank activity through Plaid. Your bank login is never shared with us.</p>
+        <div id="rlBankList" class="rl-banklist"></div>
+        <button class="rl-link" id="rlConnectBank" type="button">+ Connect a different bank</button>
+        <div class="rl-actions rl-actions-split">
+          <button class="rl-back" id="rlBankBack" type="button">Back</button>
+          <button class="btn-apply rl-btn" id="rlBankContinue" type="button" disabled>Continue</button>
+        </div>
+      </section>
+
+      <!-- Step 3: amount -->
+      <section class="rl-card rl-step" data-step="3" hidden>
+        <h2>How much do you need?</h2>
+        <p class="rl-sub">Request between <span id="rlAmtLo">$100</span> and <span id="rlAmtHi">$255</span>. Your final amount is set by your approval.</p>
+        <div class="rl-amount"><div class="rl-amount-val" id="rlAmountVal">$255</div></div>
+        <input type="range" id="rlSlider" class="rl-slider" min="100" max="255" step="5" value="255" aria-label="Loan amount">
+        <div class="rl-amtrange"><span id="rlAmtLo2">$100</span><span id="rlAmtHi2">$255</span></div>
+        <div class="rl-chips">
+          <button class="rl-chip" data-amt="100" type="button">$100</button>
+          <button class="rl-chip" data-amt="150" type="button">$150</button>
+          <button class="rl-chip" data-amt="200" type="button">$200</button>
+          <button class="rl-chip" data-amt="255" type="button">$255</button>
+        </div>
+        <p class="rl-fineprint">By submitting, you authorize Cash in Flash to review your bank activity and process a new loan application. This starts a new application in our secure system.</p>
+        <div class="rl-actions rl-actions-split">
+          <button class="rl-back" id="rlAmtBack" type="button">Back</button>
+          <button class="btn-apply rl-btn" id="rlSubmit" type="button">Submit application</button>
+        </div>
+      </section>
+    </div>
+
   </main>
 
   <footer class="dash-footer">
@@ -184,5 +331,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
+  <script src="/js/reapply.js?v=20260626a"></script>
 </body>
 </html>

@@ -126,6 +126,18 @@ PROFILE_REQUESTS_TABLE = os.environ.get(
 ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "info@cashinflash.com")
 SES_SENDER_EMAIL = os.environ.get("SES_SENDER_EMAIL", "no-reply@cashinflash.com")
 PORTAL_PUBLIC_URL = os.environ.get("PORTAL_PUBLIC_URL", "https://d1zucrj1ouu3c.cloudfront.net")
+# Fast Re-Apply — the additive cif-apply intake endpoint. The portal
+# resolves the logged-in customer's identity + linked bank SERVER-SIDE and
+# hands cif-apply a re-loan, which runs the SAME engine + dashboard
+# pipeline a normal application uses (tagged source="portal_reloan" / "RL").
+# REAPPLY_SHARED_SECRET is optional and must match cif-apply's
+# PORTAL_REAPPLY_SECRET when set; left blank, the endpoint still works.
+CIF_APPLY_REAPPLY_URL = os.environ.get(
+    "CIF_APPLY_REAPPLY_URL", "https://cif-apply.onrender.com/api/portal-reapply"
+)
+REAPPLY_SHARED_SECRET = os.environ.get("REAPPLY_SHARED_SECRET", "")
+REAPPLY_MIN_AMOUNT = 100
+REAPPLY_MAX_AMOUNT = 255
 _creds_cache: Optional[Dict[str, str]] = None
 
 # v1 service Token (GUID) — used on every v1 LMS call.
@@ -3679,6 +3691,272 @@ def _shape_vergent_customer_row(rec: Dict[str, Any]) -> Dict[str, Any]:
 # ─────────────────────────────────────────
 # Lambda entrypoint
 # ─────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════
+# FAST RE-APPLY — native in-portal re-loan for returning customers.
+#
+# Two routes:
+#   GET  /api/my-reapply/prefill  -> editable identity + linked banks
+#   POST /api/my-reapply/submit   -> hand cif-apply a re-loan (RL)
+#
+# Trust boundary: the customer identity (Vergent cid) is taken ONLY from
+# the JWT, the Plaid access token ONLY from our DynamoDB scoped to that
+# cid, and the base profile ONLY from Vergent scoped to that cid. The
+# client supplies just the requested amount, which linked bank to use,
+# and edits to its own address/employer/contact. A customer can never
+# submit a re-loan as anyone but themselves.
+# ═════════════════════════════════════════════════════════════════
+def _reapply_customer_info(cid: str, claims: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort identity / employment / bank pull for a returning
+    customer, keyed to the JWT-resolved cid. Tolerates PascalCase and
+    snake_case Vergent shapes; falls back to Cognito claims."""
+    info = {
+        "firstName": (claims.get("given_name") or "").strip(),
+        "lastName": (claims.get("family_name") or "").strip(),
+        "email": (claims.get("email") or "").strip(),
+        "phone": (claims.get("phone_number") or "").strip(),
+        "dob": "", "address": "", "address2": "", "city": "", "state": "",
+        "zip": "", "employer": "", "grossPay": "", "payDay": "",
+        "lastPayDate": "", "payFrequency": "", "sourceOfIncome": "",
+        "bankName": "", "routingNumber": "", "accountNumber": "",
+    }
+    try:
+        status, data = _v1_get(f"/V1/GetCustomerData/{cid}")
+    except Exception as exc:  # pragma: no cover - network
+        log.warning("reapply GetCustomerData failed cid=%s: %s", cid, exc)
+        status, data = 0, None
+    if status != 200 or not isinstance(data, dict):
+        return info
+
+    def g(d, *keys):
+        if not isinstance(d, dict):
+            return ""
+        for k in keys:
+            v = d.get(k)
+            if v not in (None, ""):
+                return str(v).strip()
+        return ""
+
+    cust = data.get("cust") if isinstance(data.get("cust"), dict) else data
+    info["firstName"] = g(cust, "FirstName", "firstName", "first_name") or info["firstName"]
+    info["lastName"] = g(cust, "LastName", "lastName", "last_name") or info["lastName"]
+    info["email"] = g(cust, "EmailAddr", "emailAddr", "Email", "email") or info["email"]
+    dob_raw = g(cust, "BirthDate", "birthDate", "dob")
+    if "T" in dob_raw:
+        info["dob"] = dob_raw.split("T", 1)[0]
+    elif dob_raw:
+        info["dob"] = dob_raw
+
+    addresses = data.get("custAddresses") or data.get("CustAddresses") or []
+    if isinstance(addresses, list) and addresses:
+        a = next((x for x in addresses if isinstance(x, dict)
+                  and (x.get("is_primary") or x.get("IsPrimary"))), None) \
+            or next((x for x in addresses if isinstance(x, dict)), None)
+        if a:
+            info["address"] = g(a, "addr1", "Addr1")
+            info["address2"] = g(a, "addr2", "Addr2")
+            info["city"] = g(a, "city", "City")
+            info["state"] = g(a, "abbrev", "Abbrev", "state", "State")
+            info["zip"] = g(a, "zip", "Zip")
+
+    phones = data.get("custPhones") or data.get("CustPhones") or []
+    if isinstance(phones, list) and phones:
+        p = next((x for x in phones if isinstance(x, dict)
+                  and (x.get("is_primary") or x.get("IsPrimary"))), None) \
+            or next((x for x in phones if isinstance(x, dict)), None)
+        if p:
+            info["phone"] = g(p, "number", "Number") or info["phone"]
+
+    emps = data.get("custEmps") or data.get("CustEmps") or []
+    if isinstance(emps, list) and emps:
+        e = emps[0] if isinstance(emps[0], dict) else {}
+        info["employer"] = g(e, "Name", "name", "employer_name")
+        pay = g(e, "PayAmount", "pay_amount")
+        if pay:
+            try:
+                info["grossPay"] = str(float(pay) or "")
+            except (TypeError, ValueError):
+                pass
+        prev = g(e, "PrevPayDate", "prev_pay_date")
+        if "T" in prev:
+            info["lastPayDate"] = prev.split("T", 1)[0]
+        nxt = g(e, "NextPayDate", "next_pay_date")
+        if "T" in nxt:
+            info["payDay"] = nxt.split("T", 1)[0]
+
+    banks = data.get("custBanks") or data.get("CustBanks") or []
+    if isinstance(banks, list) and banks:
+        b = banks[0] if isinstance(banks[0], dict) else {}
+        info["bankName"] = g(b, "Name", "name")
+        info["routingNumber"] = g(b, "RoutingNum", "routing_num")
+        info["accountNumber"] = g(b, "AccountNum", "account_num")
+    return info
+
+
+def _reapply_application_data(info: Dict[str, Any], amount: int) -> Dict[str, Any]:
+    """Shape the gathered info into the applicationData dict cif-apply's
+    /submit pipeline expects (same keys as server.py's record)."""
+    return {
+        "firstName": info.get("firstName", ""), "middleName": "",
+        "lastName": info.get("lastName", ""),
+        "loanAmount": str(amount),
+        "dob": info.get("dob", ""),
+        "address": info.get("address", ""), "address2": info.get("address2", ""),
+        "city": info.get("city", ""), "state": info.get("state", ""),
+        "zip": info.get("zip", ""),
+        "phone": info.get("phone", ""), "email": info.get("email", ""),
+        "sourceOfIncome": info.get("sourceOfIncome", ""),
+        "employer": info.get("employer", ""),
+        "payFrequency": info.get("payFrequency", ""),
+        "payDay": info.get("payDay", ""),
+        "lastPayDate": info.get("lastPayDate", ""),
+        "paymentMethod": "Direct Deposit",
+        "grossPay": info.get("grossPay", ""),
+        "accountType": "Checking",
+        "routingNumber": info.get("routingNumber", ""),
+        "accountNumber": info.get("accountNumber", ""),
+        "bankName": info.get("bankName", ""),
+        "housingStatus": "", "bankruptcy": "", "military": "",
+        "bankMethod": "Plaid (Connected)",
+    }
+
+
+def get_reapply_prefill(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/my-reapply/prefill — editable identity + linked banks for
+    the native re-apply flow (screens 1 + 2)."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"ok": False, "error": "no_customer_id"})
+    info = _reapply_customer_info(cid, claims)
+    try:
+        conns = plaid._list_connections(cid)
+    except Exception as exc:  # pragma: no cover - network
+        log.warning("reapply list_connections failed cid=%s: %s", cid, exc)
+        conns = []
+    banks = [{
+        "itemId": c.get("itemId", ""),
+        "institutionName": c.get("institutionName") or "Bank",
+        "accountMask": c.get("accountMask") or "",
+        "linkedAt": c.get("linkedAt") or "",
+    } for c in conns if c.get("itemId")]
+    return _json_response(200, {
+        "ok": True,
+        "prefill": {
+            "firstName": info.get("firstName", ""),
+            "lastName": info.get("lastName", ""),
+            "email": info.get("email", ""),
+            "phone": info.get("phone", ""),
+            "address": info.get("address", ""),
+            "address2": info.get("address2", ""),
+            "city": info.get("city", ""),
+            "state": info.get("state", ""),
+            "zip": info.get("zip", ""),
+            "employer": info.get("employer", ""),
+        },
+        "banks": banks,
+        "hasBankOnFile": bool(banks),
+        "minAmount": REAPPLY_MIN_AMOUNT,
+        "maxAmount": REAPPLY_MAX_AMOUNT,
+    })
+
+
+def submit_reapply(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-reapply/submit — assemble the application server-side
+    and hand it to cif-apply's additive intake endpoint.
+
+    Body: { "amount": 255, "plaidItemId": "...", "edits": {address, ...} }
+    """
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"ok": False, "error": "no_customer_id"})
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (ValueError, TypeError):
+        body = {}
+
+    try:
+        amount = int(round(float(body.get("amount") or 0)))
+    except (TypeError, ValueError):
+        amount = 0
+    if amount < REAPPLY_MIN_AMOUNT or amount > REAPPLY_MAX_AMOUNT:
+        return _json_response(400, {
+            "ok": False, "error": "bad_amount",
+            "detail": f"Amount must be ${REAPPLY_MIN_AMOUNT}–${REAPPLY_MAX_AMOUNT}.",
+        })
+
+    # Resolve the chosen linked bank's access token SERVER-SIDE, scoped to
+    # this customer. Never trust a token from the client.
+    try:
+        conns = plaid._list_connections(cid)
+    except Exception as exc:  # pragma: no cover - network
+        log.warning("reapply submit list_connections failed cid=%s: %s", cid, exc)
+        conns = []
+    item_id = (body.get("plaidItemId") or "").strip()
+    chosen = None
+    if item_id:
+        chosen = next((c for c in conns if c.get("itemId") == item_id), None)
+    if not chosen and conns:
+        chosen = conns[0]  # most-recently linked
+    if not chosen:
+        return _json_response(409, {
+            "ok": False, "error": "needs_bank",
+            "detail": "No linked bank on file. Connect your bank first.",
+        })
+    item_id = chosen.get("itemId", "")
+    institution = chosen.get("institutionName") or ""
+    access_token = plaid._get_access_token(cid, item_id)
+    if not access_token:
+        return _json_response(409, {
+            "ok": False, "error": "needs_bank",
+            "detail": "Could not read your linked bank. Please reconnect it.",
+        })
+
+    # Base profile from Vergent, overlaid with the customer's own edits.
+    info = _reapply_customer_info(cid, claims)
+    edits = body.get("edits") or {}
+    if isinstance(edits, dict):
+        for k in ("address", "address2", "city", "state", "zip",
+                  "employer", "phone", "email"):
+            v = edits.get(k)
+            if isinstance(v, str) and v.strip():
+                info[k] = v.strip()
+    app_data = _reapply_application_data(info, amount)
+
+    creds = plaid._load_creds() or {}
+    plaid_creds = {
+        "clientId": creds.get("clientId", ""),
+        "secret": creds.get("secret", ""),
+        "env": creds.get("env") or "production",
+    }
+    payload = {
+        "secret": REAPPLY_SHARED_SECRET,
+        "amount": amount,
+        "applicationData": app_data,
+        "vergentCustomerId": cid,
+        "plaidAccessToken": access_token,
+        "plaidCreds": plaid_creds,
+        "plaidItemId": item_id,
+        "plaidInstitutionName": institution,
+    }
+    status, parsed, raw = _http(CIF_APPLY_REAPPLY_URL, "POST",
+                                body=payload, timeout=25)
+    if status == 200 and isinstance(parsed, dict) and parsed.get("ok"):
+        log.info("reapply ok cid=%s amount=%s fb=%s",
+                 cid, amount, parsed.get("firebaseId"))
+        return _json_response(200, {
+            "ok": True,
+            "firebaseId": parsed.get("firebaseId"),
+            "amount": amount,
+        })
+    log.warning("reapply handoff failed cid=%s status=%s body=%r",
+                cid, status, (raw or "")[:300])
+    return _json_response(502, {
+        "ok": False, "error": "submit_failed",
+        "detail": "We couldn't submit your application. Please try again.",
+    })
+
+
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     # Keep-warm ping (EventBridge schedule) — return immediately so the
     # container stays warm without touching Vergent.
@@ -3721,6 +3999,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return change_password(event)
         if path.endswith("/my-loan/new") and method == "POST":
             return request_new_loan_handoff(event)
+        if path.endswith("/my-reapply/prefill") and method == "GET":
+            return get_reapply_prefill(event)
+        if path.endswith("/my-reapply/submit") and method == "POST":
+            return submit_reapply(event)
         if path.endswith("/my-loans/active") and method == "GET":
             return get_active_loan(event)
         if path.endswith("/my-loans/activity") and method == "GET":
