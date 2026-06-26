@@ -4332,12 +4332,12 @@ body.cif-modal-open .app-tabbar { display: none; }
 .loan-card-flabel { margin: 0 0 4px; font-size: .82rem; color: rgba(255,255,255,.82); }
 .loan-card-balance { margin: 0; font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .loan-card-balance small { font-size: 1.3rem; font-weight: 700; vertical-align: 12px; margin-right: 2px; }
-.loan-card-due { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
+.loan-card-due { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .loan-card-rule { height: 1px; background: rgba(255,255,255,.2); margin: 20px 0 16px; }
 .loan-card-note { display: flex; align-items: center; gap: 8px; margin: 0; font-size: .85rem; color: rgba(255,255,255,.85); line-height: 1.35; }
 .loan-card-note svg { flex: 0 0 auto; }
 .loan-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; text-decoration: none; color: #fff; }
-.loan-card-method { margin: 4px 0 0; font-size: .98rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.loan-card-method { margin: 4px 0 0; font-size: .98rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
 .dash-loan-empty .loan-card-empty-sub { margin: 6px 0 0; color: rgba(255,255,255,.85); font-size: .9rem; }
 
 /* No-active-loan hero = the FULL illustration card (heading / points / button /
@@ -4536,13 +4536,18 @@ body.cif-modal-open .app-tabbar { display: none; }
    card). Only the Loans card gets this — Home + Payments stay non-interactive. */
 .loans-active.loans-active-tappable { cursor: pointer; }
 .loans-active .loans-active-detaillink {
-  display: inline-flex; align-items: center; gap: 6px; margin-top: 16px;
-  color: #fff; font-weight: 700; font-size: .9rem; text-decoration: none;
+  display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 16px;
+  color: #fff; font-weight: 700; font-size: .92rem; text-decoration: none;
   opacity: .96; position: relative; z-index: 2;
 }
 .loans-active .loans-active-detaillink span { transition: transform .15s ease; }
 .loans-active.loans-active-tappable:hover .loans-active-detaillink span { transform: translateX(3px); }
 .loans-active .loans-active-detaillink:hover { text-decoration: underline; }
+/* Loans page: drop the redundant "make your payment on time" note + its divider
+   from the card so the centered "View details & documents" link sits right
+   under the figures — no empty gap. (Note stays on Home + Payments.) */
+.loans-page .loans-active .loan-card-note,
+.loans-page .loans-active .loan-card-rule { display: none; }
 .loan-card.is-pastdue .loan-card-note, .loan-card.is-pastdue-soft .loan-card-note { color: #fff; font-weight: 700; }
 .loan-card .loan-card-note.is-pastdue-note svg { color: rgba(255,255,255,.92); }
 /* Neutral loading state so the hero doesn't flash green → red before the loan

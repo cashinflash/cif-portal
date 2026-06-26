@@ -631,11 +631,20 @@
     // Stacks to a single column on mobile via the .dash-loan-stats-pair
     // grid breakpoint.
     var originatedRaw = loan.loanDate || loan.originationDate;
+    // Payment status: "92 Days" -> "92 Days Late" (append only when it's an
+    // actual late count; leave Not-Late / 0 / blank alone). The standalone
+    // "Status" row is dropped — the hero pill already shows it, and it read
+    // "Current" on a past-due loan.
+    var _dl = (loan.daysLate || '').trim();
+    var paymentStatus;
+    if (!_dl) paymentStatus = '—';
+    else if (/^0\b/.test(_dl) || /not\s*late/i.test(_dl)) paymentStatus = 'Not late';
+    else if (/late\b/i.test(_dl)) paymentStatus = _dl;
+    else paymentStatus = _dl + ' Late';
     var leftSummary = [
       ['Originated', originatedRaw ? fmtDate(originatedRaw) : '—'],
       ['Due Date', loan.nextDueDate ? fmtDate(loan.nextDueDate) : '—'],
-      ['Status', loan.status || (loan.isOutstanding ? 'Current' : 'Closed')],
-      ['Payment Status', loan.daysLate || '—'],
+      ['Payment Status', paymentStatus],
     ];
     var rightSummary = [
       ['Amount Borrowed', fmtCurrency(principal)],
