@@ -1298,6 +1298,27 @@ def _verify_onboard(token: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
+def _vergent_email_for_cid(cid: str) -> Optional[str]:
+    """Vergent's on-file email (EmailAddr) for a customer, or None if the
+    lookup fails. Lets /onboard/complete key the new account to the verified
+    address so it always clears the PreSignUp email-match guard."""
+    if not cid:
+        return None
+    tok = _get_v1_token()
+    if not tok:
+        return None
+    st, b2, _r = _http(f"{V1_BASE}/V1/GetCustomer/{cid}", "GET", headers={"Token": tok})
+    if st in (401, 403):
+        global _v1_token_exp
+        _v1_token_exp = 0
+        tok = _get_v1_token()
+        if tok:
+            st, b2, _r = _http(f"{V1_BASE}/V1/GetCustomer/{cid}", "GET", headers={"Token": tok})
+    if st != 200 or not isinstance(b2, dict):
+        return None
+    return (b2.get("EmailAddr") or "").strip()
+
+
 def _onboard_verify(event: Dict[str, Any]) -> Dict[str, Any]:
     body = _parse(event)
     p = _verify_onboard((body.get("token") or "").strip())
@@ -1323,7 +1344,17 @@ def _onboard_complete(event: Dict[str, Any]) -> Dict[str, Any]:
     vcid = str(p.get("cid") or "").strip()
     first = (p.get("fn") or "").strip()
     last = (p.get("ln") or "").strip()
-    if not email or "@" not in email or not vcid:
+    if not vcid:
+        return _resp(400, {"error": "invalid_token_payload"})
+
+    # Key the account to Vergent's on-file email so creation always satisfies
+    # the PreSignUp email-match guard — the token email is only for display, so
+    # the link works even if the address we emailed differs slightly from
+    # Vergent's record. Fall back to the token email if the lookup is down.
+    v_email = _vergent_email_for_cid(vcid)
+    if v_email and "@" in v_email:
+        email = v_email.lower()
+    if not email or "@" not in email:
         return _resp(400, {"error": "invalid_token_payload"})
 
     status = _user_status(email)
