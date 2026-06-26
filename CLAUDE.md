@@ -192,8 +192,12 @@ report **`source: "portal_reloan"`** and show an **"RL" chip** in cif-dashboard.
 
 Confirmed by user: (a) real app = `apply.cashinflash.com` (their form + Plaid +
 engine); (b) engine runs on submit and waits for the Plaid connection (forget
-bank statements). Open Qs: confirm-only vs editable fields; always fresh Plaid
-pull on submit (assume yes); eligible amount (fixed $255 vs engine-driven).
+bank statements); (c) the prefilled "confirm your info" fields (incl. address /
+employer) are **editable** — prefill + next/next, but they can change what's
+stale; (d) the amount screen is a **$100–$255 REQUEST selector** (same as the
+live app) — the customer requests, the **engine decides** the approved amount.
+Still assume a fresh Plaid pull on every submit. The 3 screens:
+confirm-info(editable) → bank(reuse token ✓ / Plaid Link) → request amount → result.
 
 A read-only mapping workflow (`map-reapply-foundation`, run via the Workflow
 tool) was launched to map cif-apply's submit/Plaid/engine/Firebase + cif-dashboard
