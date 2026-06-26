@@ -4531,6 +4531,18 @@ body.cif-modal-open .app-tabbar { display: none; }
 .home-loan.is-pending-sign,
 .home-loan.is-pastdue,
 .home-loan.is-pastdue-soft { align-self: start; height: auto; }
+/* Loans page: the active / past-due card opens its full details + documents.
+   Tappable card + a discoverable white link (reads on the green/red/amber
+   card). Only the Loans card gets this — Home + Payments stay non-interactive. */
+.loans-active.loans-active-tappable { cursor: pointer; }
+.loans-active .loans-active-detaillink {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 16px;
+  color: #fff; font-weight: 700; font-size: .9rem; text-decoration: none;
+  opacity: .96; position: relative; z-index: 2;
+}
+.loans-active .loans-active-detaillink span { transition: transform .15s ease; }
+.loans-active.loans-active-tappable:hover .loans-active-detaillink span { transform: translateX(3px); }
+.loans-active .loans-active-detaillink:hover { text-decoration: underline; }
 .loan-card.is-pastdue .loan-card-note, .loan-card.is-pastdue-soft .loan-card-note { color: #fff; font-weight: 700; }
 .loan-card .loan-card-note.is-pastdue-note svg { color: rgba(255,255,255,.92); }
 /* Neutral loading state so the hero doesn't flash green → red before the loan

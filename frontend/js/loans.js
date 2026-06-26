@@ -244,6 +244,37 @@
     // next load's <head> preflight paints it with no flash). See dashboard.js.
     try { sessionStorage.setItem('cif_pending_signature', String(_pendingSig)); } catch (e) { /* ignore */ }
     document.documentElement.classList.toggle('cif-pending-signature', _pendingSig);
+    // Loans page only: make the active/past-due card open its full details +
+    // documents (the same view past loans use). Skipped while pending-signature
+    // (the card is a Review & sign prompt then).
+    setupCardDetail(card, loan, _pendingSig);
+  }
+
+  // The active card on the Loans page opens its full detail + documents view via
+  // the existing /loans.html?id= flow (showDetail already handles active loans).
+  // This lives only here, so the Home + Payments cards stay non-interactive.
+  function setupCardDetail(card, loan, pending) {
+    var link = qs('.loans-active-detaillink', card);
+    if (pending || !loan || loan.id == null) {
+      card.classList.remove('loans-active-tappable');
+      card.onclick = null;
+      if (link && link.parentNode) link.parentNode.removeChild(link);
+      return;
+    }
+    var href = '/loans.html?id=' + encodeURIComponent(loan.id);
+    card.classList.add('loans-active-tappable');
+    card.onclick = function (e) {
+      // Don't hijack clicks on real interactive children.
+      if (e.target.closest && e.target.closest('a,button,input,[data-esign-open]')) return;
+      window.location.href = href;
+    };
+    if (!link) {
+      link = document.createElement('a');
+      link.className = 'loans-active-detaillink';
+      link.innerHTML = 'View details &amp; documents <span aria-hidden="true">→</span>';
+      (qs('.loans-active-body', card) || card).appendChild(link);
+    }
+    link.href = href;
   }
 
   // Whole days a loan is past its due date (0 if not past due / unknown).
