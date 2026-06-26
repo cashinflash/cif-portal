@@ -42,7 +42,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623a">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260626c">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260626d">
   <script>
     (function(){ try { if (sessionStorage.getItem('cif_has_active_loan') === 'true') { document.documentElement.classList.add('cif-has-active-loan'); } if (sessionStorage.getItem('cif_pending_signature') === 'true') { document.documentElement.classList.add('cif-pending-signature'); } } catch(e){} })();
   </script>
@@ -144,6 +144,29 @@
       <span class="app-welcome-avatar" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0E8741" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
       <div class="app-welcome-text"><p id="dashGreeting">Welcome back,</p><h1 id="dashFirstName" class="dash-first-name">there</h1></div>
     </div>
+    <script>
+      /* Populate the greeting + first name from the ID token synchronously,
+         before first paint, so the "Welcome back," / "there" fallbacks never
+         flash before dashboard.js fills them on DOMContentLoaded. */
+      (function () {
+        try {
+          var t = sessionStorage.getItem('cif_id_token'); if (!t) return;
+          var seg = t.split('.')[1]; if (!seg) return;
+          var b = seg.replace(/-/g, '+').replace(/_/g, '/');
+          var pad = b + '==='.slice((b.length + 3) % 4);
+          var c = JSON.parse(decodeURIComponent(atob(pad).split('').map(function (x) {
+            return '%' + ('00' + x.charCodeAt(0).toString(16)).slice(-2);
+          }).join('')));
+          var fn = (c.given_name || '').trim();
+          if (fn) {
+            var names = document.querySelectorAll('.dash-first-name');
+            for (var i = 0; i < names.length; i++) names[i].textContent = fn;
+          }
+          var ge = document.getElementById('dashGreeting');
+          if (ge) { var h = new Date().getHours(); ge.textContent = h < 12 ? 'Good morning,' : (h < 18 ? 'Good afternoon,' : 'Good evening,'); }
+        } catch (e) { /* dashboard.js will still fill these on DOMContentLoaded */ }
+      })();
+    </script>
 
     <div class="home-grid">
 

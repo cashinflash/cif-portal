@@ -1959,6 +1959,32 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
             elif body2 is not None:
                 entry["snippet"] = str(body2)[:200]
             disb[path] = entry
+
+    # Full outstanding-loan header, PII-scrubbed (denylist of personal-data key
+    # tokens; scalars only; strings truncated). Run this on a CASH loan and a
+    # CARD/ACH loan and diff the two — the field that differs is the disbursement
+    # method we can key the e-sign copy on. Temp diagnostic; scoped to caller's
+    # own JWT; no name/SSN/card/phone/email/address ever included.
+    _PII = ("name", "first", "last", "middle", "fname", "lname", "ssn",
+            "social", "tin", "taxid", "dob", "birth", "gender", "addr",
+            "street", "city", "zip", "postal", "county", "country", "phone",
+            "mobile", "cell", "fax", "email", "mail", "account", "acct",
+            "routing", "aba", "micr", "card", "pan", "cvv", "license",
+            "passport", "username", "ipaddress", "url", "uri", "signature",
+            "photo", "image")
+    hdr_all = {}
+    for rec in raw_loans:
+        h4 = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
+        if isinstance(h4, dict) and h4.get("IsStatusOutstanding"):
+            for k, v in h4.items():
+                if any(t in k.lower() for t in _PII):
+                    continue
+                if isinstance(v, bool) or isinstance(v, (int, float)):
+                    hdr_all[k] = v
+                elif isinstance(v, str):
+                    hdr_all[k] = v[:80]
+            break
+    disb["outstandingHeaderScrubbed"] = hdr_all
     out["disbursementProbe"] = disb
     return out
 
