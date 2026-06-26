@@ -25,6 +25,7 @@
   var _cache = null, _cacheAt = 0, _inflight = null;
   var _current = null;        // esign handle currently surfaced (for the open button)
   var _hadPending = false;    // we showed a "sign" state this load → watch for the flip
+  var _signWin = null;        // the Vergent signing tab we opened (so we can close it on completion)
 
   function token() { try { return sessionStorage.getItem('cif_id_token'); } catch (e) { return null; } }
 
@@ -90,7 +91,7 @@
   function _stripHtml() {
     return '<span class="cif-esign-ico" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>' +
-      '<span class="cif-esign-strip-text"><strong>Your loan agreement is ready to sign</strong><small>Sign it to receive your funds — it only takes a minute.</small></span>' +
+      '<span class="cif-esign-strip-text"><strong>Your loan agreement is ready to sign</strong><small>Sign to activate your loan — it only takes a minute.</small></span>' +
       '<button type="button" class="cif-esign-cta" data-esign-open>Review &amp; sign</button>';
   }
   // Fill every [data-esign-slot] anchor (or hide them when not pending).
@@ -192,20 +193,35 @@
     });
   }
 
+  // Close the Vergent signing tab we opened (best-effort — some mobile browsers
+  // block script-closing tabs) and land the customer on their Home dashboard
+  // with the now-active loan, so the whole flow feels seamless.
+  function _complete() {
+    try { if (_signWin && !_signWin.closed) _signWin.close(); } catch (e) { /* ignore */ }
+    _signWin = null;
+    try { window.location.assign('/dashboard.html'); }
+    catch (e) { try { window.location.reload(); } catch (e2) { /* ignore */ } }
+  }
+
   function _success(name) {
+    _stopPolling();
     var m = _modalEl();
-    var body = m.querySelector('[data-esign-body]');
-    var foot = m.querySelector('[data-esign-foot]');
-    if (foot) foot.hidden = true;
-    if (body) {
-      body.innerHTML = '<div class="cif-esign-done">' +
-        '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>' +
-        '<h4>You’re all set' + (name ? (', ' + name.split(' ')[0]) : '') + '!</h4>' +
-        '<p>Your agreement is signed. We’re activating your loan now — this page will refresh in a moment.</p>' +
-        '</div>';
+    var visible = m.classList.contains('is-open') && !m.hidden;
+    if (visible) {
+      var body = m.querySelector('[data-esign-body]');
+      if (body) {
+        body.innerHTML = '<div class="cif-esign-done">' +
+          '<svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>' +
+          '<h4>You’re all set' + (name ? (', ' + name.split(' ')[0]) : '') + '!</h4>' +
+          '<p>Your agreement is signed — taking you to your dashboard…</p>' +
+          '</div>';
+      }
+      // Show the confirmation briefly, then close the signing tab + go Home.
+      setTimeout(_complete, 1500);
+    } else {
+      // Modal already closed (they signed in the tab and came back) — go straight Home.
+      _complete();
     }
-    // Flip the whole portal to the now-active loan.
-    setTimeout(function () { try { window.location.reload(); } catch (e) { /* ignore */ } }, 1900);
   }
 
   function _wireSubmit(esign) {
@@ -294,10 +310,14 @@
     m.hidden = false;
     requestAnimationFrame(function () { m.classList.add('is-open'); });
     document.body.classList.add('cif-modal-open');
-    // Open Vergent's secure signing page in a new tab. If the browser blocks the
-    // popup, the modal's "Open signing page" button (same href) is the manual
-    // fallback — either way the poll below detects completion.
-    try { window.open(url, '_blank', 'noopener'); } catch (e) { /* popup blocked */ }
+    // Open Vergent's secure signing page in a new tab and KEEP the handle so we
+    // can close it automatically the moment they finish (so they don't have to
+    // hunt for the tab). Opened inside the click gesture, so it isn't popup-
+    // blocked; null its opener to prevent reverse-tabnabbing.
+    try {
+      _signWin = window.open(url, '_blank');
+      try { if (_signWin) _signWin.opener = null; } catch (e2) { /* cross-origin: fine */ }
+    } catch (e) { _signWin = null; }
     _hadPending = true;
     _startPolling(esign);
   }
@@ -345,7 +365,7 @@
     if (now - _lastCheck < 2500) return;
     _lastCheck = now;
     fetchPending(true).then(function (list) {
-      if (!list || !list.length) { try { window.location.reload(); } catch (e) { /* ignore */ } }
+      if (!list || !list.length) { _success(_signerName()); }
     });
   }
   document.addEventListener('visibilitychange', _onFocus);

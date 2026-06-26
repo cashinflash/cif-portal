@@ -2639,9 +2639,15 @@ button.dash-doc-download:disabled {
 /* In the loans stack the gap already spaces the strip; drop its own top margin
    (and pull up a touch on desktop) so it sits close under the loan card. */
 .loans-stack > .cif-esign-strip { margin-top: 0; }
-/* Tight, uniform spacing between the loan card, the Review & sign prompt, and
-   the Past loans section when awaiting signature (12px rhythm, portal-wide). */
+/* Pending loans: tuck the Review & sign prompt right under the loan card it
+   belongs to (12px), then a clearer break before the separate Past loans
+   section, so the prompt reads as part of the pending loan — not crammed
+   against the history below it. Margins are zeroed (and the Past-loans gap set
+   explicitly) so the result is deterministic regardless of portal.css. */
 html.cif-pending-signature .loans-stack { gap: 12px !important; }
+html.cif-pending-signature .loans-stack > .loans-active { margin-bottom: 0 !important; }
+html.cif-pending-signature .loans-stack > .cif-esign-strip { margin-top: 0 !important; margin-bottom: 0 !important; }
+html.cif-pending-signature .loans-stack > .loans-past { margin-top: 16px !important; }
 /* Home mobile: the prompt sits in .home-mobile under a 10px grid row-gap — trim
    its own top margin so the card → prompt gap is 12px too (10 + 2), matching
    loans + desktop home so the spacing is identical on every device. */
@@ -2853,6 +2859,10 @@ html.cif-pending-signature #paySummary:not([aria-busy="true"]) {
   position: relative;
   z-index: 5;
 }
+/* When hidden, stay hidden — the .dash-banner display:flex above otherwise
+   overrides the [hidden] attribute and renders an empty padded box, leaving a
+   phantom gap under the page header (most visible on Profile). */
+.dash-banner[hidden] { display: none !important; }
 .dash-banner--ok {
   background: rgba(14,135,65,.12);
   color: var(--cif-green-dark);
