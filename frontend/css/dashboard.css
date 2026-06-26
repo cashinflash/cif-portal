@@ -4735,7 +4735,9 @@ body.cif-modal-open .app-tabbar { display: none; }
 
 /* Page-background floating blobs — same language as .dash-hero-blob. */
 .app-main { position: relative; }
-.app-page { overflow-x: hidden; }
+/* clip (not hidden) prevents sideways scroll WITHOUT making the page a scroll
+   container — which is what was breaking the sticky mobile top bar. */
+.app-page { overflow-x: clip; }
 .app-blob {
   position: absolute; z-index: 0; pointer-events: none;
   background: rgba(14,135,65,.07);
