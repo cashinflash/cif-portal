@@ -197,6 +197,8 @@
       card.classList.add('loan-card--paidup');
       if (body) body.hidden = true;
       if (empty) empty.hidden = false;
+      try { sessionStorage.setItem('cif_pending_signature', 'false'); } catch (e) { /* ignore */ }
+      document.documentElement.classList.remove('cif-pending-signature');
       return;
     }
     card.classList.remove('loan-card--art', 'loan-card--paidup');
@@ -228,13 +230,20 @@
     card.classList.toggle('is-pastdue', isPastDue && !soft);
     // Awaiting e-signature → show the "Awaiting signature" pill + the Review &
     // sign prompt instead of a healthy active card (shared module, portal-wide).
+    var _pendingSig = false;
     if (window.CifEsign) {
       var esign = CifEsign.infoForLoan(loan);
       CifEsign.renderStrip(esign);
       if (esign) {
         CifEsign.gateCard(card, loan);
+        _pendingSig = true;
       }
     }
+    // Flag the pending-signature state the same way the dashboard does so the
+    // CSS tightens the loans-stack spacing + hides the Apply/pay CTAs (and the
+    // next load's <head> preflight paints it with no flash). See dashboard.js.
+    try { sessionStorage.setItem('cif_pending_signature', String(_pendingSig)); } catch (e) { /* ignore */ }
+    document.documentElement.classList.toggle('cif-pending-signature', _pendingSig);
   }
 
   // Whole days a loan is past its due date (0 if not past due / unknown).

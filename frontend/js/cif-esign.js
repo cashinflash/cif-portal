@@ -124,12 +124,14 @@
           '</button>' +
         '</header>' +
         '<div class="cif-esign-body" data-esign-body>' +
-          '<p class="cif-esign-loading" data-esign-loading>Loading your secure signing session…</p>' +
+          '<div class="cif-esign-wait">' +
+            '<span class="cif-esign-wait-ico" aria-hidden="true"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>' +
+            '<h4>Finish signing in the new tab</h4>' +
+            '<p>We opened your secure signing page in a new tab. Review and sign your documents there, then come back — this page updates automatically once you’re done.</p>' +
+            '<a class="cif-esign-submit cif-esign-submit--link" data-esign-hosted href="#" target="_blank" rel="noopener">Open signing page</a>' +
+            '<p class="cif-esign-wait-hint" aria-live="polite">Waiting for you to finish signing…</p>' +
+          '</div>' +
         '</div>' +
-        '<footer class="cif-esign-foot">' +
-          '<p class="cif-esign-legal">Review and submit your signature in the document above. This window updates automatically once you’re done.</p>' +
-          '<a class="cif-esign-alt" data-esign-hosted href="#" target="_blank" rel="noopener">Trouble loading? Open the secure signing page in a new tab &#8599;</a>' +
-        '</footer>' +
       '</div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', function (e) {
@@ -272,10 +274,14 @@
   }
   function _stopPolling() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } }
 
-  // Sign IN-PORTAL using Vergent's own secure signing page (with its own submit)
-  // embedded in the modal — the custom /sign POST didn't actually complete the
-  // signature in Vergent. A new-tab fallback covers the case where Vergent
-  // blocks framing; either way the poll above detects completion.
+  // Vergent's hosted signing page is the ONLY thing that actually completes a
+  // signature (our custom /sign POST returned success but never registered it
+  // in Vergent), and that page refuses to be embedded in an iframe — its
+  // anti-clickjacking X-Frame-Options is exactly why the in-frame attempt
+  // rendered broken/zoomed. So we open it in a new tab (where it's fully
+  // responsive + mobile-sized), show a "finish in the new tab" wait card, and
+  // watch the e-sign queue — the instant Vergent clears this loan we celebrate
+  // and flip the portal to the active card. The focus handler is a second net.
   function openModal(esign) {
     esign = esign || _current;
     if (!esign) return;
@@ -283,22 +289,16 @@
     var url = esign.signingUrl || (esign.id ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esign.id)) : null);
     if (!url) return;
     var m = _modalEl();
-    var body = m.querySelector('[data-esign-body]');
     var hosted = m.querySelector('[data-esign-hosted]');
     if (hosted) hosted.href = url;
-    if (body) {
-      body.innerHTML = '<p class="cif-esign-loading" data-esign-loading>Loading your secure signing session…</p>';
-      var f = document.createElement('iframe');
-      f.className = 'cif-esign-signframe';
-      f.title = 'Sign your loan agreement';
-      f.src = url;
-      f.setAttribute('allow', 'clipboard-write');
-      f.addEventListener('load', function () { var l = body.querySelector('[data-esign-loading]'); if (l) l.remove(); });
-      body.appendChild(f);
-    }
     m.hidden = false;
     requestAnimationFrame(function () { m.classList.add('is-open'); });
     document.body.classList.add('cif-modal-open');
+    // Open Vergent's secure signing page in a new tab. If the browser blocks the
+    // popup, the modal's "Open signing page" button (same href) is the manual
+    // fallback — either way the poll below detects completion.
+    try { window.open(url, '_blank', 'noopener'); } catch (e) { /* popup blocked */ }
+    _hadPending = true;
     _startPolling(esign);
   }
 

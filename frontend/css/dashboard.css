@@ -2640,8 +2640,16 @@ button.dash-doc-download:disabled {
    (and pull up a touch on desktop) so it sits close under the loan card. */
 .loans-stack > .cif-esign-strip { margin-top: 0; }
 /* Tight, uniform spacing between the loan card, the Review & sign prompt, and
-   the Past loans section when awaiting signature. */
+   the Past loans section when awaiting signature (12px rhythm, portal-wide). */
 html.cif-pending-signature .loans-stack { gap: 12px !important; }
+/* Home mobile: the prompt sits in .home-mobile under a 10px grid row-gap — trim
+   its own top margin so the card → prompt gap is 12px too (10 + 2), matching
+   loans + desktop home so the spacing is identical on every device. */
+html.cif-pending-signature .home-mobile > .cif-esign-strip { margin-top: 2px; }
+/* Payments: same 12px rhythm under the pending card (overrides the -6px ACH pull
+   so the e-sign prompt matches loans + home on every device). */
+html.cif-pending-signature .pay-stack { gap: 12px !important; }
+html.cif-pending-signature .pay-stack > .cif-esign-strip { margin-top: 0; }
 @media (max-width: 560px) {
   .cif-esign-strip .cif-esign-cta { margin-left: 0; width: 100%; }
 }
@@ -2736,10 +2744,36 @@ html.cif-pending-signature #paySummary:not([aria-busy="true"]) {
 .cif-esign-done svg { color: #0E8741; }
 .cif-esign-done h4 { margin: 10px 0 6px; font-size: 1.15rem; font-weight: 800; color: var(--cif-navy); }
 .cif-esign-done p { margin: 0 auto; max-width: 380px; color: var(--cif-muted); font-size: .92rem; line-height: 1.55; }
+
+/* New-tab signing handoff — the "finish in the new tab" wait card. Vergent's
+   secure signing page can't be embedded (it blocks framing), so we open it in a
+   new tab and show this while we watch for completion. */
+.cif-esign-wait { text-align: center; padding: 24px 8px 8px; }
+.cif-esign-wait-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 64px; height: 64px; border-radius: 50%;
+  background: #e8f3ee; color: #0E8741; margin-bottom: 14px;
+}
+.cif-esign-wait h4 { margin: 0 0 8px; font-size: 1.15rem; font-weight: 800; color: var(--cif-navy); }
+.cif-esign-wait p { margin: 0 auto 18px; max-width: 400px; color: var(--cif-muted); font-size: .92rem; line-height: 1.55; }
+.cif-esign-submit--link { display: inline-block; text-decoration: none; text-align: center; }
+.cif-esign-wait-hint {
+  display: inline-flex !important; align-items: center; gap: 9px;
+  margin: 20px auto 4px !important; color: #0E8741 !important;
+  font-weight: 700; font-size: .85rem !important; max-width: none !important;
+}
+.cif-esign-wait-hint::before {
+  content: ''; flex: 0 0 auto; width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid rgba(14,135,65,.25); border-top-color: #0E8741;
+  animation: cif-esign-spin .8s linear infinite;
+}
+@keyframes cif-esign-spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 560px) {
   .cif-esign-card { width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; }
   .cif-esign-doc-frame { height: 340px; }
   .cif-esign-signframe { height: 74vh; }
+  .cif-esign-wait { padding-top: 40px; }
 }
 
 /* Red "Payment returned" pill (same shape as the amber Processing pill). */
@@ -4873,7 +4907,9 @@ a.app-cta-primary[href*="payments.html"]:hover {
       "act  act  act  act  act"
       "tiles tiles tiles tiles tiles";
   }
-  html.cif-pending-signature .cif-esign-strip.u-desktop { grid-area: sign; margin-top: -14px; }
+  /* Pull the prompt up under the full-width card: 20px row gap − 8 = 12px,
+     matching the loans-stack + payments rhythm exactly. */
+  html.cif-pending-signature .cif-esign-strip.u-desktop { grid-area: sign; margin-top: -8px; }
   html.cif-pending-signature .home-loan { height: auto; }
 
   /* Force each paired card to fill its row track so the two cards in a row

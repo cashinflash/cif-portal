@@ -4,6 +4,36 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <style>/* app-feel: no sideways scroll */ html,body{overflow-x:hidden;max-width:100%;}</style>
+  <script>
+    /* Auth gate — runs before any signed-in UI can paint. If there's no valid
+       (unexpired) session, redirect to login immediately, so pressing Back
+       after an idle logout never flashes the signed-in page. Re-checked on
+       bfcache restore (pageshow). */
+    (function () {
+      function valid() {
+        try {
+          var t = sessionStorage.getItem('cif_id_token');
+          if (!t) return false;
+          var seg = t.split('.')[1]; if (!seg) return false;
+          var b = seg.replace(/-/g, '+').replace(/_/g, '/');
+          var pad = b + '==='.slice((b.length + 3) % 4);
+          var json = decodeURIComponent(atob(pad).split('').map(function (c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          }).join(''));
+          var claims = JSON.parse(json);
+          return !!(claims && claims.exp && claims.exp * 1000 > Date.now());
+        } catch (e) { return false; }
+      }
+      function gate() {
+        if (valid()) return false;
+        try { document.documentElement.style.visibility = 'hidden'; } catch (e) {}
+        window.location.replace('/login.html');
+        return true;
+      }
+      if (gate()) return;
+      window.addEventListener('pageshow', function (e) { if (e.persisted) gate(); });
+    })();
+  </script>
   <meta name="robots" content="noindex, nofollow">
   <title>Request a new loan · Cash in Flash</title>
   <link rel="icon" type="image/png" href="/images/favicon.png">
@@ -11,7 +41,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260620b">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260620b">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260626b">
   <script>
     (function(){
       try {
