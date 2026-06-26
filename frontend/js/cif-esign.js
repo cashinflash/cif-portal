@@ -124,16 +124,11 @@
           '</button>' +
         '</header>' +
         '<div class="cif-esign-body" data-esign-body>' +
-          '<p class="cif-esign-loading" data-esign-loading>Loading your documents…</p>' +
+          '<p class="cif-esign-loading" data-esign-loading>Loading your secure signing session…</p>' +
         '</div>' +
-        '<footer class="cif-esign-foot" data-esign-foot hidden>' +
-          '<p class="cif-esign-legal">By tapping <strong>Sign &amp; Accept</strong>, I agree to and electronically sign the documents above. My electronic signature is legally binding.</p>' +
-          '<p class="cif-esign-error" data-esign-error hidden></p>' +
-          '<div class="cif-esign-actions">' +
-            '<button type="button" class="cif-esign-cancel" data-esign-close>Cancel</button>' +
-            '<button type="button" class="cif-esign-submit" data-esign-submit>Sign &amp; Accept</button>' +
-          '</div>' +
-          '<a class="cif-esign-alt" data-esign-hosted href="#" target="_blank" rel="noopener" hidden>Open the secure signing page &rarr;</a>' +
+        '<footer class="cif-esign-foot">' +
+          '<p class="cif-esign-legal">Review and submit your signature in the document above. This window updates automatically once you’re done.</p>' +
+          '<a class="cif-esign-alt" data-esign-hosted href="#" target="_blank" rel="noopener">Trouble loading? Open the secure signing page in a new tab &#8599;</a>' +
         '</footer>' +
       '</div>';
     document.body.appendChild(wrap);
@@ -260,39 +255,55 @@
     if (submit) { submit.textContent = 'Sign & Accept'; submit.disabled = false; }
   }
 
+  // While the signing modal is open, poll the e-sign queue; the moment Vergent
+  // marks this loan signed (it leaves the queue), celebrate + flip to active.
+  var _pollTimer = null;
+  function _startPolling(esign) {
+    _stopPolling();
+    _pollTimer = setInterval(function () {
+      fetchPending(true).then(function (list) {
+        var still = (list || []).some(function (p) {
+          return (esign.id && String(p.id) === String(esign.id)) ||
+                 (esign.loanId && String(p.loanId) === String(esign.loanId));
+        });
+        if (!still) { _stopPolling(); _success(_signerName()); }
+      });
+    }, 4000);
+  }
+  function _stopPolling() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } }
+
+  // Sign IN-PORTAL using Vergent's own secure signing page (with its own submit)
+  // embedded in the modal — the custom /sign POST didn't actually complete the
+  // signature in Vergent. A new-tab fallback covers the case where Vergent
+  // blocks framing; either way the poll above detects completion.
   function openModal(esign) {
     esign = esign || _current;
     if (!esign) return;
     _current = esign;
+    var url = esign.signingUrl || (esign.id ? ('https://shared.vergentlms.com/esign?g=' + encodeURIComponent(esign.id)) : null);
+    if (!url) return;
     var m = _modalEl();
     var body = m.querySelector('[data-esign-body]');
-    var foot = m.querySelector('[data-esign-foot]');
     var hosted = m.querySelector('[data-esign-hosted]');
-    if (hosted) { hosted.hidden = true; if (esign.signingUrl) hosted.href = esign.signingUrl; }
-    if (foot) foot.hidden = true;
-    if (body) body.innerHTML = '<p class="cif-esign-loading" data-esign-loading>Loading your documents…</p>';
+    if (hosted) hosted.href = url;
+    if (body) {
+      body.innerHTML = '<p class="cif-esign-loading" data-esign-loading>Loading your secure signing session…</p>';
+      var f = document.createElement('iframe');
+      f.className = 'cif-esign-signframe';
+      f.title = 'Sign your loan agreement';
+      f.src = url;
+      f.setAttribute('allow', 'clipboard-write');
+      f.addEventListener('load', function () { var l = body.querySelector('[data-esign-loading]'); if (l) l.remove(); });
+      body.appendChild(f);
+    }
     m.hidden = false;
     requestAnimationFrame(function () { m.classList.add('is-open'); });
     document.body.classList.add('cif-modal-open');
-
-    var url = '/api/my-esign/document' + (esign.id ? ('?esignId=' + encodeURIComponent(esign.id))
-      : (esign.loanId ? ('?loanId=' + encodeURIComponent(esign.loanId)) : ''));
-    fetch(url, { headers: { 'Authorization': 'Bearer ' + token(), 'Accept': 'application/json' }, credentials: 'omit' })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (data) {
-        _renderDocs(body, data && data.document);
-        if (foot) foot.hidden = false;
-        _wireSubmit(esign);
-      })
-      .catch(function () {
-        if (body) body.innerHTML = '<p class="cif-esign-error" style="display:block">We couldn’t load your documents. Please use the secure signing page below, or call (888) 999-9859.</p>';
-        if (foot) foot.hidden = false;
-        if (hosted && esign.signingUrl) hosted.hidden = false;
-        _wireSubmit(esign);
-      });
+    _startPolling(esign);
   }
 
   function hideModal() {
+    _stopPolling();
     if (_modal) { _modal.classList.remove('is-open'); _modal.hidden = true; }
     document.body.classList.remove('cif-modal-open');
   }

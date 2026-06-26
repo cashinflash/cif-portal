@@ -2638,8 +2638,10 @@ button.dash-doc-download:disabled {
 .pay-stack > .cif-esign-strip { margin-top: -6px; }
 /* In the loans stack the gap already spaces the strip; drop its own top margin
    (and pull up a touch on desktop) so it sits close under the loan card. */
-.loans-stack > .cif-esign-strip { margin-top: -6px; }
-@media (min-width: 900px) { .loans-stack > .cif-esign-strip { margin-top: -12px; } }
+.loans-stack > .cif-esign-strip { margin-top: 0; }
+/* Tight, uniform spacing between the loan card, the Review & sign prompt, and
+   the Past loans section when awaiting signature. */
+html.cif-pending-signature .loans-stack { gap: 12px !important; }
 @media (max-width: 560px) {
   .cif-esign-strip .cif-esign-cta { margin-left: 0; width: 100%; }
 }
@@ -2702,6 +2704,8 @@ html.cif-pending-signature #paySummary:not([aria-busy="true"]) {
 .cif-esign-doc-name { font-weight: 700; color: var(--cif-navy); font-size: .9rem; margin: 14px 0 6px; }
 .cif-esign-doc-name:first-child { margin-top: 0; }
 .cif-esign-doc-frame { width: 100%; height: 420px; border: 1px solid #e5e9ee; border-radius: 10px; background: #fff; }
+/* Embedded Vergent signing page — tall so the customer can read + sign + submit. */
+.cif-esign-signframe { width: 100%; height: min(66vh, 580px); border: 1px solid #e5e9ee; border-radius: 10px; background: #fff; }
 .cif-esign-foot { padding: 16px 20px; border-top: 1px solid #eef1f4; background: #fafbfc; }
 .cif-esign-field { display: block; margin-bottom: 12px; }
 .cif-esign-field span { display: block; font-size: .82rem; font-weight: 600; color: var(--cif-navy); margin-bottom: 5px; }
@@ -2735,6 +2739,7 @@ html.cif-pending-signature #paySummary:not([aria-busy="true"]) {
 @media (max-width: 560px) {
   .cif-esign-card { width: 100vw; max-height: 100vh; height: 100vh; border-radius: 0; }
   .cif-esign-doc-frame { height: 340px; }
+  .cif-esign-signframe { height: 74vh; }
 }
 
 /* Red "Payment returned" pill (same shape as the amber Processing pill). */
@@ -4462,7 +4467,7 @@ body.cif-modal-open .app-tabbar { display: none; }
 .loan-card.is-pastdue-soft { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 12px 30px rgba(217,119,6,.30); }
 .loan-card.is-pastdue { background: linear-gradient(150deg, #EA5559 0%, #CE3439 58%, #B0252B 100%); box-shadow: 0 12px 30px rgba(180,35,24,.32); }
 /* Pending signature → orange "Pending Loan" treatment (loan isn't active yet). */
-.loan-card.is-pending-sign { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 12px 30px rgba(217,119,6,.30); }
+.loan-card.is-pending-sign { background: linear-gradient(150deg, #F4A722 0%, #E8850D 58%, #D2700A 100%); box-shadow: 0 8px 20px rgba(217,119,6,.20); }
 /* While the loan card is still loading, show a neutral gray placeholder — never
    the green (or orange) card behind the skeleton, on any page. */
 .loan-card[aria-busy="true"] { background: #e9edf2 !important; box-shadow: none !important; }
@@ -4868,7 +4873,7 @@ a.app-cta-primary[href*="payments.html"]:hover {
       "act  act  act  act  act"
       "tiles tiles tiles tiles tiles";
   }
-  html.cif-pending-signature .cif-esign-strip.u-desktop { grid-area: sign; }
+  html.cif-pending-signature .cif-esign-strip.u-desktop { grid-area: sign; margin-top: -14px; }
   html.cif-pending-signature .home-loan { height: auto; }
 
   /* Force each paired card to fill its row track so the two cards in a row

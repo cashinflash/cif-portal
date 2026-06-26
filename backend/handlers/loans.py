@@ -1923,6 +1923,43 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
     except Exception as exc:  # best-effort probe — never break the diagnostic
         probe["error"] = str(exc)[:120]
     out["customerPortalFullProbe"] = probe
+
+    # Disbursement-method probe (cash-extend customers don't "receive funds" on
+    # signing). The method isn't on the loan header, so look in the loan's docs
+    # + transaction history. PII-light: only type/description/method-ish fields.
+    out_hdr = None
+    for rec in raw_loans:
+        h2 = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
+        if isinstance(h2, dict) and h2.get("IsStatusOutstanding"):
+            out_hdr = h2.get("hdr_id") or h2.get("HdrId")
+            break
+    disb = {"hdr": out_hdr}
+    if out_hdr:
+        keys = ("type", "desc", "method", "disburs", "trans", "fund", "cash",
+                "kind", "category", "doc", "file", "title", "status")
+        for path in (f"/V1/customer/{cid}/docs/loan/{out_hdr}",
+                     f"/V1/customer/{cid}/loan/{out_hdr}/history",
+                     f"/V1/{cid}/loan/{out_hdr}/history",
+                     f"/V1/customer/{cid}/loan/{out_hdr}/transactions"):
+            try:
+                st2, body2 = _v1_get(path)
+            except Exception as exc2:
+                disb[path] = {"error": str(exc2)[:80]}
+                continue
+            entry = {"status": st2}
+            if isinstance(body2, list):
+                rows = []
+                for it in body2[:25]:
+                    if not isinstance(it, dict):
+                        continue
+                    rows.append({k: it.get(k) for k in it.keys()
+                                 if any(t in k.lower() for t in keys)
+                                 and isinstance(it.get(k), (str, int, float, bool))})
+                entry["rows"] = rows
+            elif body2 is not None:
+                entry["snippet"] = str(body2)[:200]
+            disb[path] = entry
+    out["disbursementProbe"] = disb
     return out
 
 
