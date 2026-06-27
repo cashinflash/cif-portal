@@ -3705,6 +3705,14 @@ def _shape_vergent_customer_row(rec: Dict[str, Any]) -> Dict[str, Any]:
 # and edits to its own address/employer/contact. A customer can never
 # submit a re-loan as anyone but themselves.
 # ═════════════════════════════════════════════════════════════════
+def _mask_tail(s: str, keep: int = 4) -> str:
+    """Mask all but the last `keep` chars of a sensitive value."""
+    s = (s or "").strip()
+    if len(s) <= keep:
+        return s
+    return "•••• " + s[-keep:]
+
+
 def _reapply_customer_info(cid: str, claims: Dict[str, Any]) -> Dict[str, Any]:
     """Best-effort identity / employment / bank pull for a returning
     customer, keyed to the JWT-resolved cid. Tolerates PascalCase and
@@ -3855,6 +3863,13 @@ def get_reapply_prefill(event: Dict[str, Any]) -> Dict[str, Any]:
         },
         "banks": banks,
         "hasBankOnFile": bool(banks),
+        "bankOnFile": {
+            "bankName": info.get("bankName", ""),
+            # Routing numbers are public bank identifiers — show in full.
+            # Account number is sensitive — mask to the last 4.
+            "routingNumber": info.get("routingNumber", ""),
+            "accountNumber": _mask_tail(info.get("accountNumber", "")),
+        },
         "minAmount": REAPPLY_MIN_AMOUNT,
         "maxAmount": REAPPLY_MAX_AMOUNT,
     })

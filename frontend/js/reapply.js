@@ -112,11 +112,14 @@
       var nm = ((p.firstName || '') + ' ' + (p.lastName || '')).trim();
       var nameEl = $('#rlName'); if (nameEl) nameEl.textContent = nm || 'Your account';
       var emEl = $('#rlEmail'); if (emEl) emEl.textContent = p.email || '';
+      var ini = (((p.firstName || ' ')[0] || '') + ((p.lastName || ' ')[0] || '')).toUpperCase().trim();
+      var avEl = $('#rlAvatar'); if (avEl) avEl.textContent = ini || '•';
       setVal('rlAddress', p.address); setVal('rlAddress2', p.address2);
       setVal('rlCity', p.city); setVal('rlState', p.state); setVal('rlZip', p.zip);
       setVal('rlEmployer', p.employer); setVal('rlPhone', p.phone);
       setupAmount();
       renderBanks();
+      renderBankFile(d.bankOnFile);
       $('#rlLoading').hidden = true;
       $('#rlWizard').hidden = false;
       showStep(1);
@@ -137,6 +140,22 @@
       employer: ($('#rlEmployer') || {}).value || '',
       phone: ($('#rlPhone') || {}).value || '',
     };
+  }
+
+  // Vergent bank-on-file (read-only) — helps the customer eyeball-match
+  // the account they're connecting via Plaid to what we have on record.
+  function renderBankFile(bf) {
+    var panel = $('#rlBankFile');
+    if (!panel) return;
+    if (!bf || !(bf.bankName || bf.routingNumber || bf.accountNumber)) {
+      panel.hidden = true;
+      return;
+    }
+    var setT = function (id, v) { var el = $('#' + id); if (el) el.textContent = v || '—'; };
+    setT('rlBfName', bf.bankName);
+    setT('rlBfRouting', bf.routingNumber);
+    setT('rlBfAccount', bf.accountNumber);
+    panel.hidden = false;
   }
 
   // ---------- Step 2: banks ----------
