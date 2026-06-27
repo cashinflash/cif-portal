@@ -570,7 +570,7 @@
     const modal = qs('#payAddCardModal');
     if (!modal) return;
     modal.classList.remove('is-open');
-    setTimeout(function () { modal.hidden = true; }, 180);
+    modal.hidden = true;
   }
   function showAddCardError(msg) {
     const el = qs('#payAddCardError');
@@ -729,7 +729,7 @@
 
   // ---------- Input formatting ----------
   function formatCardNumber(value) {
-    const digits = String(value || '').replace(/\D/g, '').slice(0, 19);
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 16);
     return digits.replace(/(\d{4})(?=\d)/g, '$1 ');
   }
   function formatExp(value) {
@@ -1264,6 +1264,8 @@
     if (addForm) addForm.addEventListener('submit', saveCard);
     const addCancel = qs('#payAddCardCancel');
     if (addCancel) addCancel.addEventListener('click', closeAddCard);
+    const addClose = qs('#payAddCardClose');
+    if (addClose) addClose.addEventListener('click', closeAddCard);
     const addBackdrop = qs('#payAddCardBackdrop');
     if (addBackdrop) addBackdrop.addEventListener('click', closeAddCard);
 

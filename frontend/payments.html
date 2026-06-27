@@ -80,6 +80,47 @@
       border: none !important; border-radius: 13px; padding: 14px 18px; font-family: inherit; font-weight: 800;
       font-size: 1rem; cursor: pointer; box-shadow: 0 6px 16px rgba(14,135,65,.24); transition: filter .15s, box-shadow .15s; }
     .pay-cc-pay:hover { filter: brightness(1.05); box-shadow: 0 8px 20px rgba(14,135,65,.30); }
+
+    /* Add-a-debit-card modal — mirrors the re-apply wizard modal (request-loan.html)
+       so the two are pixel-identical. Scoped to #payAddCardModal; !important on the
+       buttons beats this page's .dashboard-page button flattening. Keep in sync. */
+    #payAddCardModal { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center;
+      padding:18px; background:rgba(15,23,42,.55); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
+      animation:pacIn .16s ease-out; }
+    #payAddCardModal[hidden] { display:none; }
+    @keyframes pacIn { from { opacity:0; } to { opacity:1; } }
+    #payAddCardModal .pac-backdrop { position:absolute; inset:0; background:none; border:none; padding:0; margin:0; cursor:default; }
+    #payAddCardModal .pac-card { position:relative; z-index:1; align-self:center; width:min(420px, calc(100vw - 32px));
+      max-height:calc(100vh - 40px); overflow:auto;
+      background:#fff; border-radius:20px; box-shadow:0 24px 60px rgba(2,6,23,.35);
+      animation:pacCardIn .2s cubic-bezier(.16,1,.3,1); }
+    @keyframes pacCardIn { from { opacity:0; transform:translateY(12px) scale(.98); } to { opacity:1; transform:none; } }
+    #payAddCardModal .pac-head { display:flex; align-items:center; gap:11px; padding:18px 20px; border-bottom:1px solid #eef1f4; }
+    #payAddCardModal .pac-ico { width:38px; height:38px; flex:none; border-radius:50%; background:#e8f5ee; color:#0E8741;
+      display:flex; align-items:center; justify-content:center; }
+    #payAddCardModal .pac-head h3 { margin:0; flex:1; font-size:1.12rem; font-weight:800; letter-spacing:-.01em; color:#0f2a20; }
+    #payAddCardModal .pac-x { flex:none; background:none !important; border:none !important; cursor:pointer; color:#9aa3af !important; padding:4px; line-height:0; border-radius:8px; }
+    #payAddCardModal .pac-x:hover { background:#f3f4f6 !important; color:#33414e !important; }
+    #payAddCardModal .pac-body { padding:18px 20px 20px; }
+    #payAddCardModal .pac-field { display:flex; flex-direction:column; }
+    #payAddCardModal .pac-field + .pac-field { margin-top:11px; }
+    #payAddCardModal .pac-field > span { font-size:.8rem; font-weight:700; color:#33414e; margin-bottom:6px; }
+    #payAddCardModal .pac-input { width:100%; padding:13px 14px; border:1.5px solid #dde3e8; border-radius:12px;
+      font-size:16px; font-family:inherit; color:#0f2a20; background:#fbfdfc; transition:border-color .15s, box-shadow .15s, background .15s; }
+    #payAddCardModal .pac-input:focus { outline:none; border-color:#0E8741; background:#fff; box-shadow:0 0 0 3.5px rgba(14,135,65,.13); }
+    #payAddCardModal .pac-row { display:grid; grid-template-columns:1fr 1fr; gap:11px; margin-top:11px; }
+    #payAddCardModal .pac-err { color:#b42318; font-size:.85rem; line-height:1.45; margin:10px 0 0; }
+    #payAddCardModal .pac-note { color:#9aa3af; font-size:.78rem; line-height:1.5; margin:10px 0 0; }
+    #payAddCardModal .pac-actions { margin-top:16px; display:flex; gap:12px; align-items:center; }
+    #payAddCardModal .pac-back { flex:0 0 auto; background:#fff !important; border:1.5px solid #dde3e8 !important;
+      border-radius:13px; padding:14px 20px; font-family:inherit; font-weight:800; font-size:.95rem; color:#33414e !important; cursor:pointer; }
+    #payAddCardModal .pac-back:hover { background:#f7f9fa !important; }
+    #payAddCardModal .pac-btn { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      background:linear-gradient(180deg,#0E8741 0%, #0C7137 100%) !important; color:#fff !important; border:none !important;
+      border-radius:13px; padding:15px 20px; font-family:inherit; font-weight:800; font-size:1rem; cursor:pointer;
+      box-shadow:0 6px 16px rgba(14,135,65,.22); transition:filter .15s, box-shadow .15s, opacity .15s; }
+    #payAddCardModal .pac-btn:hover:not(:disabled) { filter:brightness(1.05); box-shadow:0 8px 20px rgba(14,135,65,.28); }
+    #payAddCardModal .pac-btn:disabled { opacity:.5; cursor:not-allowed; box-shadow:none; }
   </style>
   <script>
     (function(){
@@ -376,50 +417,29 @@
       </section>
 
       <!-- Add-card modal (saves a debit card to Vergent; never charges).
-           Reuses the Profile page's modal classes -> mobile bottom-sheet. -->
-      <div class="profile-modal" id="payAddCardModal" hidden>
-        <button type="button" class="profile-modal-backdrop" id="payAddCardBackdrop" aria-label="Close"></button>
-        <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="payAddCardTitle">
-          <div class="profile-modal-head">
-            <h3 class="profile-modal-title" id="payAddCardTitle">Add a debit card</h3>
+           Centered modal — identical to the re-apply wizard's add-card modal. -->
+      <div id="payAddCardModal" hidden>
+        <button type="button" class="pac-backdrop" id="payAddCardBackdrop" aria-label="Close"></button>
+        <div class="pac-card" role="dialog" aria-modal="true" aria-labelledby="payAddCardTitle">
+          <div class="pac-head">
+            <span class="pac-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>
+            <h3 id="payAddCardTitle">Add a debit card</h3>
+            <button type="button" class="pac-x" id="payAddCardClose" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           </div>
-          <div class="profile-modal-body">
-            <p class="profile-modal-intro">
-              We'll securely save this debit card to your account. You won't be charged now &mdash;
-              you can pay with it from the payment screen.
-            </p>
-            <form id="payAddCardForm" class="profile-modal-form" autocomplete="off" novalidate>
-              <div class="profile-modal-field">
-                <label class="profile-modal-field-label" for="payCardNumber">Card number</label>
-                <input type="text" inputmode="numeric" id="payCardNumber" name="cardNumber"
-                       placeholder="0000 0000 0000 0000" autocomplete="cc-number" maxlength="23">
+          <div class="pac-body">
+            <form id="payAddCardForm" autocomplete="off" novalidate>
+              <label class="pac-field"><span>Name on card</span><input class="pac-input" type="text" id="payName" name="nameOnCard" placeholder="Jane Smith" autocomplete="cc-name" maxlength="64"></label>
+              <label class="pac-field"><span>Card number</span><input class="pac-input" type="text" inputmode="numeric" id="payCardNumber" name="cardNumber" placeholder="1234 5678 9012 3456" autocomplete="cc-number" maxlength="19"></label>
+              <div class="pac-row">
+                <label class="pac-field"><span>Expiration</span><input class="pac-input" type="text" inputmode="numeric" id="payExp" name="exp" placeholder="MM/YY" maxlength="5" autocomplete="cc-exp"></label>
+                <label class="pac-field"><span>Billing ZIP</span><input class="pac-input" type="text" inputmode="numeric" id="payZip" name="zip" placeholder="12345" maxlength="5" autocomplete="postal-code"></label>
               </div>
-              <div class="profile-modal-row">
-                <div class="profile-modal-field profile-modal-field--narrow">
-                  <label class="profile-modal-field-label" for="payExp">Expiration</label>
-                  <input type="text" inputmode="numeric" id="payExp" name="exp"
-                         placeholder="MM/YY" maxlength="5" autocomplete="cc-exp">
-                </div>
-                <div class="profile-modal-field profile-modal-field--narrow">
-                  <label class="profile-modal-field-label" for="payZip">Billing ZIP</label>
-                  <input type="text" inputmode="numeric" id="payZip" name="zip"
-                         placeholder="12345" maxlength="5" autocomplete="postal-code">
-                </div>
+              <p class="pac-err" id="payAddCardError" hidden></p>
+              <div class="pac-actions">
+                <button type="button" class="pac-back" id="payAddCardCancel">Cancel</button>
+                <button type="submit" class="pac-btn" id="payAddCardSave">Save card</button>
               </div>
-              <div class="profile-modal-field">
-                <label class="profile-modal-field-label" for="payName">Name on card</label>
-                <input type="text" id="payName" name="nameOnCard"
-                       placeholder="Jane Smith" autocomplete="cc-name" maxlength="64">
-              </div>
-              <p class="profile-modal-error" id="payAddCardError" hidden></p>
-              <div class="pay-trust" style="margin-top:4px">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                Debit cards only. Secured with bank-grade encryption &mdash; we never store your card number.
-              </div>
-              <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">
-                <button type="button" class="btn-login" id="payAddCardCancel">Cancel</button>
-                <button type="submit" class="btn-apply" id="payAddCardSave">Save card</button>
-              </div>
+              <p class="pac-note">Debit cards only. Encrypted &amp; never stored by us.</p>
             </form>
           </div>
         </div>
@@ -674,6 +694,6 @@
   <script src="/js/sidebar.js"></script>
   <script src="/js/cif-ach.js?v=20260626c"></script>
   <script src="/js/cif-esign.js?v=20260626c"></script>
-  <script src="/js/payments.js?v=20260627c"></script>
+  <script src="/js/payments.js?v=20260627d"></script>
 </body>
 </html>
