@@ -818,13 +818,21 @@
     clearError();
 
     const form = readPayForm();
-    const err = validatePayForm(form);
-    if (err) { showError(err); return; }
 
-    // Bank (ACH) gets a confirmation modal first (5-business-day notice +
-    // estimated clear date). Card pays immediately, as before.
-    if (form.kind === 'bank') { openAchConfirm(form); return; }
-    doCharge(form);
+    // Bank (ACH) → its own confirm modal (CVV not applicable).
+    if (form.kind === 'bank') {
+      const berr = validatePayForm(form);
+      if (berr) { showError(berr); return; }
+      openAchConfirm(form);
+      return;
+    }
+    // Card → validate everything EXCEPT the CVV (the CVV is entered in the
+    // confirmation modal), then open the confirm modal so a single tap never
+    // silently charges the card.
+    if (!form.vergentCardId) { showError('Please choose a saved card, or add one below.'); return; }
+    if (!form.amount || isNaN(form.amount) || form.amount <= 0) { showError('Please enter a valid amount.'); return; }
+    if (form.amount > 5000) { showError('Amount must be $5,000 or less.'); return; }
+    openCardConfirm(form);
   }
 
   // ---------- ACH confirm modal ----------
@@ -847,6 +855,50 @@
     if (!m) return;
     m.classList.remove('is-open');
     m.hidden = true;
+  }
+
+  // ---------- Card confirm modal (also collects the CVV at authorize time) ----------
+  var _pendingCardForm = null;
+  function openCardConfirm(form) {
+    _pendingCardForm = form;
+    setText(qs('#payCardConfirmAmount'), money(form.amount));
+    var cardLabel = (form.brand || 'Card') + (form.last4 ? ' •• ' + form.last4 : '');
+    setText(qs('#payCardConfirmCard'), cardLabel);
+    setText(qs('#payCardConfirmPay'), 'Confirm & Pay ' + money(form.amount));
+    var cv = qs('#payCvv'); if (cv) cv.value = '';
+    var er = qs('#payCardConfirmError'); if (er) { er.hidden = true; er.textContent = ''; }
+    var m = qs('#payCardConfirmModal');
+    if (!m) {  // modal missing — prompt for CVV so we never charge blind
+      var c = window.prompt('Enter your card security code (CVV) to confirm payment of ' + money(form.amount));
+      if (!c || !/^\d{3,4}$/.test(String(c).trim())) { showError('Please enter the 3- or 4-digit CVV.'); _pendingCardForm = null; return; }
+      form.cvv = String(c).trim(); _pendingCardForm = null; doCharge(form); return;
+    }
+    m.hidden = false;
+    requestAnimationFrame(function () { m.classList.add('is-open'); });
+    setTimeout(function () { var i = qs('#payCvv'); if (i) i.focus(); }, 120);
+  }
+  function closeCardConfirm() {
+    _pendingCardForm = null;
+    var m = qs('#payCardConfirmModal');
+    if (!m) return;
+    m.classList.remove('is-open');
+    m.hidden = true;
+  }
+  function confirmCardPay() {
+    var form = _pendingCardForm;
+    if (!form) return;
+    var cvv = String((qs('#payCvv') || {}).value || '').trim();
+    if (!/^\d{3,4}$/.test(cvv)) {
+      var er = qs('#payCardConfirmError');
+      if (er) { er.textContent = 'Please enter the 3- or 4-digit security code.'; er.hidden = false; }
+      var i = qs('#payCvv'); if (i) i.focus();
+      return;
+    }
+    form.cvv = cvv;
+    _pendingCardForm = null;
+    var m = qs('#payCardConfirmModal');
+    if (m) { m.classList.remove('is-open'); m.hidden = true; }
+    doCharge(form);
   }
 
   function doCharge(form) {
@@ -1228,6 +1280,18 @@
     const achBackdrop = qs('#payAchBackdrop');
     if (achBackdrop) achBackdrop.addEventListener('click', function () {
       _pendingAchForm = null; closeAchConfirm();
+    });
+
+    // Card confirm modal wiring (Confirm & Pay / Cancel / backdrop).
+    const cardConfirmPay = qs('#payCardConfirmPay');
+    if (cardConfirmPay) cardConfirmPay.addEventListener('click', confirmCardPay);
+    const cardConfirmCancel = qs('#payCardConfirmCancel');
+    if (cardConfirmCancel) cardConfirmCancel.addEventListener('click', closeCardConfirm);
+    const cardConfirmBackdrop = qs('#payCardConfirmBackdrop');
+    if (cardConfirmBackdrop) cardConfirmBackdrop.addEventListener('click', closeCardConfirm);
+    const cardConfirmCvv = qs('#payCvv');
+    if (cardConfirmCvv) cardConfirmCvv.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); confirmCardPay(); }
     });
 
     // Add-bank modal wiring.

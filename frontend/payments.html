@@ -290,12 +290,8 @@
                            placeholder="0.00" autocomplete="off">
                   </div>
                 </div>
-                <div class="pay-field-cvv">
-                  <label class="pay-field-label" for="payCvv">CVV</label>
-                  <input type="text" inputmode="numeric" id="payCvv" name="cvv"
-                         class="pay-input pay-input--narrow" placeholder="123"
-                         maxlength="4" autocomplete="cc-csc">
-                </div>
+                <!-- CVV moved into the payment-confirmation modal (entered at
+                     authorize time, bank-style) — see #payCardConfirmModal. -->
               </div>
 
               <p id="payCardAddedNote" hidden class="pay-cardadded-note"></p>
@@ -500,12 +496,6 @@
           <a href="/dashboard.html" class="btn-login">Back to dashboard</a>
           <button type="button" class="btn-apply" id="payTryAgainBtn">Try a different card</button>
         </div>
-        <p style="margin-top:14px;font-size:0.85rem;color:#777">
-          Need help? Call us at
-          <a href="tel:+18889999859" style="color:#15C15D;font-weight:700;text-decoration:none">
-            (888) 999-9859
-          </a>.
-        </p>
       </section>
 
       <!-- Receipt view (shown after a successful charge) -->
@@ -569,6 +559,39 @@
         </div>
       </div>
 
+      <!-- Card payment confirmation modal — shown before a card is charged, so
+           a tap never charges silently. The CVV lives here (authorize-time). -->
+      <div class="profile-modal" id="payCardConfirmModal" hidden>
+        <button type="button" class="profile-modal-backdrop" id="payCardConfirmBackdrop" aria-label="Close"></button>
+        <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="payCardConfirmTitle">
+          <div class="profile-modal-head">
+            <h3 class="profile-modal-title" id="payCardConfirmTitle">Confirm your payment</h3>
+          </div>
+          <div class="profile-modal-body">
+            <p class="profile-modal-intro">
+              You're about to pay <strong id="payCardConfirmAmount">$0.00</strong> with your card
+              <strong id="payCardConfirmCard">card</strong>. Your card will be charged right away.
+            </p>
+            <div class="profile-modal-field">
+              <label class="profile-modal-field-label" for="payCvv">Security code (CVV)</label>
+              <input type="text" inputmode="numeric" id="payCvv" name="cvv"
+                     placeholder="123" maxlength="4" autocomplete="cc-csc"
+                     style="width:120px;padding:12px 14px;border:1px solid #d4dae3;border-radius:10px;font-family:inherit;font-size:1rem;letter-spacing:.18em;background:#fff;color:#1a1a2e">
+              <p style="margin:6px 0 0;font-size:.82rem;color:#6b7280">The 3 digits on the back of your card (4 on the front for Amex).</p>
+            </div>
+            <p class="profile-modal-error" id="payCardConfirmError" hidden></p>
+            <div class="pay-trust" style="margin-top:4px">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Your payment is secure and encrypted.
+            </div>
+            <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+              <button type="button" class="btn-login" id="payCardConfirmCancel">Cancel</button>
+              <button type="button" class="btn-apply" id="payCardConfirmPay">Confirm &amp; Pay</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <p class="pay-help-line">
         Need help? Call us at <a href="tel:+18889999859">(888) 999-9859</a> or visit any Cash in Flash location.
       </p>
@@ -620,6 +643,6 @@
   <script src="/js/sidebar.js"></script>
   <script src="/js/cif-ach.js?v=20260626c"></script>
   <script src="/js/cif-esign.js?v=20260626c"></script>
-  <script src="/js/payments.js?v=20260627b"></script>
+  <script src="/js/payments.js?v=20260627c"></script>
 </body>
 </html>
