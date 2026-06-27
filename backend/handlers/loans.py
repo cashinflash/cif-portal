@@ -4106,6 +4106,69 @@ def get_reapply_my_status(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+SUPPORT_REASONS = {
+    "general": "General question",
+    "loan": "Loan question",
+    "payment": "Payment question",
+    "technical": "Technical support",
+    "other": "Other",
+}
+
+
+def submit_support(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/my-support — a signed-in customer sends a support message.
+    Identity comes from the JWT (no re-typing); emailed to info@cashinflash.com
+    via Resend, with reply-to set to the customer so the team can reply directly."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"error": "unauthorized"})
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        return _json_response(400, {"error": "bad_body"})
+    reason = SUPPORT_REASONS.get(str(body.get("reason") or "").strip().lower(), "General question")
+    message = str(body.get("message") or "").strip()
+    if len(message) < 2:
+        return _json_response(400, {"error": "empty_message"})
+    message = message[:5000]
+    name = ((claims.get("given_name") or "") + " " + (claims.get("family_name") or "")).strip() or "(no name)"
+    email = (claims.get("email") or "").strip()
+    phone = (claims.get("phone_number") or "").strip()
+
+    def esc(s):
+        return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    row = ("<tr><td style=\"padding:4px 14px 4px 0;color:#6b7280\">{}</td>"
+           "<td style=\"color:#0f2a20\"><b>{}</b></td></tr>")
+    html = (
+        "<div style=\"font-family:Arial,Helvetica,sans-serif\">"
+        "<h2 style=\"margin:0 0 14px;color:#0E8741\">Portal support request</h2>"
+        "<table style=\"font-size:14px;border-collapse:collapse\">"
+        + row.format("Reason", esc(reason))
+        + row.format("Customer", esc(name))
+        + row.format("Email", esc(email or "—"))
+        + row.format("Phone", esc(phone or "—"))
+        + row.format("Vergent ID", esc(cid))
+        + "</table>"
+        "<p style=\"font-size:13px;color:#6b7280;margin:16px 0 6px\">Message</p>"
+        "<div style=\"font-size:15px;line-height:1.55;white-space:pre-wrap;color:#111\">"
+        + esc(message).replace("\n", "<br>") + "</div></div>"
+    )
+    text = ("Portal support request\n"
+            f"Reason: {reason}\nCustomer: {name}\nEmail: {email or '-'}\n"
+            f"Phone: {phone or '-'}\nVergent ID: {cid}\n\nMessage:\n{message}")
+    send_kwargs = dict(to="info@cashinflash.com",
+                       subject=f"Portal support: {reason} — {name}", html=html, text=text)
+    if "@" in email:
+        send_kwargs["reply_to"] = email
+    ok, code, detail = resend_email.send(**send_kwargs)
+    if not ok:
+        log.warning("support email failed code=%s detail=%s", code, detail)
+        return _json_response(502, {"error": "send_failed"})
+    return _json_response(200, {"ok": True})
+
+
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     # Keep-warm ping (EventBridge schedule) — return immediately so the
     # container stays warm without touching Vergent.
@@ -4152,6 +4215,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return submit_reapply(event)
         if path.endswith("/my-reapply/status") and method == "GET":
             return get_reapply_my_status(event)
+        if path.endswith("/my-support") and method == "POST":
+            return submit_support(event)
         if path.endswith("/my-loans/active") and method == "GET":
             return get_active_loan(event)
         if path.endswith("/my-loans/activity") and method == "GET":

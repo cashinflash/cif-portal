@@ -80,6 +80,7 @@ jobs:
             "GET /api/my-reapply/prefill"
             "POST /api/my-reapply/submit"
             "GET /api/my-reapply/status"
+            "POST /api/my-support"
             "GET /api/my-esign/pending"
             "POST /api/my-esign/resend"
             "GET /api/my-esign/document"
