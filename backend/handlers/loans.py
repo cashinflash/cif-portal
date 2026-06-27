@@ -1998,6 +1998,40 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
             break
     disb["outstandingHeaderScrubbed"] = hdr_all
     out["disbursementProbe"] = disb
+
+    # Payment-plan schedule probe (Vergent DynamicRepaymentPlan/GetExistingSchedule).
+    # Enroll a TEST loan in a payment plan in Vergent, then run this to capture
+    # the exact installment shape (dates + amounts) and which loan-id the
+    # endpoint expects. Schedule data is amounts/dates only — no PII. Temporary.
+    plan: Dict[str, Any] = {}
+    out_rec = None
+    for rec in raw_loans:
+        h5 = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
+        if isinstance(h5, dict) and h5.get("IsStatusOutstanding"):
+            out_rec = h5
+            break
+    if isinstance(out_rec, dict):
+        cand_ids: List[Any] = []
+        for k in ("hdr_id", "HdrId", "LoanId", "loanId", "Id", "id",
+                  "PublicLoanId", "LoanNumber", "loanNumber"):
+            v = out_rec.get(k)
+            if v not in (None, "", 0) and v not in cand_ids:
+                cand_ids.append(v)
+        plan["candidateIds"] = cand_ids
+        for lid in cand_ids[:4]:
+            path = f"/V1/DynamicRepaymentPlan/{lid}/GetExistingSchedule"
+            try:
+                stp, bodyp = _v1_get(path)
+            except Exception as excp:
+                plan[path] = {"error": str(excp)[:120]}
+                continue
+            entry: Dict[str, Any] = {"status": stp}
+            if isinstance(bodyp, (dict, list)):
+                entry["body"] = bodyp
+            elif bodyp is not None:
+                entry["snippet"] = str(bodyp)[:400]
+            plan[path] = entry
+    out["paymentPlanProbe"] = plan
     return out
 
 
