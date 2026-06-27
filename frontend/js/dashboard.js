@@ -407,7 +407,10 @@
     var state = d && d.state;
     var slot = reapplySlot();
     if (state === 'pending') {
-      reapplyHideApplyCtas(true);
+      // Keep the Apply button visible — tapping it opens the friendly
+      // "application is being reviewed" gate (consistent with the Loans
+      // page) rather than the form. The card below just informs.
+      reapplyHideApplyCtas(false);
       var amt = d.amount ? (' for ' + String(d.amount).replace(/[^0-9$.,]/g, '')) : '';
       slot.innerHTML =
         '<div style="background:linear-gradient(135deg,#f1faf5,#e7f6ee);border:1px solid #cfead9;' +

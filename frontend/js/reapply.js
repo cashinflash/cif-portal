@@ -183,20 +183,26 @@
   function blockMessage(kind) {
     var ld = $('#rlLoading'); if (ld) ld.hidden = true;
     var wz = $('#rlWizard'); if (wz) wz.hidden = true;
-    var title, msg;
+    var icon, title, msg;
     if (kind === 'active') {
+      icon = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>';
       title = 'You already have an active loan';
       msg = 'You can request a new loan once your current one is paid off. Head to your dashboard to manage it.';
     } else {
+      icon = '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>';
       title = 'Your application is being reviewed';
-      msg = 'You already have an application in review — we’ll email or text you with a decision. No need to apply again.';
+      msg = 'We’ve got your application and we’re reviewing it now — we’ll email or text you with a decision. No need to apply again.';
     }
     var slot = $('#rlError');
-    if (slot) {
-      slot.hidden = false;
-      slot.innerHTML = '<h2>' + title + '</h2><p class="rl-sub">' + msg + '</p>' +
-        '<a class="rl-btn" href="/dashboard.html" style="text-decoration:none;">Back to dashboard</a>';
-    }
+    if (!slot) return;
+    slot.hidden = false;
+    slot.className = 'rl-card rl-done';  // reuse the centered, polished layout
+    slot.innerHTML =
+      '<div class="rl-done-ico" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 24 24" ' +
+      'fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+      icon + '</svg></div>' +
+      '<h2>' + title + '</h2><p>' + msg + '</p>' +
+      '<a class="rl-btn" href="/dashboard.html" style="text-decoration:none;">Back to dashboard</a>';
   }
 
   // Vergent bank-on-file (read-only) — helps the customer eyeball-match
