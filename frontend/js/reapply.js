@@ -477,17 +477,16 @@
   // so the customer never leaves the re-apply flow.
   function clearAddCardErr() { var e = $('#rlAddCardErr'); if (e) { e.hidden = true; e.textContent = ''; } }
   function showAddCardErr(msg) { var e = $('#rlAddCardErr'); if (e) { e.textContent = msg; e.hidden = false; } }
+  function closeAddCardModal() { var box = $('#rlAddCard'); if (box) box.hidden = true; clearAddCardErr(); }
   function wireAddCard() {
     var toggle = $('#rlAddCardToggle'), box = $('#rlAddCard');
     if (!toggle || !box) return;
     toggle.addEventListener('click', function () {
-      box.hidden = !box.hidden;
-      toggle.textContent = box.hidden ? '+ Add a debit card' : 'Cancel';
-      if (!box.hidden) { var f = $('#rlCardNumber'); if (f) { try { f.focus(); } catch (e) {} } }
+      box.hidden = false; clearAddCardErr();
+      var f = $('#rlCardNumber'); if (f) { try { f.focus(); } catch (e) {} }
     });
-    var cancel = $('#rlAddCardCancel');
-    if (cancel) cancel.addEventListener('click', function () {
-      box.hidden = true; toggle.textContent = '+ Add a debit card'; clearAddCardErr();
+    ['rlAddCardCancel', 'rlAddCardClose', 'rlAddCardBackdrop'].forEach(function (id) {
+      var el = $('#' + id); if (el) el.addEventListener('click', closeAddCardModal);
     });
     var num = $('#rlCardNumber');
     if (num) num.addEventListener('input', function () {
@@ -528,7 +527,7 @@
         var newLast4 = (r.data && r.data.last4) || '';
         ['rlCardNumber', 'rlCardExp', 'rlCardName', 'rlCardZip'].forEach(function (id) { var el = $('#' + id); if (el) el.value = ''; });
         var box = $('#rlAddCard'); if (box) box.hidden = true;
-        var toggle = $('#rlAddCardToggle'); if (toggle) toggle.textContent = '+ Add a debit card';
+        clearAddCardErr();
         api('/api/my-cards').then(function (cr) {
           var cards = (cr.data && cr.data.cards) || [];
           if (newLast4) {
