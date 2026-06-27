@@ -635,10 +635,28 @@
   // ---------- Step 3: amount ----------
   function fmtUsd(n) { return '$' + Number(n).toLocaleString('en-US'); }
 
+  // The slider snaps to these exact tiers. 225 -> 255 is a $30 jump, so a
+  // uniform native `step` can't express it — the slider is index-based and we
+  // map index <-> tier.
+  var AMT_STEPS = [100, 125, 150, 175, 200, 225, 255];
+  function nearestStep(v) {
+    v = parseInt(v, 10) || AMT_STEPS[0];
+    var best = AMT_STEPS[0], bd = Infinity;
+    for (var i = 0; i < AMT_STEPS.length; i++) {
+      var d = Math.abs(AMT_STEPS[i] - v);
+      if (d < bd) { bd = d; best = AMT_STEPS[i]; }
+    }
+    return best;
+  }
+
   function setAmount(v) {
-    v = Math.max(state.min, Math.min(state.max, parseInt(v, 10) || state.min));
+    v = nearestStep(v);
     state.amount = v;
-    var slider = $('#rlSlider'); if (slider && parseInt(slider.value, 10) !== v) slider.value = v;
+    var slider = $('#rlSlider');
+    if (slider) {
+      var idx = AMT_STEPS.indexOf(v);
+      if (idx >= 0 && parseInt(slider.value, 10) !== idx) slider.value = idx;
+    }
     var val = $('#rlAmountVal'); if (val) val.textContent = fmtUsd(v);
     Array.prototype.forEach.call(document.querySelectorAll('.rl-chip'), function (c) {
       c.classList.toggle('is-sel', parseInt(c.getAttribute('data-amt'), 10) === v);
@@ -648,11 +666,13 @@
   function setupAmount() {
     var slider = $('#rlSlider');
     if (slider) {
-      slider.min = state.min; slider.max = state.max; slider.step = 5; slider.value = state.amount;
-      slider.addEventListener('input', function () { setAmount(this.value); });
+      slider.min = 0; slider.max = AMT_STEPS.length - 1; slider.step = 1;
+      var startIdx = AMT_STEPS.indexOf(nearestStep(state.amount));
+      slider.value = startIdx >= 0 ? startIdx : (AMT_STEPS.length - 1);
+      slider.addEventListener('input', function () { setAmount(AMT_STEPS[parseInt(this.value, 10)]); });
     }
-    var lo = $('#rlAmtLo'); if (lo) lo.textContent = fmtUsd(state.min);
-    var hi = $('#rlAmtHi'); if (hi) hi.textContent = fmtUsd(state.max);
+    var lo = $('#rlAmtLo'); if (lo) lo.textContent = fmtUsd(AMT_STEPS[0]);
+    var hi = $('#rlAmtHi'); if (hi) hi.textContent = fmtUsd(AMT_STEPS[AMT_STEPS.length - 1]);
     Array.prototype.forEach.call(document.querySelectorAll('.rl-chip'), function (c) {
       c.addEventListener('click', function () { setAmount(this.getAttribute('data-amt')); });
     });
