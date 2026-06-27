@@ -225,8 +225,10 @@
          base `.rl-title-brk{display:none}` regardless of source order. */
       .rl-title { text-align:center; }
       .rl-title .rl-title-brk { display:inline; }
-      /* keep "Confirm your details" on one line beside the Edit button
-         (1.15rem fits even on 360px-wide phones) */
+      /* on mobile, stack + center "Confirm your details" with the Edit button
+         centered below it; title stays one line (1.15rem fits 360px) */
+      .rl-step1-head { flex-direction:column; align-items:center; gap:10px; }
+      .rl-step1-headtext { text-align:center; }
       .rl-step1-head h2 { font-size:1.15rem; }
     }
 
