@@ -6,12 +6,13 @@ name: Provision custom domain (my.cashinflash.com)
 #            and prints the DNS validation record. Add that record at your
 #            DNS host, then wait for ACM to mark the cert ISSUED.
 #   Run #2 : once the cert is ISSUED, attaches the domain + cert to the
-#            CloudFront distribution as an alias and prints the FINAL DNS
-#            record (DOMAIN -> the distribution domain). Add that record.
+#            CloudFront distribution as an alias, sets DefaultRootObject to
+#            login.html (the portal has no index.html), invalidates, and
+#            prints the FINAL DNS record (DOMAIN -> the distribution domain).
 #
-# Safe to re-run any time: it only ever mutates the distribution's Aliases
-# and ViewerCertificate. The existing *.cloudfront.net domain keeps working
-# the whole time (it is the distribution's default domain, not an alias).
+# Safe to re-run any time: it only mutates the distribution's Aliases,
+# ViewerCertificate, and DefaultRootObject. The existing *.cloudfront.net
+# domain keeps working the whole time.
 
 on:
   workflow_dispatch:
@@ -24,6 +25,10 @@ on:
         description: "CloudFront distribution id"
         required: true
         default: "EOV9K12LFKK8T"
+      default_root_object:
+        description: "Object served at the bare domain root"
+        required: true
+        default: "login.html"
 
 env:
   AWS_REGION: us-east-1
@@ -67,7 +72,6 @@ jobs:
           ARN: ${{ steps.cert.outputs.arn }}
         run: |
           set -euo pipefail
-          # ACM populates the validation ResourceRecord asynchronously; poll briefly.
           STATUS=""; VNAME=""; VVALUE=""; VTYPE=""
           for i in 1 2 3 4 5 6; do
             DESC=$(aws acm describe-certificate --region us-east-1 --certificate-arn "$ARN")
@@ -80,7 +84,6 @@ jobs:
             sleep 5
           done
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-          # Echo to the log in an easy-to-grep block, AND to the run summary.
           echo "::group::VALIDATION RECORD"
           echo "VALIDATION_STATUS=$STATUS"
           echo "VALIDATION_TYPE=$VTYPE"
@@ -133,35 +136,28 @@ jobs:
           done
           echo "RESULT: published-and-correct=$MATCH"
           echo "::endgroup::"
-          {
-            echo ""
-            echo "### DNS check for the validation record"
-            echo "- Host: \`$VNAME_NODOT\`"
-            echo "- Expected target: \`$VVALUE\`"
-            if [ "$MATCH" = "yes" ]; then
-              echo "- ✅ The record **is published and correct** — ACM just needs a little more time. Re-run shortly."
-            else
-              echo "- ❌ The record is **not resolving yet** (missing, wrong Host, or still propagating). Double-check the Namecheap entry."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Attach alias + certificate to CloudFront (only when ISSUED)
+      - name: Attach alias + cert + default root object (only when ISSUED)
         if: steps.status.outputs.status == 'ISSUED'
         env:
           ARN: ${{ steps.cert.outputs.arn }}
           DOMAIN: ${{ inputs.domain }}
           DIST: ${{ inputs.distribution_id }}
+          DRO: ${{ inputs.default_root_object }}
         run: |
           set -euo pipefail
           aws cloudfront get-distribution-config --id "$DIST" > dist.json
           ETAG=$(jq -r '.ETag' dist.json)
+          OLD_DRO=$(jq -r '.DistributionConfig.DefaultRootObject // ""' dist.json)
           jq '.DistributionConfig' dist.json > cfg.json
+          echo "Current DefaultRootObject: '${OLD_DRO:-<empty>}'  ->  '$DRO'"
 
-          # Add the domain to Aliases (idempotent) and point ViewerCertificate
-          # at the ACM cert. Everything else in the config is preserved verbatim.
-          jq --arg d "$DOMAIN" --arg arn "$ARN" '
+          # Add the domain to Aliases (idempotent), point ViewerCertificate at
+          # the ACM cert, and set the bare-root object. Rest preserved verbatim.
+          jq --arg d "$DOMAIN" --arg arn "$ARN" --arg dro "$DRO" '
             .Aliases.Items = ((.Aliases.Items // []) + [$d] | unique)
             | .Aliases.Quantity = (.Aliases.Items | length)
+            | .DefaultRootObject = $dro
             | .ViewerCertificate = {
                 "ACMCertificateArn": $arn,
                 "SSLSupportMethod": "sni-only",
@@ -174,6 +170,8 @@ jobs:
           aws cloudfront update-distribution --id "$DIST" \
             --distribution-config file://newcfg.json \
             --if-match "$ETAG" --no-cli-pager > /dev/null
+          aws cloudfront create-invalidation --distribution-id "$DIST" \
+            --paths "/" "/index.html" --no-cli-pager > /dev/null
 
           CF_DOMAIN=$(aws cloudfront get-distribution --id "$DIST" \
             --query 'Distribution.DomainName' --output text)
@@ -184,15 +182,35 @@ jobs:
           echo "::endgroup::"
           {
             echo "## ✅ CloudFront updated"
-            echo "Alias **$DOMAIN** + ACM certificate attached to distribution \`$DIST\`."
+            echo "Alias **$DOMAIN** + ACM cert attached; DefaultRootObject set to \`$DRO\`."
             echo ""
-            echo "### Step 2 (final) — add this DNS record at your DNS host"
-            echo ""
+            echo "### Final DNS record (if not already added)"
             echo "| Type | Name / Host | Value / Target |"
             echo "|---|---|---|"
             echo "| CNAME | \`$DOMAIN\` | \`$CF_DOMAIN\` |"
             echo ""
-            echo "CloudFront takes ~5–15 min to deploy. After that **https://$DOMAIN** serves the portal."
+            echo "CloudFront takes ~5–15 min to deploy the config change. After that the"
+            echo "bare **https://$DOMAIN** serves \`$DRO\` (no more Access Denied at root)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify — what do the domains return right now?
+        if: always()
+        env:
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -euo pipefail
+          echo "::group::HTTP STATUS CHECK (note: config changes take ~5-15 min to deploy)"
+          for URL in \
+            "https://$DOMAIN/" \
+            "https://$DOMAIN/login.html" \
+            "https://d1zucrj1ouu3c.cloudfront.net/" \
+            "https://d1zucrj1ouu3c.cloudfront.net/login.html"; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 25 "$URL" 2>/dev/null || echo "ERR")
+            printf '%-6s %s\n' "$CODE" "$URL"
+          done
+          echo "::endgroup::"
+          {
             echo ""
-            echo "Then run **Set portal origin** with \`https://$DOMAIN\` to flip CORS + onboarding links."
+            echo "### Live HTTP check (200=ok, 403=AccessDenied, 404=missing)"
+            echo "_Run again in ~10 min if the root still shows 403 — the DefaultRootObject change needs to deploy._"
           } >> "$GITHUB_STEP_SUMMARY"
