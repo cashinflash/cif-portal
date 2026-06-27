@@ -272,6 +272,7 @@
       if (box && box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
+    setDetailsLocked(true);  // auto-"Done": re-lock the fields when advancing
     showStep(2);
   }
 
