@@ -42,6 +42,45 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
   <link rel="stylesheet" href="/css/dashboard.css?v=20260627b">
+  <style>
+    /* Card payment confirmation modal — centered (not a bottom-sheet) + lively. */
+    .pay-cc-modal { align-items: center !important; padding: 18px; }
+    .pay-cc-card { width: min(380px, calc(100vw - 32px)) !important; align-self: center !important;
+      border-radius: 22px !important; overflow: hidden; max-height: calc(100vh - 40px) !important; }
+    @media (max-width: 640px) {
+      .pay-cc-card { width: calc(100vw - 36px) !important; border-radius: 22px !important; align-self: center !important; }
+    }
+    .pay-cc-hero { background: linear-gradient(150deg, #19a64f 0%, #0E8741 60%, #0b6a35 100%);
+      color: #fff; text-align: center; padding: 26px 24px 22px; position: relative; }
+    .pay-cc-hero::after { content: ""; position: absolute; right: -30px; top: -30px; width: 120px; height: 120px;
+      border-radius: 50%; background: rgba(255,255,255,.08); }
+    .pay-cc-hero-ico { position: relative; z-index: 1; width: 52px; height: 52px; margin: 0 auto 12px;
+      border-radius: 50%; background: rgba(255,255,255,.20); display: flex; align-items: center; justify-content: center; color: #fff; }
+    .pay-cc-title { position: relative; z-index: 1; margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: .01em; opacity: .96; }
+    .pay-cc-amount { position: relative; z-index: 1; font-size: 2.5rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 6px 0 2px; }
+    .pay-cc-cardline { position: relative; z-index: 1; font-size: .9rem; opacity: .92; }
+    .pay-cc-cardline strong { font-weight: 700; }
+    .pay-cc-body { padding: 22px; background: #fff; }
+    .pay-cc-cvvlabel { display: block; font-size: .82rem; font-weight: 700; color: #33414e; margin: 0 0 9px; text-align: center; }
+    .pay-cc-cvv { display: block; width: 150px; margin: 0 auto; text-align: center; letter-spacing: .45em;
+      text-indent: .45em; font-size: 1.4rem; font-weight: 800; padding: 13px 10px; border: 1.5px solid #d4dae3;
+      border-radius: 13px; font-family: inherit; color: #0f2a20; background: #fbfdfc; transition: border-color .15s, box-shadow .15s; }
+    .pay-cc-cvv:focus { outline: none; border-color: #0E8741; box-shadow: 0 0 0 3.5px rgba(14,135,65,.14); background: #fff; }
+    .pay-cc-hint { text-align: center; font-size: .82rem; color: #6b7280; margin: 9px 0 0; }
+    .pay-cc-err { text-align: center; margin-top: 10px; }
+    .pay-cc-secure { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: .8rem;
+      color: #0E8741; font-weight: 600; margin: 16px 0 0; }
+    .pay-cc-actions { display: flex; gap: 10px; margin-top: 18px; }
+    .pay-cc-cancel { flex: 0 0 auto; background: #fff !important; border: 1.5px solid #dde3e8 !important;
+      color: #33414e !important; border-radius: 13px; padding: 13px 18px; font-family: inherit; font-weight: 800;
+      font-size: .95rem; cursor: pointer; }
+    .pay-cc-cancel:hover { background: #f7f9fa !important; }
+    /* !important so dashboard.css / portal.css's global button rules don't flatten the gradient */
+    .pay-cc-pay { flex: 1; background: linear-gradient(180deg, #0E8741, #0C7137) !important; color: #fff !important;
+      border: none !important; border-radius: 13px; padding: 14px 18px; font-family: inherit; font-weight: 800;
+      font-size: 1rem; cursor: pointer; box-shadow: 0 6px 16px rgba(14,135,65,.24); transition: filter .15s, box-shadow .15s; }
+    .pay-cc-pay:hover { filter: brightness(1.05); box-shadow: 0 8px 20px rgba(14,135,65,.30); }
+  </style>
   <script>
     (function(){
       try {
@@ -559,34 +598,26 @@
         </div>
       </div>
 
-      <!-- Card payment confirmation modal — shown before a card is charged, so
-           a tap never charges silently. The CVV lives here (authorize-time). -->
-      <div class="profile-modal" id="payCardConfirmModal" hidden>
+      <!-- Card payment confirmation modal — centered, lively; charged only on
+           Confirm. CVV is entered here (authorize-time). -->
+      <div class="profile-modal pay-cc-modal" id="payCardConfirmModal" hidden>
         <button type="button" class="profile-modal-backdrop" id="payCardConfirmBackdrop" aria-label="Close"></button>
-        <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="payCardConfirmTitle">
-          <div class="profile-modal-head">
-            <h3 class="profile-modal-title" id="payCardConfirmTitle">Confirm your payment</h3>
+        <div class="profile-modal-card pay-cc-card" role="dialog" aria-modal="true" aria-labelledby="payCardConfirmTitle">
+          <div class="pay-cc-hero">
+            <span class="pay-cc-hero-ico" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>
+            <h3 class="pay-cc-title" id="payCardConfirmTitle">Confirm your payment</h3>
+            <div class="pay-cc-amount" id="payCardConfirmAmount">$0.00</div>
+            <div class="pay-cc-cardline">to <strong id="payCardConfirmCard">your card</strong></div>
           </div>
-          <div class="profile-modal-body">
-            <p class="profile-modal-intro">
-              You're about to pay <strong id="payCardConfirmAmount">$0.00</strong> with your card
-              <strong id="payCardConfirmCard">card</strong>. Your card will be charged right away.
-            </p>
-            <div class="profile-modal-field">
-              <label class="profile-modal-field-label" for="payCvv">Security code (CVV)</label>
-              <input type="text" inputmode="numeric" id="payCvv" name="cvv"
-                     placeholder="123" maxlength="4" autocomplete="cc-csc"
-                     style="width:120px;padding:12px 14px;border:1px solid #d4dae3;border-radius:10px;font-family:inherit;font-size:1rem;letter-spacing:.18em;background:#fff;color:#1a1a2e">
-              <p style="margin:6px 0 0;font-size:.82rem;color:#6b7280">The 3 digits on the back of your card (4 on the front for Amex).</p>
-            </div>
-            <p class="profile-modal-error" id="payCardConfirmError" hidden></p>
-            <div class="pay-trust" style="margin-top:4px">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Your payment is secure and encrypted.
-            </div>
-            <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-              <button type="button" class="btn-login" id="payCardConfirmCancel">Cancel</button>
-              <button type="button" class="btn-apply" id="payCardConfirmPay">Confirm &amp; Pay</button>
+          <div class="pay-cc-body">
+            <label class="pay-cc-cvvlabel" for="payCvv">Enter your security code to authorize</label>
+            <input type="text" inputmode="numeric" id="payCvv" name="cvv" class="pay-cc-cvv" placeholder="•••" maxlength="4" autocomplete="cc-csc" aria-label="Card security code (CVV)">
+            <p class="pay-cc-hint">The 3 digits on the back of your card.</p>
+            <p class="profile-modal-error pay-cc-err" id="payCardConfirmError" hidden></p>
+            <div class="pay-cc-secure"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Secure &amp; encrypted</div>
+            <div class="pay-cc-actions">
+              <button type="button" class="pay-cc-cancel" id="payCardConfirmCancel">Cancel</button>
+              <button type="button" class="pay-cc-pay" id="payCardConfirmPay">Confirm &amp; Pay</button>
             </div>
           </div>
         </div>

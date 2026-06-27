@@ -2032,6 +2032,30 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
                 entry["snippet"] = str(bodyp)[:400]
             plan[path] = entry
     out["paymentPlanProbe"] = plan
+
+    # Funding-method probe (Vergent GetFundingStatus → Results[].FundingMethod).
+    # Run on a CARD-disbursed loan and a CASH-disbursed loan and compare the
+    # FundingMethod value to find the card-vs-cash signal. Methods/ids only —
+    # no PII. Temporary.
+    fund: Dict[str, Any] = {"hdr": out_hdr}
+    if out_hdr:
+        for path in (f"/V1/GetFundingStatus?HdrId={out_hdr}",
+                     f"/V1/GetFundingStatus?hdrId={out_hdr}",
+                     f"/V1/GetFundingStatus?TrackingNumber={out_hdr}",
+                     f"/V1/GetFundingStatus/{out_hdr}",
+                     f"/V1/{out_hdr}/GetFundingStatus"):
+            try:
+                stf, bodyf = _v1_get(path)
+            except Exception as excf:
+                fund[path] = {"error": str(excf)[:120]}
+                continue
+            entry2: Dict[str, Any] = {"status": stf}
+            if isinstance(bodyf, (dict, list)):
+                entry2["body"] = bodyf
+            elif bodyf is not None:
+                entry2["snippet"] = str(bodyf)[:400]
+            fund[path] = entry2
+    out["fundingProbe"] = fund
     return out
 
 
