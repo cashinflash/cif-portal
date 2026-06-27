@@ -628,6 +628,16 @@
     if (_gmapsP) return _gmapsP;
     _gmapsP = new Promise(function (resolve, reject) {
       if (window.google && window.google.maps && window.google.maps.importLibrary) return resolve();
+      // Surface Google auth failures (wrong/missing API enabled, billing off,
+      // bad key, or this site not in the key's HTTP-referrer allowlist).
+      try {
+        window.gm_authFailure = function () {
+          console.error('[reapply] Google Maps auth FAILED (gm_authFailure): ' +
+            'check that "Places API (New)" AND "Maps JavaScript API" are enabled, ' +
+            'billing is on, and this site is in the key’s HTTP-referrer allowlist. ' +
+            'Look just above for the specific *MapError.');
+        };
+      } catch (e) {}
       var s = document.createElement('script');
       s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) + '&v=weekly&libraries=places&loading=async';
       s.async = true;
@@ -667,7 +677,11 @@
       input.addEventListener('input', onInput);
       input.addEventListener('keydown', onKey);
       document.addEventListener('click', function (e) { if (!box.contains(e.target)) closeMenu(); });
-    }).catch(function () { /* graceful: plain field stays usable */ });
+    }).catch(function (e) {
+      console.error('[reapply] Google Maps failed to load:', (e && e.message) || e,
+        '\nCheck the key, that "Maps JavaScript API" is enabled, and the HTTP-referrer restriction allows this site.');
+      /* graceful: plain field stays usable */
+    });
 
     function onInput() {
       if (input.readOnly) return;
@@ -685,8 +699,17 @@
         sessionToken: token,
       }).then(function (res) {
         items = (res && res.suggestions) || [];
+        if (!items.length) {
+          console.warn('[reapply] address autocomplete: 0 suggestions (request OK). ' +
+            'If this is every query, confirm "Places API (New)" is enabled + billing is on.');
+        }
         renderMenu();
-      }).catch(function () { closeMenu(); });
+      }).catch(function (e) {
+        console.error('[reapply] address autocomplete request FAILED:', (e && e.message) || e,
+          '\nFix: enable "Places API (New)" + "Maps JavaScript API", turn on billing, and add this ' +
+          'site to the key’s HTTP-referrer allowlist (must include the CloudFront URL while testing).');
+        closeMenu();
+      });
     }
     function predText(p, which) {
       var f = p && p[which];

@@ -126,6 +126,9 @@
         // No active loan — surface the "Need extra cash?" cross-sell banner.
         var bannerEmpty = document.querySelector('.app-loan-banner');
         if (bannerEmpty) bannerEmpty.style.display = '';
+        // No active loan to pay → drop the card/bank selector radios (the saved
+        // methods read as a plain "wallet" list instead).
+        document.body.classList.add('cif-pay-no-active');
         return null;
       }
       const loan = data.loan;
@@ -134,6 +137,8 @@
       // Gate the "Need extra cash?" banner: never offer a new loan while an
       // active loan with a balance is open.
       var hasActiveLoan = !!(loan && Number(loan.balance) > 0);
+      // Selector radios only make sense when there's a balance to pay.
+      document.body.classList.toggle('cif-pay-no-active', !hasActiveLoan);
       var bannerActive = document.querySelector('.app-loan-banner');
       if (bannerActive) bannerActive.style.display = hasActiveLoan ? 'none' : '';
       setText(qs('[data-pay-loan-id]', card), (loan.publicId || loan.id || '—'));

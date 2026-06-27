@@ -41,7 +41,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260620b">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260627a">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260627b">
   <!-- Plaid Link SDK (same as dashboard.html) -->
   <script async src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
   <script>
@@ -62,12 +62,21 @@
        Mobile-first; --rl-grn brand green throughout. */
     :root { --rl-grn:#0E8741; --rl-grn-d:#0C7137; --rl-ink:#0f2a20; --rl-mut:#6b7280; }
     .rl-main { padding-bottom:56px; max-width:560px; margin:0 auto; }
-    .rl-loading { text-align:center; color:var(--rl-mut); min-height:58vh;
-      display:flex; flex-direction:column; align-items:center; justify-content:center; padding:30px 0; }
+    /* display:flex lives on :not([hidden]) so setting hidden actually hides it
+       (a bare .rl-loading{display:flex} would override the [hidden] attribute). */
+    .rl-loading { text-align:center; color:var(--rl-mut); }
+    .rl-loading:not([hidden]) { min-height:58vh; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; padding:30px 0; }
     .rl-loading p { font-size:1.05rem; font-weight:700; color:var(--rl-ink); margin:0; }
-    .rl-spinner { width:38px; height:38px; margin:0 auto 16px; border:3px solid rgba(14,135,65,.18);
-      border-top-color:var(--rl-grn); border-radius:50%; animation:rlspin .8s linear infinite; }
-    @keyframes rlspin { to { transform:rotate(360deg); } }
+    /* Spinning "cash coin" loader */
+    .rl-coin { width:62px; height:62px; margin:0 auto 18px; perspective:180px; }
+    .rl-coin-face { width:100%; height:100%; border-radius:50%;
+      background:radial-gradient(circle at 34% 28%, #34c172, #0E8741 72%);
+      color:#fff; font-weight:900; font-size:1.85rem; line-height:1;
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:0 8px 18px rgba(14,135,65,.30), inset 0 0 0 3px rgba(255,255,255,.30);
+      animation:rlcoin 1.4s linear infinite; }
+    @keyframes rlcoin { from { transform:rotateY(0deg); } to { transform:rotateY(360deg); } }
 
     /* Stepper with connecting track */
     .rl-steps { display:flex; align-items:flex-start; list-style:none; padding:0;
@@ -216,6 +225,9 @@
          base `.rl-title-brk{display:none}` regardless of source order. */
       .rl-title { text-align:center; }
       .rl-title .rl-title-brk { display:inline; }
+      /* keep "Confirm your details" on one line beside the Edit button
+         (1.15rem fits even on 360px-wide phones) */
+      .rl-step1-head h2 { font-size:1.15rem; }
     }
 
     /* Win against portal.css's global .dashboard-page button rules, which
@@ -340,7 +352,7 @@
     <div class="rl-main">
 
     <div id="rlLoading" class="rl-loading">
-      <div class="rl-spinner" aria-label="Loading"></div>
+      <div class="rl-coin" aria-label="Loading"><div class="rl-coin-face">$</div></div>
       <p>Let's get you some cash…</p>
     </div>
 
@@ -486,6 +498,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/reapply.js?v=20260627i"></script>
+  <script src="/js/reapply.js?v=20260627j"></script>
 </body>
 </html>

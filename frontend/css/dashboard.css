@@ -2397,6 +2397,12 @@ button.dash-doc-download:disabled {
   cursor: pointer;
   accent-color: var(--cif-green, #0E8741);
 }
+/* No active loan to pay: payment methods read as a plain wallet list —
+   hide the selector radios and the selectable affordance (hover/selected). */
+body.cif-pay-no-active .pay-method input[type="radio"] { display: none; }
+body.cif-pay-no-active .pay-method { cursor: default; }
+body.cif-pay-no-active .pay-method:hover { border-color: #d1d5db; }
+body.cif-pay-no-active .pay-method.is-selected { border-color: #d1d5db; box-shadow: none; }
 .pay-method-body { flex: 1; line-height: 1.3; }
 .pay-method-brand {
   font-weight: 700;
