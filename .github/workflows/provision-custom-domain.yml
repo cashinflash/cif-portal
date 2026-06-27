@@ -106,6 +106,45 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Diagnose — does the validation record resolve? (only when not ISSUED)
+        if: steps.status.outputs.status != 'ISSUED'
+        env:
+          ARN: ${{ steps.cert.outputs.arn }}
+        run: |
+          set -euo pipefail
+          DESC=$(aws acm describe-certificate --region us-east-1 --certificate-arn "$ARN")
+          VNAME=$(echo "$DESC"  | jq -r '.Certificate.DomainValidationOptions[0].ResourceRecord.Name  // empty')
+          VVALUE=$(echo "$DESC" | jq -r '.Certificate.DomainValidationOptions[0].ResourceRecord.Value // empty')
+          VNAME_NODOT=${VNAME%.}
+          command -v dig >/dev/null 2>&1 || sudo apt-get install -y -q dnsutils >/dev/null 2>&1 || true
+          MATCH="no"
+          echo "::group::DNS RESOLUTION CHECK"
+          echo "Validation host: $VNAME_NODOT"
+          echo "Expected value : $VVALUE"
+          for RES in 8.8.8.8 1.1.1.1; do
+            echo "--- via $RES ---"
+            if command -v dig >/dev/null 2>&1; then
+              OUT=$(dig +short CNAME "$VNAME_NODOT" @"$RES" 2>&1 || true)
+            else
+              OUT=$(nslookup -type=CNAME "$VNAME_NODOT" "$RES" 2>&1 || true)
+            fi
+            echo "${OUT:-<no answer / NXDOMAIN>}"
+            echo "$OUT" | grep -qiF "${VVALUE%.}" && MATCH="yes" || true
+          done
+          echo "RESULT: published-and-correct=$MATCH"
+          echo "::endgroup::"
+          {
+            echo ""
+            echo "### DNS check for the validation record"
+            echo "- Host: \`$VNAME_NODOT\`"
+            echo "- Expected target: \`$VVALUE\`"
+            if [ "$MATCH" = "yes" ]; then
+              echo "- ✅ The record **is published and correct** — ACM just needs a little more time. Re-run shortly."
+            else
+              echo "- ❌ The record is **not resolving yet** (missing, wrong Host, or still propagating). Double-check the Namecheap entry."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Attach alias + certificate to CloudFront (only when ISSUED)
         if: steps.status.outputs.status == 'ISSUED'
         env:
