@@ -1,0 +1,159 @@
+name: Provision custom domain (my.cashinflash.com)
+
+# Idempotent helper to move the portal onto a custom domain.
+#
+#   Run #1 : finds or requests the ACM certificate (us-east-1, DNS-validated)
+#            and prints the DNS validation record. Add that record at your
+#            DNS host, then wait for ACM to mark the cert ISSUED.
+#   Run #2 : once the cert is ISSUED, attaches the domain + cert to the
+#            CloudFront distribution as an alias and prints the FINAL DNS
+#            record (DOMAIN -> the distribution domain). Add that record.
+#
+# Safe to re-run any time: it only ever mutates the distribution's Aliases
+# and ViewerCertificate. The existing *.cloudfront.net domain keeps working
+# the whole time (it is the distribution's default domain, not an alias).
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Custom domain to add"
+        required: true
+        default: "my.cashinflash.com"
+      distribution_id:
+        description: "CloudFront distribution id"
+        required: true
+        default: "EOV9K12LFKK8T"
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find or request ACM certificate (us-east-1)
+        id: cert
+        env:
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -euo pipefail
+          # CloudFront certs MUST live in us-east-1.
+          ARN=$(aws acm list-certificates --region us-east-1 \
+            --query "CertificateSummaryList[?DomainName=='${DOMAIN}'].CertificateArn | [0]" \
+            --output text)
+          if [ "$ARN" = "None" ] || [ -z "$ARN" ]; then
+            echo "No certificate for ${DOMAIN} yet — requesting one (DNS validation)…"
+            ARN=$(aws acm request-certificate --region us-east-1 \
+              --domain-name "${DOMAIN}" \
+              --validation-method DNS \
+              --query CertificateArn --output text)
+            echo "Requested: $ARN"
+          else
+            echo "Reusing existing certificate: $ARN"
+          fi
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Read certificate status + DNS validation record
+        id: status
+        env:
+          ARN: ${{ steps.cert.outputs.arn }}
+        run: |
+          set -euo pipefail
+          # ACM populates the validation ResourceRecord asynchronously; poll briefly.
+          STATUS=""; VNAME=""; VVALUE=""; VTYPE=""
+          for i in 1 2 3 4 5 6; do
+            DESC=$(aws acm describe-certificate --region us-east-1 --certificate-arn "$ARN")
+            STATUS=$(echo "$DESC" | jq -r '.Certificate.Status')
+            VNAME=$(echo "$DESC"  | jq -r '.Certificate.DomainValidationOptions[0].ResourceRecord.Name  // empty')
+            VVALUE=$(echo "$DESC" | jq -r '.Certificate.DomainValidationOptions[0].ResourceRecord.Value // empty')
+            VTYPE=$(echo "$DESC"  | jq -r '.Certificate.DomainValidationOptions[0].ResourceRecord.Type  // empty')
+            if [ -n "$VNAME" ] || [ "$STATUS" = "ISSUED" ]; then break; fi
+            echo "Validation record not populated yet (status=$STATUS); retrying…"
+            sleep 5
+          done
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          # Echo to the log in an easy-to-grep block, AND to the run summary.
+          echo "::group::VALIDATION RECORD"
+          echo "VALIDATION_STATUS=$STATUS"
+          echo "VALIDATION_TYPE=$VTYPE"
+          echo "VALIDATION_NAME=$VNAME"
+          echo "VALIDATION_VALUE=$VVALUE"
+          echo "::endgroup::"
+          {
+            echo "## Certificate status: \`$STATUS\`"
+            echo ""
+            if [ "$STATUS" = "ISSUED" ]; then
+              echo "✅ Certificate is **ISSUED** — the next step attaches it to CloudFront."
+            else
+              echo "### Step 1 — add this DNS record at your DNS host to validate the cert"
+              echo ""
+              echo "| Field | Value |"
+              echo "|---|---|"
+              echo "| **Type** | \`$VTYPE\` |"
+              echo "| **Name / Host** | \`$VNAME\` |"
+              echo "| **Value / Target** | \`$VVALUE\` |"
+              echo ""
+              echo "ACM validates automatically once the record resolves (minutes to ~30 min)."
+              echo "When the cert shows **ISSUED**, re-run this workflow to finish."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach alias + certificate to CloudFront (only when ISSUED)
+        if: steps.status.outputs.status == 'ISSUED'
+        env:
+          ARN: ${{ steps.cert.outputs.arn }}
+          DOMAIN: ${{ inputs.domain }}
+          DIST: ${{ inputs.distribution_id }}
+        run: |
+          set -euo pipefail
+          aws cloudfront get-distribution-config --id "$DIST" > dist.json
+          ETAG=$(jq -r '.ETag' dist.json)
+          jq '.DistributionConfig' dist.json > cfg.json
+
+          # Add the domain to Aliases (idempotent) and point ViewerCertificate
+          # at the ACM cert. Everything else in the config is preserved verbatim.
+          jq --arg d "$DOMAIN" --arg arn "$ARN" '
+            .Aliases.Items = ((.Aliases.Items // []) + [$d] | unique)
+            | .Aliases.Quantity = (.Aliases.Items | length)
+            | .ViewerCertificate = {
+                "ACMCertificateArn": $arn,
+                "SSLSupportMethod": "sni-only",
+                "MinimumProtocolVersion": "TLSv1.2_2021",
+                "Certificate": $arn,
+                "CertificateSource": "acm"
+              }
+          ' cfg.json > newcfg.json
+
+          aws cloudfront update-distribution --id "$DIST" \
+            --distribution-config file://newcfg.json \
+            --if-match "$ETAG" --no-cli-pager > /dev/null
+
+          CF_DOMAIN=$(aws cloudfront get-distribution --id "$DIST" \
+            --query 'Distribution.DomainName' --output text)
+          echo "::group::FINAL DNS RECORD"
+          echo "FINAL_TYPE=CNAME"
+          echo "FINAL_NAME=$DOMAIN"
+          echo "FINAL_VALUE=$CF_DOMAIN"
+          echo "::endgroup::"
+          {
+            echo "## ✅ CloudFront updated"
+            echo "Alias **$DOMAIN** + ACM certificate attached to distribution \`$DIST\`."
+            echo ""
+            echo "### Step 2 (final) — add this DNS record at your DNS host"
+            echo ""
+            echo "| Type | Name / Host | Value / Target |"
+            echo "|---|---|---|"
+            echo "| CNAME | \`$DOMAIN\` | \`$CF_DOMAIN\` |"
+            echo ""
+            echo "CloudFront takes ~5–15 min to deploy. After that **https://$DOMAIN** serves the portal."
+            echo ""
+            echo "Then run **Set portal origin** with \`https://$DOMAIN\` to flip CORS + onboarding links."
+          } >> "$GITHUB_STEP_SUMMARY"
