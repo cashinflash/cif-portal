@@ -193,6 +193,20 @@
       color:var(--rl-ink); margin:0 0 18px; }
     .rl-legal { text-align:center; color:#9aa3af; font-size:.78rem; line-height:1.5;
       margin:26px auto 0; max-width:560px; }
+
+    /* Phone-change verification (screen 1) */
+    .rl-pv { grid-column:1 / -1; border:1px solid #f0d9a8; background:#fffaf0; border-radius:12px;
+      padding:13px 14px; margin-top:-2px; }
+    .rl-pv-note { font-size:.85rem; color:#7a5b13; font-weight:600; margin-bottom:10px; line-height:1.45; }
+    .rl-pv-row { display:flex; gap:9px; }
+    .rl-pv-otp { display:flex; gap:9px; margin-top:10px; }
+    .rl-pv-otp .rl-input { flex:1; }
+    .rl-pv-btn { flex:none; background:var(--rl-grn); color:#fff; border:none; border-radius:11px;
+      padding:12px 16px; font-family:inherit; font-weight:800; font-size:.9rem; cursor:pointer; }
+    .rl-pv-btn:disabled { opacity:.55; cursor:not-allowed; }
+    .rl-pv-msg { font-size:.83rem; margin-top:9px; line-height:1.45; }
+    .rl-pv-msg.ok { color:var(--rl-grn-d); font-weight:700; }
+    .rl-pv-msg.err { color:#b42318; }
     @media (max-width:560px){ .rl-title{ font-size:1.45rem; } }
   </style>
 </head>
@@ -325,6 +339,17 @@
           <label class="rl-field"><span>ZIP</span><input id="rlZip" class="rl-input" type="text" inputmode="numeric" autocomplete="postal-code"></label>
           <label class="rl-field rl-col2"><span>Employer</span><input id="rlEmployer" class="rl-input" type="text"></label>
           <label class="rl-field rl-col2"><span>Mobile phone</span><input id="rlPhone" class="rl-input" type="tel" autocomplete="tel"></label>
+          <div class="rl-pv" id="rlPhoneVerify" hidden>
+            <div class="rl-pv-note">You changed your phone number. Verify it with a text code to continue.</div>
+            <div class="rl-pv-row">
+              <button type="button" class="rl-pv-btn" id="rlPhoneSendCode">Send code</button>
+            </div>
+            <div class="rl-pv-otp" id="rlPhoneOtpRow" hidden>
+              <input id="rlPhoneOtp" class="rl-input" type="text" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="Enter the 6-digit code">
+              <button type="button" class="rl-pv-btn" id="rlPhoneVerifyBtn">Verify</button>
+            </div>
+            <div class="rl-pv-msg" id="rlPhoneVerifyMsg" role="status"></div>
+          </div>
         </div>
         <div class="rl-actions">
           <button class="rl-btn" id="rlStep1Continue" type="button">Continue</button>
@@ -402,6 +427,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/reapply.js?v=20260627b"></script>
+  <script src="/js/reapply.js?v=20260627c"></script>
 </body>
 </html>

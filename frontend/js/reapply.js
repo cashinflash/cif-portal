@@ -28,6 +28,7 @@
   var state = {
     min: 100, max: 255, amount: 255,
     banks: [], selectedItemId: null, submitting: false,
+    originalPhone: '', phoneVerified: true,
   };
 
   // ---------- API ----------
@@ -117,6 +118,9 @@
       setVal('rlAddress', p.address); setVal('rlAddress2', p.address2);
       setVal('rlCity', p.city); setVal('rlState', p.state); setVal('rlZip', p.zip);
       setVal('rlEmployer', p.employer); setVal('rlPhone', p.phone);
+      state.originalPhone = String(p.phone || '').replace(/[^0-9]/g, '').slice(-10);
+      state.phoneVerified = true;  // unchanged on load → no verification needed
+      updatePhoneVerifyUI();
       setupAmount();
       renderBanks();
       renderBankFile(d.bankOnFile);
@@ -161,6 +165,76 @@
     if (st) st.addEventListener('blur', function () {
       this.value = (this.value || '').toUpperCase().trim().slice(0, 2);
     });
+  }
+
+  // ---------- Phone-change verification (Telnyx OTP) ----------
+  function phoneDigits() { return val('rlPhone').replace(/[^0-9]/g, '').slice(-10); }
+  function phoneChanged() {
+    var d = phoneDigits();
+    return d.length >= 10 && d !== state.originalPhone;
+  }
+  function updatePhoneVerifyUI() {
+    var box = $('#rlPhoneVerify');
+    if (box) box.hidden = !(phoneChanged() && !state.phoneVerified);
+  }
+  function pvMsg(text, kind) {
+    var m = $('#rlPhoneVerifyMsg');
+    if (m) { m.textContent = text || ''; m.className = 'rl-pv-msg' + (kind ? ' ' + kind : ''); }
+  }
+  function wirePhoneVerify() {
+    var ph = $('#rlPhone');
+    if (ph) ph.addEventListener('input', function () {
+      state.phoneVerified = !phoneChanged();
+      var otp = $('#rlPhoneOtpRow'); if (otp) otp.hidden = true;
+      var send = $('#rlPhoneSendCode'); if (send) send.textContent = 'Send code';
+      pvMsg('', '');
+      updatePhoneVerifyUI();
+    });
+    var send = $('#rlPhoneSendCode');
+    if (send) send.addEventListener('click', function () {
+      send.disabled = true; pvMsg('Sending…', '');
+      api('/api/my-profile/phone/start-verify',
+        { method: 'POST', body: JSON.stringify({ phone: val('rlPhone').trim() }) })
+        .then(function (r) {
+          send.disabled = false;
+          if (r.ok && r.data && r.data.ok) {
+            var otp = $('#rlPhoneOtpRow'); if (otp) otp.hidden = false;
+            send.textContent = 'Resend code';
+            pvMsg('We texted a code to ' + (r.data.maskedPhone || 'your number') + '.', 'ok');
+            var i = $('#rlPhoneOtp'); if (i) i.focus();
+          } else {
+            pvMsg((r.data && r.data.detail) || 'Couldn’t send the code. Check the number and try again.', 'err');
+          }
+        }).catch(function () { send.disabled = false; pvMsg('Network error — please try again.', 'err'); });
+    });
+    var vbtn = $('#rlPhoneVerifyBtn');
+    if (vbtn) vbtn.addEventListener('click', function () {
+      var code = val('rlPhoneOtp').replace(/[^0-9]/g, '');
+      if (code.length < 4) { pvMsg('Enter the code we texted you.', 'err'); return; }
+      vbtn.disabled = true; pvMsg('Verifying…', '');
+      api('/api/my-profile/phone/confirm',
+        { method: 'POST', body: JSON.stringify({ phone: val('rlPhone').trim(), code: code }) })
+        .then(function (r) {
+          vbtn.disabled = false;
+          if (r.ok && r.data && !r.data.error) {
+            state.phoneVerified = true;
+            var box = $('#rlPhoneVerify'); if (box) box.hidden = true;
+            pvMsg('', '');
+          } else {
+            pvMsg((r.data && r.data.detail) || 'That code didn’t match. Try again or resend.', 'err');
+          }
+        }).catch(function () { vbtn.disabled = false; pvMsg('Network error — please try again.', 'err'); });
+    });
+  }
+  function step1Continue() {
+    if (phoneChanged() && !state.phoneVerified) {
+      updatePhoneVerifyUI();
+      pvMsg('Please verify your new phone number to continue.', 'err');
+      var box = $('#rlPhoneVerify');
+      if (box && box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    showStep(2);
   }
 
   // Gate: a portal re-loan is only for a customer with NO active loan AND
@@ -364,13 +438,14 @@
   // ---------- Wiring ----------
   function init() {
     if (!$('#rlWizard')) return; // not on the re-apply page
-    var s1 = $('#rlStep1Continue'); if (s1) s1.addEventListener('click', function () { showStep(2); });
+    var s1 = $('#rlStep1Continue'); if (s1) s1.addEventListener('click', step1Continue);
     var b1 = $('#rlBankBack'); if (b1) b1.addEventListener('click', function () { showStep(1); });
     var bc = $('#rlBankContinue'); if (bc) bc.addEventListener('click', function () { if (state.selectedItemId) showStep(3); });
     var a1 = $('#rlAmtBack'); if (a1) a1.addEventListener('click', function () { showStep(2); });
     var cb = $('#rlConnectBank'); if (cb) cb.addEventListener('click', openLink);
     var sub = $('#rlSubmit'); if (sub) sub.addEventListener('click', submit);
     wireAutoCaps();
+    wirePhoneVerify();
     gateThenLoad();
   }
 
