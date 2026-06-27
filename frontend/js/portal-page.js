@@ -118,37 +118,5 @@
       if (soM) soM.addEventListener('click', signOut);
     }
 
-    // Vergent handoff for "Open Vergent portal" buttons only. "Request a
-    // new loan" (data-action="new-loan") now navigates to the native
-    // in-portal Fast Re-Apply flow at /request-loan.html — no handoff.
-    var handoffButtons = document.querySelectorAll(
-      '[data-action="open-vergent-portal"]'
-    );
-    Array.prototype.forEach.call(handoffButtons, function (btn) {
-      btn.addEventListener('click', function (ev) {
-        ev.preventDefault();
-        var orig = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'Starting…';
-        fetch('/api/my-loan/new', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
-        }).then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data && data.url) {
-              window.location.href = data.url;
-              return;
-            }
-            btn.disabled = false;
-            btn.textContent = orig;
-            alert('Could not connect to the portal. Please try again or call (888) 999-9859.');
-          })
-          .catch(function () {
-            btn.disabled = false;
-            btn.textContent = orig;
-            alert('Network error. Please try again.');
-          });
-      });
-    });
   });
 })();

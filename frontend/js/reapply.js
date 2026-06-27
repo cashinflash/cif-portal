@@ -461,7 +461,7 @@
           var c = selectedCard();
           return c ? {
             vergentCardId: c.id, brand: c.brand, last4: c.last4,
-            expMonth: c.expMonth, expYear: c.expYear,
+            expMonth: c.expMonth, expYear: c.expYear, cardholder: c.cardholder,
           } : null;
         })(),
       }),

@@ -216,6 +216,7 @@ def _shape_card_v1(raw: Dict[str, Any]) -> Dict[str, Any]:
         "id": raw.get("id"),
         "brand": brand,
         "last4": last4,
+        "cardholder": (raw.get("card_holder") or raw.get("cardHolder") or "").strip(),
         "expMonth": raw.get("exp_month") or raw.get("expire_month"),
         "expYear": raw.get("exp_year") or raw.get("expire_year"),
         "isExpired": False,

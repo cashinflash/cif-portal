@@ -2778,37 +2778,6 @@ def get_document_download(event: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def request_new_loan_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
-    claims = _claims(event)
-    cid = _customer_id(claims)
-    if not cid:
-        return _json_response(400, {"error": "no_customer_id"})
-
-    tok = _get_apim_token()
-    if not tok:
-        return _json_response(502, {"error": "apim_unavailable"})
-    creds = _get_creds()
-    status, body, _raw = _http(
-        f"{APIM_BASE}/api/authenticate/handoff/create",
-        "POST",
-        body={
-            "customerId": int(cid),
-            "TargetRelativePage": "/",
-            "ExpectedReferrerAuthority": HANDOFF_AUTHORITY,
-        },
-        headers={"x-api-key": creds["xApiKey"], "Authorization": f"Bearer {tok}"},
-    )
-    if status != 200 or not isinstance(body, dict):
-        log.warning("handoff/create failed status=%s", status)
-        return _json_response(502, {"error": "handoff_failed"})
-
-    url = body.get("handoffUrl") or body.get("handoff_url")
-    token = body.get("token")
-    if not url:
-        return _json_response(502, {"error": "handoff_no_url"})
-    return _json_response(200, {"url": url, "token": token})
-
-
 # ─────────────────────────────────────────
 # E-sign — pending signatures + resend link
 # ─────────────────────────────────────────
@@ -3828,58 +3797,35 @@ def _reapply_application_data(info: Dict[str, Any], amount: int) -> Dict[str, An
     }
 
 
-def _reapply_sync_vergent_edits(cid: str, claims: Dict[str, Any],
-                                orig: Dict[str, Any],
-                                edits: Dict[str, Any]) -> None:
-    """Queue admin change-requests for profile edits the customer made in
-    the re-apply flow, so they reach Vergent through the SAME review path
-    as a normal profile edit. Phone is handled separately by its verify
-    step. Best-effort — never blocks the application. Case-insensitive
-    diffing so a title-cased "123 Main St" vs on-file "123 main st" isn't
-    treated as a change."""
+def _reapply_vergent_edits(orig: Dict[str, Any],
+                           edits: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the {phone?, address?} of fields the customer actually changed,
+    for direct push to the existing Vergent record (cif-apply applies it via
+    its V1 client). Case-insensitive diff so a title-cased "123 Main St" vs
+    on-file "123 main st" isn't treated as a change. Employer has no Vergent
+    write endpoint, so it stays on the application for the operator."""
+    out: Dict[str, Any] = {}
     if not isinstance(edits, dict):
-        return
+        return out
 
     def n(s):
         return (s or "").strip().lower()
 
-    try:
-        addr_keys = ("address", "address2", "city", "state", "zip")
-        addr_changed = any(
-            isinstance(edits.get(k), str) and n(edits.get(k))
-            and n(edits.get(k)) != n(orig.get(k))
-            for k in addr_keys
-        )
-        if addr_changed:
-            _create_change_request(
-                cid, claims, "address",
-                current_value={
-                    "addr1": orig.get("address"), "addr2": orig.get("address2"),
-                    "city": orig.get("city"), "state": orig.get("state"),
-                    "zip": orig.get("zip"),
-                },
-                requested_value={
-                    "addr1": (edits.get("address") or orig.get("address") or "").strip(),
-                    "addr2": (edits.get("address2") or orig.get("address2") or "").strip() or None,
-                    "city": (edits.get("city") or orig.get("city") or "").strip(),
-                    "state": (edits.get("state") or orig.get("state") or "").strip().upper()[:2],
-                    "zip": _digits_only(edits.get("zip") or orig.get("zip") or "")[:9],
-                },
-                extra_meta={"source": "portal_reloan"},
-            )
-            log.info("reapply queued Vergent address change cid=%s", cid)
+    new_phone = _digits_only(edits.get("phone") or "")[-10:]
+    if len(new_phone) == 10 and new_phone != _digits_only(orig.get("phone") or "")[-10:]:
+        out["phone"] = new_phone
 
-        emp_new = (edits.get("employer") or "").strip()
-        if emp_new and n(emp_new) != n(orig.get("employer")):
-            _create_change_request(
-                cid, claims, "employer",
-                current_value=orig.get("employer") or "",
-                requested_value=emp_new,
-                extra_meta={"source": "portal_reloan"},
-            )
-            log.info("reapply queued Vergent employer change cid=%s", cid)
-    except Exception as exc:  # pragma: no cover - best effort
-        log.warning("reapply Vergent edit sync failed cid=%s: %s", cid, exc)
+    addr_keys = ("address", "address2", "city", "state", "zip")
+    if any(isinstance(edits.get(k), str) and n(edits.get(k))
+           and n(edits.get(k)) != n(orig.get(k)) for k in addr_keys):
+        out["address"] = {
+            "addr1": (edits.get("address") or orig.get("address") or "").strip(),
+            "addr2": (edits.get("address2") or orig.get("address2") or "").strip(),
+            "city": (edits.get("city") or orig.get("city") or "").strip(),
+            "state": (edits.get("state") or orig.get("state") or "").strip().upper()[:2],
+            "zip": _digits_only(edits.get("zip") or orig.get("zip") or "")[:9],
+        }
+    return out
 
 
 def get_reapply_prefill(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -4000,18 +3946,16 @@ def submit_reapply(event: Dict[str, Any]) -> Dict[str, Any]:
         app_data["debitCard"] = {
             "brand": str(dc.get("brand") or "")[:32],
             "last4": str(dc.get("last4") or "")[-4:],
+            "cardholder": str(dc.get("cardholder") or "")[:80],
             "expMonth": str(dc.get("expMonth") or ""),
             "expYear": str(dc.get("expYear") or ""),
             "vergentCardId": str(dc.get("vergentCardId") or ""),
             "onFile": True,
         }
 
-    # Sync any edits back to the existing Vergent profile via the admin
-    # change-request queue (phone is handled by its own verify step).
-    try:
-        _reapply_sync_vergent_edits(cid, claims, orig_info, edits)
-    except Exception:  # pragma: no cover - never block the application
-        pass
+    # Edits to push directly into the existing Vergent profile (cif-apply
+    # applies them via its V1 client). Phone is Telnyx-verified above.
+    vergent_edits = _reapply_vergent_edits(orig_info, edits)
 
     creds = plaid._load_creds() or {}
     plaid_creds = {
@@ -4028,6 +3972,7 @@ def submit_reapply(event: Dict[str, Any]) -> Dict[str, Any]:
         "plaidCreds": plaid_creds,
         "plaidItemId": item_id,
         "plaidInstitutionName": institution,
+        "vergentEdits": vergent_edits,
     }
     status, parsed, raw = _http(CIF_APPLY_REAPPLY_URL, "POST",
                                 body=payload, timeout=25)
@@ -4128,8 +4073,6 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return confirm_phone_verify(event)
         if path.endswith("/my-profile/password") and method == "POST":
             return change_password(event)
-        if path.endswith("/my-loan/new") and method == "POST":
-            return request_new_loan_handoff(event)
         if path.endswith("/my-reapply/prefill") and method == "GET":
             return get_reapply_prefill(event)
         if path.endswith("/my-reapply/submit") and method == "POST":
