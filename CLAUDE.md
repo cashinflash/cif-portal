@@ -15,7 +15,8 @@ e-sign a pending loan, view loan details + documents, manage profile/cards, and
 backend (Python 3.12, **stdlib + boto3 only**). No bundler, plain JS (ES5-ish,
 `var`, no modules).
 
-Live at **https://d1zucrj1ouu3c.cloudfront.net** (CloudFront → S3 for the
+Live at **https://my.cashinflash.com** (custom domain, cut over 2026-06-27;
+the original **https://d1zucrj1ouu3c.cloudfront.net** still resolves too). (CloudFront → S3 for the
 frontend; CloudFront `/api/*` → API Gateway HTTP API `anh066l1wf` → Lambdas).
 
 ## Repos, branch, deploy
@@ -217,6 +218,26 @@ building. Reuse template for Plaid token reuse: **cif-apply `/api/refresh-from-p
 4. Wire the onboarding `mint-link` into the Resend email templates (the other
    Claude session that sends emails) — integration note: POST mint-link with
    `X-Api-Key`, put returned `url` on the "Register" button.
+
+## Custom domain — my.cashinflash.com (cut over 2026-06-27)
+
+Driven by `.github/workflows/provision-custom-domain.yml` (idempotent
+workflow_dispatch). NOTE: that workflow + `set-portal-origin.yml` are
+dispatched from the **default branch `claude/continue-previous-session-e2Z43`**
+(workflow_dispatch only registers from the default branch; the feature
+branch is ahead of it). Done:
+- ACM cert (us-east-1) `…/96196a6b-3aa1-4b7e-8f8a-3da5a61439d8` — ISSUED.
+- `my.cashinflash.com` + cert attached to CloudFront `EOV9K12LFKK8T` as an
+  alias (ViewerCertificate = ACM, sni-only). `*.cloudfront.net` still works.
+- DNS at **Namecheap**: validation CNAME (added) + final
+  `my` → `d1zucrj1ouu3c.cloudfront.net` CNAME.
+- `PORTAL_ORIGIN=https://my.cashinflash.com` set on all 5 Lambdas via
+  `set-portal-origin.yml` → flips CORS + onboarding magic-link base.
+
+Frontend is domain-agnostic (relative paths) so no code change was needed.
+Follow-ups: repoint hardcoded `d1zucrj1ouu3c.cloudfront.net` logo/reset
+links in `auth_mfa.py`/`loans.py` emails to the new domain (cosmetic, they
+still work); delete the stray `provision-custom-domain.yml` copy on `main`.
 
 ## Workflow rule
 
