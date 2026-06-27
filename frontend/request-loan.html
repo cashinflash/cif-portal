@@ -159,6 +159,12 @@
     .rl-onfile-row span:first-child { color:var(--rl-mut); }
     .rl-onfile-row span:last-child { color:var(--rl-ink); font-weight:700; text-align:right; }
 
+    /* Inline add-a-debit-card form (on the bank step) */
+    .rl-addcard { margin-top:12px; border-top:1px solid #eef1f4; padding-top:14px; }
+    .rl-addcard-row { display:grid; grid-template-columns:1fr 1fr; gap:11px; margin-top:11px; }
+    .rl-addcard-err { color:#b42318; font-size:.85rem; line-height:1.45; margin:10px 0 0; }
+    .rl-addcard-note { color:#9aa3af; font-size:.78rem; line-height:1.5; margin:10px 0 0; }
+
     /* Bank match check (Plaid-connected vs account on file) */
     .rl-bankmatch { display:flex; align-items:flex-start; gap:9px; border-radius:12px; padding:11px 14px;
       font-size:.86rem; font-weight:600; line-height:1.5; margin:2px 0 6px; }
@@ -433,7 +439,21 @@
         <div id="rlCardFile" class="rl-onfile" hidden>
           <p class="rl-onfile-h">Debit card on file</p>
           <div id="rlCardList"></div>
-          <a class="rl-link" href="/payments.html" style="padding-top:10px;">Add a debit card &rarr;</a>
+          <button class="rl-link" id="rlAddCardToggle" type="button" style="padding-top:10px;">+ Add a debit card</button>
+          <div id="rlAddCard" class="rl-addcard" hidden>
+            <label class="rl-field rl-col2"><span>Card number</span><input id="rlCardNumber" class="rl-input" type="text" inputmode="numeric" autocomplete="cc-number" placeholder="0000 0000 0000 0000" maxlength="23"></label>
+            <div class="rl-addcard-row">
+              <label class="rl-field"><span>Expiration</span><input id="rlCardExp" class="rl-input" type="text" inputmode="numeric" autocomplete="cc-exp" placeholder="MM/YY" maxlength="5"></label>
+              <label class="rl-field"><span>Billing ZIP</span><input id="rlCardZip" class="rl-input" type="text" inputmode="numeric" autocomplete="postal-code" placeholder="12345" maxlength="5"></label>
+            </div>
+            <label class="rl-field rl-col2" style="margin-top:11px"><span>Name on card</span><input id="rlCardName" class="rl-input" type="text" autocomplete="cc-name" placeholder="Jane Smith" maxlength="64"></label>
+            <p class="rl-addcard-err" id="rlAddCardErr" hidden></p>
+            <div class="rl-actions rl-actions-split" style="margin-top:12px">
+              <button class="rl-back" id="rlAddCardCancel" type="button">Cancel</button>
+              <button class="rl-btn" id="rlAddCardSave" type="button">Save card</button>
+            </div>
+            <p class="rl-addcard-note">Debit cards only. Encrypted &amp; never stored by us.</p>
+          </div>
         </div>
         <div class="rl-actions rl-actions-split">
           <button class="rl-back" id="rlBankBack" type="button">Back</button>
@@ -494,6 +514,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/reapply.js?v=20260627k"></script>
+  <script src="/js/reapply.js?v=20260627l"></script>
 </body>
 </html>

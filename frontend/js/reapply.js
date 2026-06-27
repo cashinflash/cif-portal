@@ -456,6 +456,9 @@
         });
       });
     });
+    // Cap saved cards at 3 — hide the inline "Add a debit card" toggle at the max.
+    var addT = $('#rlAddCardToggle');
+    if (addT) addT.style.display = (state.cards.length >= 3) ? 'none' : '';
   }
   function selectedCard() {
     var id = state.selectedCardId;
@@ -466,6 +469,89 @@
       // The endpoint already returns only usable cards — don't re-filter.
       renderCards((r.data && r.data.cards) || []);
     }).catch(function () { /* leave the panel hidden on error */ });
+  }
+
+  // ---------- Inline add-a-debit-card (on the bank step) ----------
+  // Saves to Vergent via the same POST /api/my-cards the payments page uses
+  // (backend tokenizes at Repay). On success we reload + select the new card,
+  // so the customer never leaves the re-apply flow.
+  function clearAddCardErr() { var e = $('#rlAddCardErr'); if (e) { e.hidden = true; e.textContent = ''; } }
+  function showAddCardErr(msg) { var e = $('#rlAddCardErr'); if (e) { e.textContent = msg; e.hidden = false; } }
+  function wireAddCard() {
+    var toggle = $('#rlAddCardToggle'), box = $('#rlAddCard');
+    if (!toggle || !box) return;
+    toggle.addEventListener('click', function () {
+      box.hidden = !box.hidden;
+      toggle.textContent = box.hidden ? '+ Add a debit card' : 'Cancel';
+      if (!box.hidden) { var f = $('#rlCardNumber'); if (f) { try { f.focus(); } catch (e) {} } }
+    });
+    var cancel = $('#rlAddCardCancel');
+    if (cancel) cancel.addEventListener('click', function () {
+      box.hidden = true; toggle.textContent = '+ Add a debit card'; clearAddCardErr();
+    });
+    var num = $('#rlCardNumber');
+    if (num) num.addEventListener('input', function () {
+      var d = this.value.replace(/\D/g, '').slice(0, 19);
+      this.value = d.replace(/(.{4})/g, '$1 ').trim();
+    });
+    var exp = $('#rlCardExp');
+    if (exp) exp.addEventListener('input', function () {
+      var d = this.value.replace(/\D/g, '').slice(0, 4);
+      this.value = d.length >= 3 ? (d.slice(0, 2) + '/' + d.slice(2)) : d;
+    });
+    var zip = $('#rlCardZip');
+    if (zip) zip.addEventListener('input', function () { this.value = this.value.replace(/\D/g, '').slice(0, 5); });
+    var save = $('#rlAddCardSave');
+    if (save) save.addEventListener('click', saveReapplyCard);
+  }
+  function saveReapplyCard() {
+    clearAddCardErr();
+    var num = val('rlCardNumber').replace(/\s+/g, '');
+    var expDigits = val('rlCardExp').replace(/\D/g, '');
+    var expMonth = parseInt(expDigits.slice(0, 2), 10);
+    var expYearShort = parseInt(expDigits.slice(2, 4), 10);
+    var expYear = isNaN(expYearShort) ? 0 : (2000 + expYearShort);
+    var name = val('rlCardName').trim();
+    var zip = val('rlCardZip').trim();
+    if (!num || num.length < 13) { showAddCardErr('Please enter a valid card number.'); return; }
+    if (!expMonth || expMonth < 1 || expMonth > 12) { showAddCardErr('Enter a valid expiration month (01–12).'); return; }
+    if (!expYear || expYear < 2026 || expYear > 2050) { showAddCardErr('Enter a valid expiration year.'); return; }
+    if (!zip || zip.length < 5) { showAddCardErr('Please enter your 5-digit billing ZIP.'); return; }
+    var save = $('#rlAddCardSave');
+    if (save) { save.disabled = true; save.textContent = 'Saving…'; }
+    api('/api/my-cards', {
+      method: 'POST',
+      body: JSON.stringify({ cardNumber: num, expMonth: expMonth, expYear: expYear, nameOnCard: name, zip: zip }),
+    }).then(function (r) {
+      if (save) { save.disabled = false; save.textContent = 'Save card'; }
+      if (r.ok && r.data && (r.data.ok || r.data.last4)) {
+        var newLast4 = (r.data && r.data.last4) || '';
+        ['rlCardNumber', 'rlCardExp', 'rlCardName', 'rlCardZip'].forEach(function (id) { var el = $('#' + id); if (el) el.value = ''; });
+        var box = $('#rlAddCard'); if (box) box.hidden = true;
+        var toggle = $('#rlAddCardToggle'); if (toggle) toggle.textContent = '+ Add a debit card';
+        api('/api/my-cards').then(function (cr) {
+          var cards = (cr.data && cr.data.cards) || [];
+          if (newLast4) {
+            var m = cards.filter(function (c) { return c.last4 === newLast4; })[0];
+            if (m) state.selectedCardId = String(m.id);
+          }
+          renderCards(cards);
+        });
+      } else {
+        var code = (r.data && (r.data.error || r.data.code)) || '';
+        var msgs = {
+          invalid_card_number: 'Card number is invalid.',
+          card_failed_luhn: 'Card number is invalid — please double-check it.',
+          invalid_exp_month: 'Expiration month is invalid.',
+          invalid_exp_year: 'Expiration year is invalid.',
+          tokenize_failed: 'We couldn’t verify that card. Please double-check the details and try again.',
+        };
+        showAddCardErr(msgs[code] || 'We couldn’t save that card. Please try again.');
+      }
+    }).catch(function () {
+      if (save) { save.disabled = false; save.textContent = 'Save card'; }
+      showAddCardErr('Network error. Please try again.');
+    });
   }
 
   // ---------- Step 2: banks ----------
@@ -786,6 +872,7 @@
     wireAutoCaps();
     wirePhoneVerify();
     wireEditToggle();
+    wireAddCard();
     setupAddressAutocomplete();
     gateThenLoad();
   }
