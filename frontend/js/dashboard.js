@@ -413,13 +413,13 @@
       reapplyHideApplyCtas(false);
       var amt = d.amount ? (' for ' + String(d.amount).replace(/[^0-9$.,]/g, '')) : '';
       slot.innerHTML =
-        '<div style="background:linear-gradient(135deg,#f1faf5,#e7f6ee);border:1px solid #cfead9;' +
-        'border-radius:16px;padding:18px;display:flex;gap:14px;align-items:flex-start;">' +
+        '<div style="background:#fff;border:1px solid #d7e6dd;border-radius:16px;padding:18px;' +
+        'display:flex;gap:14px;align-items:flex-start;box-shadow:0 6px 20px rgba(16,40,34,.10);">' +
         '<div style="width:40px;height:40px;flex:none;border-radius:50%;background:#0E8741;color:#fff;' +
         'display:flex;align-items:center;justify-content:center;">' +
         '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></div>' +
-        '<div><div style="font-weight:800;color:#0f2a20;font-size:1.02rem;margin-bottom:3px;">Application received — under review</div>' +
-        '<div style="color:#46535f;font-size:.9rem;line-height:1.5;">We’re reviewing your request' + amt + '. We’ll email or text you with a decision — usually within minutes during business hours.</div></div></div>';
+        '<div><div style="font-weight:800;color:#0f2a20;font-size:1.02rem;margin-bottom:3px;">Your application is under review</div>' +
+        '<div style="color:#46535f;font-size:.9rem;line-height:1.5;">Your application' + amt + ' is being reviewed. We’ll notify you of the decision by email and text, typically within minutes during business hours.</div></div></div>';
       return;
     }
     if (state === 'declined') {

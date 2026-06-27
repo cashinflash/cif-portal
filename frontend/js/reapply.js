@@ -132,9 +132,11 @@
       $('#rlLoading').hidden = true;
       $('#rlWizard').hidden = false;
       showStep(1);
+      showLegal();
     }).catch(function (e) {
       $('#rlLoading').hidden = true;
       hideHero();
+      showLegal();
       $('#rlError').hidden = false;
       if (e && e.message === 'unauthorized') return;
     });
@@ -258,6 +260,9 @@
   // hide it on the terminal screens (submitted / already-applied / error) so
   // those read as clean, focused confirmations.
   function hideHero() { var h = document.querySelector('.rl-head'); if (h) h.hidden = true; }
+  // The legal footer is hidden during the loading state (so it never floats in
+  // the middle of an otherwise-empty screen); reveal it once real content shows.
+  function showLegal() { var l = $('#rlLegal'); if (l) l.hidden = false; }
 
   function step1Continue() {
     if (phoneChanged() && !state.phoneVerified) {
@@ -291,6 +296,7 @@
     var ld = $('#rlLoading'); if (ld) ld.hidden = true;
     var wz = $('#rlWizard'); if (wz) wz.hidden = true;
     hideHero();
+    showLegal();
     var icon, title, msg;
     if (kind === 'active') {
       icon = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>';
@@ -359,6 +365,65 @@
     }
   }
 
+  // ---------- Bank + card icons (mirrors the payments page) ----------
+  // Real bank logo (favicon over a colored monogram) and card-network marks,
+  // reusing the .pay-* classes already in dashboard.css.
+  function bankDomain(name) {
+    var n = (name || '').toUpperCase();
+    var rules = [
+      ['BANK OF AMERICA', 'bankofamerica.com'], ['WELLS FARGO', 'wellsfargo.com'],
+      ['JPMORGAN', 'chase.com'], ['CHASE', 'chase.com'], ['CITIBANK', 'citi.com'],
+      ['U.S. BANK', 'usbank.com'], ['US BANK', 'usbank.com'], ['USBANK', 'usbank.com'],
+      ['PNC', 'pnc.com'], ['TRUIST', 'truist.com'], ['SUNTRUST', 'truist.com'],
+      ['CAPITAL ONE', 'capitalone.com'], ['TD BANK', 'td.com'], ['CITIZENS', 'citizensbank.com'],
+      ['FIFTH THIRD', '53.com'], ['KEYBANK', 'key.com'], ['KEY BANK', 'key.com'],
+      ['REGIONS', 'regions.com'], ['HUNTINGTON', 'huntington.com'], ['M&T', 'mtb.com'],
+      ['ALLY', 'ally.com'], ['USAA', 'usaa.com'], ['NAVY FEDERAL', 'navyfederal.org'],
+      ['BMO', 'bmo.com'], ['HARRIS', 'bmo.com'], ['COMERICA', 'comerica.com'],
+      ['DISCOVER', 'discover.com'], ['SCHWAB', 'schwab.com'], ['AMERICAN EXPRESS', 'americanexpress.com'],
+      ['MARCUS', 'marcus.com'], ['GOLDMAN', 'marcus.com'], ['SOFI', 'sofi.com'],
+      ['CHIME', 'chime.com'], ['VARO', 'varomoney.com'], ['GREEN DOT', 'greendot.com'],
+      ['WOODFOREST', 'woodforest.com'], ['FIRST CITIZENS', 'firstcitizens.com'],
+      ['SYNOVUS', 'synovus.com'], ['ZIONS', 'zionsbank.com'], ['FROST', 'frostbank.com'],
+      ['FIRST HORIZON', 'firsthorizon.com'], ['VALLEY NATIONAL', 'valley.com'],
+      ['WEBSTER', 'websterbank.com'], ['EAST WEST', 'eastwestbank.com'],
+      ['SANTANDER', 'santanderbank.com'], ['FLAGSTAR', 'flagstar.com'],
+      ['PENTAGON FEDERAL', 'penfed.org'], ['PENFED', 'penfed.org'],
+      ['SCHOOLSFIRST', 'schoolsfirstfcu.org'], ['GOLDEN 1', 'golden1.com'],
+      ['BECU', 'becu.org'], ['MORGAN STANLEY', 'morganstanley.com'],
+    ];
+    for (var i = 0; i < rules.length; i++) if (n.indexOf(rules[i][0]) !== -1) return rules[i][1];
+    return '';
+  }
+  function bankIconHtml(name) {
+    var n = (name || 'Bank').trim();
+    var letter = (n.charAt(0) || 'B').toUpperCase();
+    var palette = ['#1a4d6b', '#0E8741', '#3b5bdb', '#7048e8', '#c2255c', '#e8590c', '#1098ad', '#2b8a3e'];
+    var h = 0;
+    for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+    var domain = bankDomain(n);
+    var logo = domain
+      ? '<img class="pay-bank-logo" alt="" src="https://icons.duckduckgo.com/ip3/' + encodeURIComponent(domain) + '.ico">'
+      : '';
+    return '<span class="pay-method-icon pay-bank-mono" style="background:' + palette[h % palette.length] + '" aria-hidden="true">' +
+      '<span class="pay-bank-mono-letter">' + escapeHtml(letter) + '</span>' + logo + '</span>';
+  }
+  function wireBankLogos(root) {
+    Array.prototype.forEach.call((root || document).querySelectorAll('img.pay-bank-logo'), function (img) {
+      if (img.complete && img.naturalWidth > 0) { img.classList.add('is-loaded'); return; }
+      img.addEventListener('load', function () { if (img.naturalWidth > 0) img.classList.add('is-loaded'); });
+      img.addEventListener('error', function () { img.classList.remove('is-loaded'); });
+    });
+  }
+  function cardBrandIconHtml(brand) {
+    var b = (brand || '').toLowerCase();
+    if (b.indexOf('master') !== -1) return '<span class="pay-method-icon pay-brand-icon" aria-hidden="true"><svg width="28" height="18" viewBox="0 0 32 20"><circle cx="13" cy="10" r="8" fill="#EB001B"/><circle cx="19" cy="10" r="8" fill="#F79E1B" fill-opacity=".9"/></svg></span>';
+    if (b.indexOf('visa') !== -1) return '<span class="pay-method-icon pay-brand-icon" aria-hidden="true"><span style="color:#1A1F71;font-weight:800;font-style:italic;font-size:.66rem;letter-spacing:.3px">VISA</span></span>';
+    if (b.indexOf('amex') !== -1 || b.indexOf('american') !== -1) return '<span class="pay-method-icon pay-brand-icon" style="background:#1F72CD;border-color:#1F72CD" aria-hidden="true"><span style="color:#fff;font-weight:800;font-size:.5rem;letter-spacing:.3px">AMEX</span></span>';
+    if (b.indexOf('discover') !== -1) return '<span class="pay-method-icon pay-brand-icon" aria-hidden="true"><span style="color:#E8850D;font-weight:800;font-size:.52rem;letter-spacing:.2px">DISC</span></span>';
+    return '<span class="pay-method-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>';
+  }
+
   // Debit card(s) on file (from Vergent, via the payments machinery) —
   // selectable; the chosen card is carried into the application so the
   // operator sees it in the dashboard Debit Card tab.
@@ -378,7 +443,7 @@
       var on = String(c.id) === state.selectedCardId;
       return '<label class="rl-bank' + (on ? ' is-sel' : '') + '" data-card="' + escapeHtml(String(c.id)) + '">' +
         '<input type="radio" name="rlcard" value="' + escapeHtml(String(c.id)) + '"' + (on ? ' checked' : '') + '>' +
-        '<span class="rl-bank-ico" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>' +
+        cardBrandIconHtml(c.brand) +
         '<span class="rl-bank-body"><span class="rl-bank-name">' + escapeHtml(c.brand || 'Card') + ' •••• ' + escapeHtml(c.last4 || '') + '</span>' +
         (exp ? '<span class="rl-bank-meta">' + escapeHtml(exp) + '</span>' : '') + '</span></label>';
     }).join('');
@@ -419,9 +484,7 @@
       var checked = (b.itemId === state.selectedItemId) ? ' checked' : '';
       return '<label class="rl-bank' + (checked ? ' is-sel' : '') + '" data-item="' + escapeHtml(b.itemId) + '">'
         + '<input type="radio" name="rlbank" value="' + escapeHtml(b.itemId) + '"' + checked + '>'
-        + '<span class="rl-bank-ico" aria-hidden="true">'
-        + '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 14h6M9 18h6"/></svg>'
-        + '</span>'
+        + bankIconHtml(b.institutionName)
         + '<span class="rl-bank-body"><span class="rl-bank-name">' + escapeHtml(b.institutionName || 'Bank') + '</span>'
         + (mask ? '<span class="rl-bank-meta">' + mask + '</span>' : '') + '</span>'
         + '</label>';
@@ -438,6 +501,7 @@
     });
     updateBankContinue();
     updateBankMatch();
+    wireBankLogos(root);
   }
 
   function updateBankContinue() {
@@ -537,6 +601,7 @@
         if (amtEl) amtEl.textContent = fmtUsd(res.data.amount || state.amount);
         $('#rlWizard').hidden = true;
         hideHero();
+        showLegal();
         $('#rlDone').hidden = false;
         try { window.scrollTo(0, 0); } catch (e) {}
         return;

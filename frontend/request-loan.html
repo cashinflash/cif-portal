@@ -62,7 +62,9 @@
        Mobile-first; --rl-grn brand green throughout. */
     :root { --rl-grn:#0E8741; --rl-grn-d:#0C7137; --rl-ink:#0f2a20; --rl-mut:#6b7280; }
     .rl-main { padding-bottom:56px; max-width:560px; margin:0 auto; }
-    .rl-loading { text-align:center; padding:70px 0; color:var(--rl-mut); }
+    .rl-loading { text-align:center; color:var(--rl-mut); min-height:58vh;
+      display:flex; flex-direction:column; align-items:center; justify-content:center; padding:30px 0; }
+    .rl-loading p { font-size:1.05rem; font-weight:700; color:var(--rl-ink); margin:0; }
     .rl-spinner { width:38px; height:38px; margin:0 auto 16px; border:3px solid rgba(14,135,65,.18);
       border-top-color:var(--rl-grn); border-radius:50%; animation:rlspin .8s linear infinite; }
     @keyframes rlspin { to { transform:rotate(360deg); } }
@@ -339,7 +341,7 @@
 
     <div id="rlLoading" class="rl-loading">
       <div class="rl-spinner" aria-label="Loading"></div>
-      <p>Loading your details…</p>
+      <p>Let's get you some cash…</p>
     </div>
 
     <div id="rlError" class="rl-card" hidden>
@@ -353,7 +355,7 @@
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
       </div>
       <h2>Application received</h2>
-      <p>Your request for <strong id="rlDoneAmount">$255</strong> has been received and is now under review. We'll notify you of your decision by email and text, typically within a few minutes during business hours.</p>
+      <p>Your application for <strong id="rlDoneAmount">$255</strong> has been received and is now under review. We'll notify you of your decision by email and text, typically within a few minutes during business hours.</p>
       <a class="rl-btn" href="/dashboard.html" style="display:inline-block;text-align:center;text-decoration:none;">Back to dashboard</a>
     </div>
 
@@ -369,7 +371,6 @@
         <div class="rl-step1-head">
           <div class="rl-step1-headtext">
             <h2>Confirm your details</h2>
-            <p class="rl-sub">We've pre-filled what we have on file. Tap Edit to update anything that's changed.</p>
           </div>
           <button type="button" class="rl-edit" id="rlEditToggle" aria-pressed="false" aria-label="Edit your details">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
@@ -453,7 +454,7 @@
       </section>
     </div>
 
-      <p class="rl-legal">&copy; 2026 Cash in Flash. Licensed by the California Department of Financial Protection and Innovation #214840.</p>
+      <p class="rl-legal" id="rlLegal" hidden>&copy; 2026 Cash in Flash. Licensed by the California Department of Financial Protection and Innovation #214840.</p>
     </div>
   </main>
 
@@ -485,6 +486,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/reapply.js?v=20260627h"></script>
+  <script src="/js/reapply.js?v=20260627i"></script>
 </body>
 </html>
