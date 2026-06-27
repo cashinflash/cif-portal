@@ -53,6 +53,10 @@
       } catch(e){}
     })();
   </script>
+  <!-- Google Maps Places key for address autocomplete (browser key, restricted
+       by HTTP referrer). Empty = autocomplete disabled, plain field used.
+       Paste the restricted key here to enable it. -->
+  <script>window.CIF_GMAPS_KEY = '';</script>
   <style>
     /* Fast Re-Apply wizard — scoped .rl-* so it never clashes with portal css.
        Mobile-first; --rl-grn brand green throughout. */
@@ -141,6 +145,25 @@
       font-size:.9rem; }
     .rl-onfile-row span:first-child { color:var(--rl-mut); }
     .rl-onfile-row span:last-child { color:var(--rl-ink); font-weight:700; text-align:right; }
+
+    /* Bank match check (Plaid-connected vs account on file) */
+    .rl-bankmatch { display:flex; align-items:flex-start; gap:9px; border-radius:12px; padding:11px 14px;
+      font-size:.86rem; font-weight:600; line-height:1.5; margin:2px 0 6px; }
+    .rl-bankmatch.is-ok { background:#e8f5ee; color:#1a6b3c; border:1px solid #bfe3cd; }
+    .rl-bankmatch.is-warn { background:#fff5e6; color:#5a3300; border:1px solid #f0d9a8; }
+    .rl-bankmatch-ico { flex:none; width:18px; height:18px; border-radius:50%; display:flex; align-items:center;
+      justify-content:center; font-size:.72rem; font-weight:900; color:#fff; margin-top:1px; }
+    .rl-bankmatch.is-ok .rl-bankmatch-ico { background:#1a6b3c; }
+    .rl-bankmatch.is-warn .rl-bankmatch-ico { background:#c77700; }
+
+    /* Address autocomplete dropdown (custom, on-brand) */
+    .rl-ac-menu { position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:30; background:#fff;
+      border:1px solid #e3e8ec; border-radius:12px; box-shadow:0 12px 28px rgba(16,40,34,.14);
+      overflow:hidden auto; max-height:264px; }
+    .rl-ac-item { display:flex; flex-direction:column; gap:1px; padding:10px 13px; cursor:pointer; }
+    .rl-ac-item:hover, .rl-ac-item.is-active { background:#f3faf6; }
+    .rl-ac-main { font-size:.92rem; font-weight:700; color:var(--rl-ink); }
+    .rl-ac-sec { font-size:.78rem; color:var(--rl-mut); }
 
     .rl-amount { text-align:center; margin:8px 0 2px; }
     .rl-amount-val { font-size:3.2rem; font-weight:800; color:var(--rl-grn); letter-spacing:-.03em; line-height:1; }
@@ -391,6 +414,7 @@
         <p class="rl-sub">We securely review your most recent bank activity through Plaid. Your bank login is never shared with us.</p>
         <div id="rlBankList" class="rl-banklist"></div>
         <button class="rl-link" id="rlConnectBank" type="button">Connect a different bank</button>
+        <div id="rlBankMatch" class="rl-bankmatch" hidden></div>
         <div id="rlBankFile" class="rl-onfile" hidden>
           <p class="rl-onfile-h">Bank account on file</p>
           <div class="rl-onfile-row"><span>Bank</span><span id="rlBfName">—</span></div>
@@ -461,6 +485,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/reapply.js?v=20260627g"></script>
+  <script src="/js/reapply.js?v=20260627h"></script>
 </body>
 </html>

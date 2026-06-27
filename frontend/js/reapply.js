@@ -30,7 +30,10 @@
     banks: [], selectedItemId: null, submitting: false,
     originalPhone: '', phoneVerified: true,
     cards: [], selectedCardId: null,
+    onFileAcctLast4: '', bankMatch: null,
   };
+
+  function last4(s) { return String(s == null ? '' : s).replace(/\D/g, '').slice(-4); }
 
   // ---------- API ----------
   function api(path, options) {
@@ -324,6 +327,36 @@
     setT('rlBfRouting', bf.routingNumber);
     setT('rlBfAccount', bf.accountNumber);
     panel.hidden = false;
+    state.onFileAcctLast4 = last4(bf.accountNumber);
+    updateBankMatch();
+  }
+
+  // Compare the selected/connected Plaid account against the account we have
+  // on file in Vergent. We never block (a customer may have legitimately
+  // switched banks) — we reassure on a match, warn on a mismatch, and tag the
+  // application so the operator confirms the exact account before funding.
+  function selectedBank() {
+    return (state.banks || []).filter(function (b) { return b.itemId === state.selectedItemId; })[0] || null;
+  }
+  function updateBankMatch() {
+    var el = $('#rlBankMatch');
+    if (!el) return;
+    var onfile = state.onFileAcctLast4;
+    var b = selectedBank();
+    var conn = b ? last4(b.accountMask) : '';
+    if (!onfile || !conn) { el.hidden = true; el.className = 'rl-bankmatch'; state.bankMatch = null; return; }
+    var ok = (onfile === conn);
+    state.bankMatch = { matches: ok, connectedLast4: conn, onFileLast4: onfile };
+    el.hidden = false;
+    el.className = 'rl-bankmatch ' + (ok ? 'is-ok' : 'is-warn');
+    if (ok) {
+      el.innerHTML = '<span class="rl-bankmatch-ico" aria-hidden="true">✓</span> This is the account we have on file (ending ' + escapeHtml(conn) + ').';
+    } else {
+      el.innerHTML = '<span class="rl-bankmatch-ico" aria-hidden="true">!</span> '
+        + '<span><strong>Double-check your bank.</strong> The account you connected ends in ' + escapeHtml(conn)
+        + ', but we have one ending in ' + escapeHtml(onfile) + ' on file. If you switched banks, you can continue. '
+        + 'Otherwise, connect the account ending in ' + escapeHtml(onfile) + '.</span>';
+    }
   }
 
   // Debit card(s) on file (from Vergent, via the payments machinery) —
@@ -400,9 +433,11 @@
           el.classList.toggle('is-sel', el.getAttribute('data-item') === state.selectedItemId);
         });
         updateBankContinue();
+        updateBankMatch();
       });
     });
     updateBankContinue();
+    updateBankMatch();
   }
 
   function updateBankContinue() {
@@ -493,6 +528,7 @@
             expMonth: c.expMonth, expYear: c.expYear, cardholder: c.cardholder,
           } : null;
         })(),
+        bankMatch: state.bankMatch,
       }),
     }).then(function (res) {
       state.submitting = false;
@@ -517,6 +553,138 @@
     });
   }
 
+  // ---------- Google Places address autocomplete (current Places API) ----------
+  // Drives a custom, on-brand dropdown off our own #rlAddress field (the new
+  // PlaceAutocompleteElement brings its own input + shadow DOM that wouldn't
+  // match our styling). No key configured (window.CIF_GMAPS_KEY) → the field
+  // stays a plain input, so this is a zero-risk enhancement.
+  var _gmapsP = null;
+  function loadGmaps(key) {
+    if (_gmapsP) return _gmapsP;
+    _gmapsP = new Promise(function (resolve, reject) {
+      if (window.google && window.google.maps && window.google.maps.importLibrary) return resolve();
+      var s = document.createElement('script');
+      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) + '&v=weekly&libraries=places&loading=async';
+      s.async = true;
+      s.onerror = function () { reject(new Error('gmaps_load_failed')); };
+      s.onload = function () {
+        var deadline = Date.now() + 8000;
+        var iv = setInterval(function () {
+          if (window.google && window.google.maps && window.google.maps.importLibrary) { clearInterval(iv); resolve(); }
+          else if (Date.now() > deadline) { clearInterval(iv); reject(new Error('gmaps_init_timeout')); }
+        }, 60);
+      };
+      document.head.appendChild(s);
+    });
+    return _gmapsP;
+  }
+  function setupAddressAutocomplete() {
+    var key = (window.CIF_GMAPS_KEY || '').trim();
+    var input = $('#rlAddress');
+    if (!key || !input || !input.parentNode) return; // graceful: plain field
+    var box = input.parentNode; // the <label class="rl-field rl-col2">
+    box.style.position = 'relative';
+    var menu = document.createElement('div');
+    menu.className = 'rl-ac-menu';
+    menu.hidden = true;
+    box.appendChild(menu);
+
+    var Places = null, token = null, items = [], active = -1, t = null;
+    function newToken() { try { token = new Places.AutocompleteSessionToken(); } catch (e) { token = null; } }
+
+    loadGmaps(key).then(function () {
+      return window.google.maps.importLibrary('places');
+    }).then(function (lib) {
+      Places = lib;
+      if (!Places || !Places.AutocompleteSuggestion) return;
+      input.setAttribute('autocomplete', 'off');
+      newToken();
+      input.addEventListener('input', onInput);
+      input.addEventListener('keydown', onKey);
+      document.addEventListener('click', function (e) { if (!box.contains(e.target)) closeMenu(); });
+    }).catch(function () { /* graceful: plain field stays usable */ });
+
+    function onInput() {
+      if (input.readOnly) return;
+      var q = input.value.trim();
+      if (t) clearTimeout(t);
+      if (q.length < 3) { closeMenu(); return; }
+      t = setTimeout(function () { fetchSuggest(q); }, 220);
+    }
+    function fetchSuggest(q) {
+      if (!Places || !Places.AutocompleteSuggestion) return;
+      if (!token) newToken();
+      Places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        input: q, includedRegionCodes: ['us'],
+        includedPrimaryTypes: ['street_address', 'premise', 'subpremise'],
+        sessionToken: token,
+      }).then(function (res) {
+        items = (res && res.suggestions) || [];
+        renderMenu();
+      }).catch(function () { closeMenu(); });
+    }
+    function predText(p, which) {
+      var f = p && p[which];
+      return (f && f.text) ? f.text : '';
+    }
+    function renderMenu() {
+      if (!items.length) { closeMenu(); return; }
+      active = -1;
+      menu.innerHTML = items.map(function (s, i) {
+        var p = s.placePrediction || {};
+        var main = predText(p, 'mainText') || predText(p, 'text');
+        var sec = predText(p, 'secondaryText');
+        return '<div class="rl-ac-item" data-i="' + i + '"><span class="rl-ac-main">' + escapeHtml(main) + '</span>'
+          + (sec ? '<span class="rl-ac-sec">' + escapeHtml(sec) + '</span>' : '') + '</div>';
+      }).join('');
+      menu.hidden = false;
+      Array.prototype.forEach.call(menu.querySelectorAll('.rl-ac-item'), function (el) {
+        // mousedown (not click) so it fires before the input's blur closes us.
+        el.addEventListener('mousedown', function (ev) { ev.preventDefault(); choose(parseInt(el.getAttribute('data-i'), 10)); });
+      });
+    }
+    function closeMenu() { menu.hidden = true; menu.innerHTML = ''; items = []; active = -1; }
+    function hl() {
+      Array.prototype.forEach.call(menu.querySelectorAll('.rl-ac-item'), function (el, i) {
+        el.classList.toggle('is-active', i === active);
+      });
+    }
+    function onKey(e) {
+      if (menu.hidden) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(items.length - 1, active + 1); hl(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); hl(); }
+      else if (e.key === 'Enter') { if (active >= 0) { e.preventDefault(); choose(active); } }
+      else if (e.key === 'Escape') { closeMenu(); }
+    }
+    function choose(i) {
+      var s = items[i];
+      if (!s || !s.placePrediction) { closeMenu(); return; }
+      var place;
+      try { place = s.placePrediction.toPlace(); } catch (e) { closeMenu(); return; }
+      place.fetchFields({ fields: ['addressComponents'] }).then(function (r) {
+        var comps = (r && r.place && r.place.addressComponents) || place.addressComponents || [];
+        applyComponents(comps);
+        closeMenu();
+        newToken(); // a selection ends the billing session
+      }).catch(function () { closeMenu(); });
+    }
+    function comp(comps, type, useShort) {
+      var c = (comps || []).filter(function (x) { return (x.types || []).indexOf(type) >= 0; })[0];
+      if (!c) return '';
+      return useShort ? (c.shortText || c.longText || '') : (c.longText || c.shortText || '');
+    }
+    function applyComponents(comps) {
+      var street = (comp(comps, 'street_number') + ' ' + comp(comps, 'route')).trim();
+      if (street) setVal('rlAddress', street);
+      var city = comp(comps, 'locality') || comp(comps, 'sublocality') || comp(comps, 'postal_town');
+      if (city) setVal('rlCity', city);
+      var st = comp(comps, 'administrative_area_level_1', true);
+      if (st) setVal('rlState', st);
+      var zip = comp(comps, 'postal_code');
+      if (zip) setVal('rlZip', zip);
+    }
+  }
+
   // ---------- Wiring ----------
   function init() {
     if (!$('#rlWizard')) return; // not on the re-apply page
@@ -529,6 +697,7 @@
     wireAutoCaps();
     wirePhoneVerify();
     wireEditToggle();
+    setupAddressAutocomplete();
     gateThenLoad();
   }
 

@@ -3953,6 +3953,21 @@ def submit_reapply(event: Dict[str, Any]) -> Dict[str, Any]:
             "onFile": True,
         }
 
+    # Bank-match check (Plaid-connected account vs the account on file in
+    # Vergent). The customer is warned but never blocked; we stamp the result
+    # so the dashboard flags a mismatch for the operator to confirm the exact
+    # account before funding (Vergent exposes no API to overwrite it).
+    bm = body.get("bankMatch")
+    if isinstance(bm, dict):
+        conn4 = "".join(c for c in str(bm.get("connectedLast4") or "") if c.isdigit())[-4:]
+        file4 = "".join(c for c in str(bm.get("onFileLast4") or "") if c.isdigit())[-4:]
+        if conn4 and file4:
+            app_data["bankMatch"] = {
+                "matches": bool(bm.get("matches")),
+                "connectedLast4": conn4,
+                "onFileLast4": file4,
+            }
+
     # Edits to push directly into the existing Vergent profile (cif-apply
     # applies them via its V1 client). Phone is Telnyx-verified above.
     vergent_edits = _reapply_vergent_edits(orig_info, edits)
