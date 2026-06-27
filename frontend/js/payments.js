@@ -369,6 +369,9 @@
 
     updateRepayLabel();
     applyMethodSelection();
+    // Cap saved cards at 3 — silently hide "Add a debit card" once at the max.
+    var addCardBtn = qs('#payAddCardBtn');
+    if (addCardBtn) addCardBtn.style.display = (state.methods.length >= 3) ? 'none' : '';
   }
 
   // ---------- Bank accounts (on-file, from Vergent) ----------
@@ -505,6 +508,9 @@
     if (bankMore && state.bankAccounts.length > 1) {
       bankMore.appendChild(makeViewMore(list, state.bankAccounts.length - 1));
     }
+    // Cap saved banks at 3 — silently hide "Add a bank account" once at the max.
+    var addBankBtn = qs('#payAddBankBtn');
+    if (addBankBtn) addBankBtn.style.display = (state.bankAccounts.length >= 3) ? 'none' : '';
   }
 
   function applyMethodSelection() {
@@ -548,6 +554,7 @@
 
   // ---------- Add-card modal ----------
   function openAddCard() {
+    if ((state.methods || []).length >= 3) return;  // max 3 cards
     clearAddCardError();
     ['#payCardNumber', '#payExp', '#payName', '#payZip'].forEach(function (s) {
       const el = qs(s); if (el) el.value = '';
@@ -578,6 +585,7 @@
 
   // ---------- Add-bank modal ----------
   function openAddBank() {
+    if ((state.bankAccounts || []).length >= 3) return;  // max 3 bank accounts
     clearAddBankError();
     ['#payBankRouting', '#payBankAccount', '#payBankAccountConfirm', '#payBankName'].forEach(function (s) {
       const el = qs(s); if (el) el.value = '';
