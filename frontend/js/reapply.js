@@ -131,6 +131,7 @@
       showStep(1);
     }).catch(function (e) {
       $('#rlLoading').hidden = true;
+      hideHero();
       $('#rlError').hidden = false;
       if (e && e.message === 'unauthorized') return;
     });
@@ -207,7 +208,7 @@
           } else {
             pvMsg((r.data && r.data.detail) || 'Couldn’t send the code. Check the number and try again.', 'err');
           }
-        }).catch(function () { send.disabled = false; pvMsg('Network error — please try again.', 'err'); });
+        }).catch(function () { send.disabled = false; pvMsg('Network error. Please try again.', 'err'); });
     });
     var vbtn = $('#rlPhoneVerifyBtn');
     if (vbtn) vbtn.addEventListener('click', function () {
@@ -225,9 +226,36 @@
           } else {
             pvMsg((r.data && r.data.detail) || 'That code didn’t match. Try again or resend.', 'err');
           }
-        }).catch(function () { vbtn.disabled = false; pvMsg('Network error — please try again.', 'err'); });
+        }).catch(function () { vbtn.disabled = false; pvMsg('Network error. Please try again.', 'err'); });
     });
   }
+  // Prefilled details start LOCKED (read-only) so the customer confirms at a
+  // glance; the Edit toggle unlocks them to change what's stale.
+  var LOCK_IDS = ['rlAddress', 'rlAddress2', 'rlCity', 'rlState', 'rlZip', 'rlEmployer', 'rlPhone'];
+  function setDetailsLocked(locked) {
+    var grid = $('#rlDetailsGrid');
+    if (grid) grid.classList.toggle('rl-grid-locked', locked);
+    LOCK_IDS.forEach(function (id) { var el = $('#' + id); if (el) el.readOnly = locked; });
+    var btn = $('#rlEditToggle');
+    if (btn) { btn.classList.toggle('is-editing', !locked); btn.setAttribute('aria-pressed', String(!locked)); }
+    var lbl = $('#rlEditToggleLabel'); if (lbl) lbl.textContent = locked ? 'Edit' : 'Done';
+  }
+  function wireEditToggle() {
+    var btn = $('#rlEditToggle'), grid = $('#rlDetailsGrid');
+    if (!btn || !grid) return;
+    btn.addEventListener('click', function () {
+      var unlock = grid.classList.contains('rl-grid-locked');
+      setDetailsLocked(!unlock);
+      if (unlock) { var f = $('#rlAddress'); if (f) { try { f.focus(); } catch (e) {} } }
+    });
+    setDetailsLocked(true);
+  }
+
+  // The big "Ready for another loan?" hero is page chrome for the wizard only —
+  // hide it on the terminal screens (submitted / already-applied / error) so
+  // those read as clean, focused confirmations.
+  function hideHero() { var h = document.querySelector('.rl-head'); if (h) h.hidden = true; }
+
   function step1Continue() {
     if (phoneChanged() && !state.phoneVerified) {
       updatePhoneVerifyUI();
@@ -259,6 +287,7 @@
   function blockMessage(kind) {
     var ld = $('#rlLoading'); if (ld) ld.hidden = true;
     var wz = $('#rlWizard'); if (wz) wz.hidden = true;
+    hideHero();
     var icon, title, msg;
     if (kind === 'active') {
       icon = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>';
@@ -267,7 +296,7 @@
     } else {
       icon = '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>';
       title = 'Your application is being reviewed';
-      msg = 'We’ve got your application and we’re reviewing it now — we’ll email or text you with a decision. No need to apply again.';
+      msg = 'We’ve got your application and we’re reviewing it now. We’ll email or text you with a decision. No need to apply again.';
     }
     var slot = $('#rlError');
     if (!slot) return;
@@ -306,7 +335,7 @@
     state.cards = cards || [];
     panel.hidden = false;
     if (!state.cards.length) {
-      root.innerHTML = '<p class="rl-muted" style="margin:0 0 2px">No debit card on file yet — add one below.</p>';
+      root.innerHTML = '<p class="rl-muted" style="margin:0 0 2px">No debit card on file yet. Add one below.</p>';
       state.selectedCardId = null;
       return;
     }
@@ -345,8 +374,8 @@
     var root = $('#rlBankList');
     if (!root) return;
     if (!state.banks.length) {
-      root.innerHTML = '<p class="rl-muted">No bank connected yet. Connect your bank below — '
-        + 'it only takes a moment and keeps your application secure.</p>';
+      root.innerHTML = '<p class="rl-muted">No bank connected yet. Connect your bank below. '
+        + 'It only takes a moment and keeps your application secure.</p>';
       updateBankContinue();
       return;
     }
@@ -471,6 +500,7 @@
         var amtEl = $('#rlDoneAmount');
         if (amtEl) amtEl.textContent = fmtUsd(res.data.amount || state.amount);
         $('#rlWizard').hidden = true;
+        hideHero();
         $('#rlDone').hidden = false;
         try { window.scrollTo(0, 0); } catch (e) {}
         return;
@@ -498,6 +528,7 @@
     var sub = $('#rlSubmit'); if (sub) sub.addEventListener('click', submit);
     wireAutoCaps();
     wirePhoneVerify();
+    wireEditToggle();
     gateThenLoad();
   }
 
