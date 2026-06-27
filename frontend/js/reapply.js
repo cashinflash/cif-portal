@@ -29,6 +29,7 @@
     min: 100, max: 255, amount: 255,
     banks: [], selectedItemId: null, submitting: false,
     originalPhone: '', phoneVerified: true,
+    cards: [], selectedCardId: null,
   };
 
   // ---------- API ----------
@@ -296,28 +297,46 @@
     panel.hidden = false;
   }
 
-  // Debit card(s) on file (from Vergent, via the payments machinery).
+  // Debit card(s) on file (from Vergent, via the payments machinery) —
+  // selectable; the chosen card is carried into the application so the
+  // operator sees it in the dashboard Debit Card tab.
   function renderCards(cards) {
     var panel = $('#rlCardFile'), root = $('#rlCardList');
     if (!panel || !root) return;
+    state.cards = cards || [];
     panel.hidden = false;
-    if (!cards || !cards.length) {
-      root.innerHTML = '<div class="rl-onfile-row"><span>No debit card on file</span><span></span></div>';
+    if (!state.cards.length) {
+      root.innerHTML = '<p class="rl-muted" style="margin:0 0 2px">No debit card on file yet — add one below.</p>';
+      state.selectedCardId = null;
       return;
     }
-    root.innerHTML = cards.map(function (c) {
-      var exp = (c.expMonth && c.expYear)
-        ? (' · ' + c.expMonth + '/' + String(c.expYear).slice(-2)) : '';
-      return '<div class="rl-onfile-row"><span>' + escapeHtml(c.brand || 'Card') +
-        '</span><span>•••• ' + escapeHtml(c.last4 || '') + exp + '</span></div>';
+    if (!state.selectedCardId) state.selectedCardId = String(state.cards[0].id);
+    root.innerHTML = state.cards.map(function (c) {
+      var exp = (c.expMonth && c.expYear) ? ('Expires ' + c.expMonth + '/' + String(c.expYear).slice(-2)) : '';
+      var on = String(c.id) === state.selectedCardId;
+      return '<label class="rl-bank' + (on ? ' is-sel' : '') + '" data-card="' + escapeHtml(String(c.id)) + '">' +
+        '<input type="radio" name="rlcard" value="' + escapeHtml(String(c.id)) + '"' + (on ? ' checked' : '') + '>' +
+        '<span class="rl-bank-ico" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>' +
+        '<span class="rl-bank-body"><span class="rl-bank-name">' + escapeHtml(c.brand || 'Card') + ' •••• ' + escapeHtml(c.last4 || '') + '</span>' +
+        (exp ? '<span class="rl-bank-meta">' + escapeHtml(exp) + '</span>' : '') + '</span></label>';
     }).join('');
+    Array.prototype.forEach.call(root.querySelectorAll('input[name="rlcard"]'), function (inp) {
+      inp.addEventListener('change', function () {
+        state.selectedCardId = this.value;
+        Array.prototype.forEach.call(root.querySelectorAll('.rl-bank'), function (el) {
+          el.classList.toggle('is-sel', el.getAttribute('data-card') === state.selectedCardId);
+        });
+      });
+    });
+  }
+  function selectedCard() {
+    var id = state.selectedCardId;
+    return (state.cards || []).filter(function (c) { return String(c.id) === String(id); })[0] || null;
   }
   function loadCards() {
     api('/api/my-cards').then(function (r) {
-      var cards = ((r.data && r.data.cards) || []).filter(function (c) {
-        return c && c.isActive !== false;
-      });
-      renderCards(cards);
+      // The endpoint already returns only usable cards — don't re-filter.
+      renderCards((r.data && r.data.cards) || []);
     }).catch(function () { /* leave the panel hidden on error */ });
   }
 
@@ -438,6 +457,13 @@
         amount: state.amount,
         plaidItemId: state.selectedItemId,
         edits: gatherEdits(),
+        debitCard: (function () {
+          var c = selectedCard();
+          return c ? {
+            vergentCardId: c.id, brand: c.brand, last4: c.last4,
+            expMonth: c.expMonth, expYear: c.expYear,
+          } : null;
+        })(),
       }),
     }).then(function (res) {
       state.submitting = false;

@@ -3993,6 +3993,19 @@ def submit_reapply(event: Dict[str, Any]) -> Dict[str, Any]:
                 info[k] = v.strip()
     app_data = _reapply_application_data(info, amount)
 
+    # Carry the customer's chosen on-file debit card into the application
+    # so the dashboard's Debit Card tab shows which card they selected.
+    dc = body.get("debitCard")
+    if isinstance(dc, dict) and dc.get("last4"):
+        app_data["debitCard"] = {
+            "brand": str(dc.get("brand") or "")[:32],
+            "last4": str(dc.get("last4") or "")[-4:],
+            "expMonth": str(dc.get("expMonth") or ""),
+            "expYear": str(dc.get("expYear") or ""),
+            "vergentCardId": str(dc.get("vergentCardId") or ""),
+            "onFile": True,
+        }
+
     # Sync any edits back to the existing Vergent profile via the admin
     # change-request queue (phone is handled by its own verify step).
     try:
