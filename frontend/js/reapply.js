@@ -490,7 +490,7 @@
     });
     var num = $('#rlCardNumber');
     if (num) num.addEventListener('input', function () {
-      var d = this.value.replace(/\D/g, '').slice(0, 19);
+      var d = this.value.replace(/\D/g, '').slice(0, 16);
       this.value = d.replace(/(.{4})/g, '$1 ').trim();
     });
     var exp = $('#rlCardExp');
