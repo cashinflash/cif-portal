@@ -130,16 +130,73 @@
     });
   }
 
+  // Title-case address text ("123 main st" -> "123 Main St").
+  function titleCaseAddr(v) {
+    return String(v || '').toLowerCase().replace(/\b([a-z])/g, function (m, c) {
+      return c.toUpperCase();
+    });
+  }
+  function val(id) { var e = $('#' + id); return e ? (e.value || '') : ''; }
+
   function gatherEdits() {
     return {
-      address: ($('#rlAddress') || {}).value || '',
-      address2: ($('#rlAddress2') || {}).value || '',
-      city: ($('#rlCity') || {}).value || '',
-      state: ($('#rlState') || {}).value || '',
-      zip: ($('#rlZip') || {}).value || '',
-      employer: ($('#rlEmployer') || {}).value || '',
-      phone: ($('#rlPhone') || {}).value || '',
+      address: titleCaseAddr(val('rlAddress')).trim(),
+      address2: titleCaseAddr(val('rlAddress2')).trim(),
+      city: titleCaseAddr(val('rlCity')).trim(),
+      state: val('rlState').toUpperCase().trim().slice(0, 2),
+      zip: val('rlZip').trim(),
+      employer: val('rlEmployer').trim(),
+      phone: val('rlPhone').replace(/[^0-9]/g, ''),
     };
+  }
+
+  function wireAutoCaps() {
+    ['rlAddress', 'rlAddress2', 'rlCity'].forEach(function (id) {
+      var el = $('#' + id);
+      if (el) el.addEventListener('blur', function () {
+        if (this.value.trim()) this.value = titleCaseAddr(this.value).trim();
+      });
+    });
+    var st = $('#rlState');
+    if (st) st.addEventListener('blur', function () {
+      this.value = (this.value || '').toUpperCase().trim().slice(0, 2);
+    });
+  }
+
+  // Gate: a portal re-loan is only for a customer with NO active loan AND
+  // NO application already in review.
+  function gateThenLoad() {
+    Promise.all([
+      api('/api/my-loans/active').then(function (r) { return r.data; },
+        function () { return null; }),
+      api('/api/my-reapply/status').then(function (r) { return r.data; },
+        function () { return null; })
+    ]).then(function (res) {
+      var active = res[0] || {};
+      var rl = res[1] || {};
+      if (active && (active.loan || active.pendingSignature)) { blockMessage('active'); return; }
+      if (rl && rl.state === 'pending') { blockMessage('pending'); return; }
+      loadPrefill();
+    }).catch(function () { loadPrefill(); /* fail open to the wizard */ });
+  }
+
+  function blockMessage(kind) {
+    var ld = $('#rlLoading'); if (ld) ld.hidden = true;
+    var wz = $('#rlWizard'); if (wz) wz.hidden = true;
+    var title, msg;
+    if (kind === 'active') {
+      title = 'You already have an active loan';
+      msg = 'You can request a new loan once your current one is paid off. Head to your dashboard to manage it.';
+    } else {
+      title = 'Your application is being reviewed';
+      msg = 'You already have an application in review — we’ll email or text you with a decision. No need to apply again.';
+    }
+    var slot = $('#rlError');
+    if (slot) {
+      slot.hidden = false;
+      slot.innerHTML = '<h2>' + title + '</h2><p class="rl-sub">' + msg + '</p>' +
+        '<a class="rl-btn" href="/dashboard.html" style="text-decoration:none;">Back to dashboard</a>';
+    }
   }
 
   // Vergent bank-on-file (read-only) — helps the customer eyeball-match
@@ -307,7 +364,8 @@
     var a1 = $('#rlAmtBack'); if (a1) a1.addEventListener('click', function () { showStep(2); });
     var cb = $('#rlConnectBank'); if (cb) cb.addEventListener('click', openLink);
     var sub = $('#rlSubmit'); if (sub) sub.addEventListener('click', submit);
-    loadPrefill();
+    wireAutoCaps();
+    gateThenLoad();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

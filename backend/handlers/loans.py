@@ -3995,7 +3995,15 @@ def get_reapply_my_status(event: Dict[str, Any]) -> Dict[str, Any]:
     if parsed.get("funded"):
         state = "funded"        # active-loan card takes over; no RL card
     elif parsed.get("declined"):
-        state = "declined"
+        # Show the "not approved" card for at most 24h after submission,
+        # then let it clear (and the Apply CTAs return) if they haven't
+        # re-applied.
+        sub_ms = parsed.get("submittedAt") or 0
+        try:
+            age_ms = (time.time() * 1000) - float(sub_ms)
+        except (TypeError, ValueError):
+            age_ms = 0
+        state = "declined" if (sub_ms and age_ms < 24 * 3600 * 1000) else "none"
     else:
         state = "pending"
     return _json_response(200, {

@@ -374,10 +374,20 @@
     if (slot) return slot;
     slot = document.createElement('div');
     slot.id = 'reapplyStatusSlot';
-    slot.style.cssText = 'margin:0 0 16px;';
-    var anchor = qs('#activeLoanCard') || qs('.dash-loan-empty') || qs('main');
-    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(slot, anchor);
-    else if (anchor) anchor.appendChild(slot);
+    slot.style.cssText = 'margin:0 0 18px;max-width:920px;';
+    // Insert full-width at the top of the content column (after the page
+    // heading) so it spans properly on desktop instead of being trapped
+    // in the narrow no-loan grid column.
+    var main = qs('.app-main') || qs('main');
+    if (main) {
+      var head = main.querySelector('.app-pagehead');
+      if (head && head.nextSibling) main.insertBefore(slot, head.nextSibling);
+      else main.insertBefore(slot, main.firstChild);
+    } else {
+      var anchor = qs('#activeLoanCard') || qs('.dash-loan-empty');
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(slot, anchor);
+      else document.body.appendChild(slot);
+    }
     return slot;
   }
 

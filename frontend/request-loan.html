@@ -175,6 +175,15 @@
       /* center the "Connect a different bank" link on mobile only */
       .rl-link { text-align:center; }
     }
+
+    /* Win against portal.css's global .dashboard-page button rules, which
+       were flattening our gradient CTA to a blank white block. */
+    .rl-main .rl-btn { background:linear-gradient(180deg,#0E8741,#0C7137) !important; color:#fff !important; border:none !important; }
+    .rl-main .rl-btn:disabled { background:#a8d6bd !important; color:#fff !important; }
+    .rl-main .rl-back { background:#fff !important; color:#33414e !important; border:1.5px solid #dde3e8 !important; }
+    .rl-main .rl-chip { background:#fff !important; color:#0f2a20 !important; }
+    .rl-main .rl-chip.is-sel { background:#f3faf6 !important; color:#0C7137 !important; }
+    .rl-main .rl-link { background:none !important; color:#0E8741 !important; }
   </style>
 </head>
 <body class="dashboard-page has-sidebar">
@@ -377,6 +386,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/reapply.js?v=20260626b"></script>
+  <script src="/js/reapply.js?v=20260627a"></script>
 </body>
 </html>
