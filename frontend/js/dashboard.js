@@ -360,6 +360,71 @@
   // removed so these links/buttons navigate normally.
   function wireNewLoanButton() { /* no-op: native /request-loan.html flow */ }
 
+  // ---------- Fast Re-Apply status (Q3): pending / declined card ----------
+  function reapplyHideApplyCtas(hidden) {
+    ['#requestLoanBtn', '#requestLoanBtnMobile'].forEach(function (s) {
+      var el = qs(s); if (el) el.style.display = hidden ? 'none' : '';
+    });
+    qsa('a.paidup-cta').forEach(function (el) { el.style.display = hidden ? 'none' : ''; });
+    var nl = qs('.home-needloan'); if (nl) nl.style.display = hidden ? 'none' : '';
+  }
+
+  function reapplySlot() {
+    var slot = qs('#reapplyStatusSlot');
+    if (slot) return slot;
+    slot = document.createElement('div');
+    slot.id = 'reapplyStatusSlot';
+    slot.style.cssText = 'margin:0 0 16px;';
+    var anchor = qs('#activeLoanCard') || qs('.dash-loan-empty') || qs('main');
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(slot, anchor);
+    else if (anchor) anchor.appendChild(slot);
+    return slot;
+  }
+
+  function loadReapplyStatus(hasActive) {
+    // An active loan takes precedence — its card shows, no RL status card.
+    if (hasActive) {
+      var s = qs('#reapplyStatusSlot'); if (s) s.innerHTML = '';
+      reapplyHideApplyCtas(false);
+      return;
+    }
+    api('/api/my-reapply/status', token).then(function (d) {
+      renderReapplyStatus(d || {});
+    }).catch(function () { /* fail soft — no card */ });
+  }
+
+  function renderReapplyStatus(d) {
+    var state = d && d.state;
+    var slot = reapplySlot();
+    if (state === 'pending') {
+      reapplyHideApplyCtas(true);
+      var amt = d.amount ? (' for ' + String(d.amount).replace(/[^0-9$.,]/g, '')) : '';
+      slot.innerHTML =
+        '<div style="background:linear-gradient(135deg,#f1faf5,#e7f6ee);border:1px solid #cfead9;' +
+        'border-radius:16px;padding:18px;display:flex;gap:14px;align-items:flex-start;">' +
+        '<div style="width:40px;height:40px;flex:none;border-radius:50%;background:#0E8741;color:#fff;' +
+        'display:flex;align-items:center;justify-content:center;">' +
+        '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></div>' +
+        '<div><div style="font-weight:800;color:#0f2a20;font-size:1.02rem;margin-bottom:3px;">Application received — under review</div>' +
+        '<div style="color:#46535f;font-size:.9rem;line-height:1.5;">We’re reviewing your request' + amt + '. We’ll email or text you with a decision — usually within minutes during business hours.</div></div></div>';
+      return;
+    }
+    if (state === 'declined') {
+      reapplyHideApplyCtas(false);
+      slot.innerHTML =
+        '<div style="background:#fdf3f3;border:1px solid #f3c9c9;border-radius:16px;padding:18px;display:flex;gap:14px;align-items:flex-start;">' +
+        '<div style="width:40px;height:40px;flex:none;border-radius:50%;background:#dc2626;color:#fff;' +
+        'display:flex;align-items:center;justify-content:center;">' +
+        '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>' +
+        '<div><div style="font-weight:800;color:#5a0d0d;font-size:1.02rem;margin-bottom:3px;">Application not approved</div>' +
+        '<div style="color:#7a4a4a;font-size:.9rem;line-height:1.5;">We’ve emailed you the details. You’re welcome to apply again, or call (888) 999-9859 with questions.</div></div></div>';
+      return;
+    }
+    // none / funded → clear the card, restore apply CTAs.
+    reapplyHideApplyCtas(false);
+    slot.innerHTML = '';
+  }
+
   function formatPhone(raw) {
     const digits = String(raw).replace(/\D/g, '');
     if (digits.length === 11 && digits[0] === '1') {
@@ -403,6 +468,10 @@
         newLoanLinks[i].style.display = hasActive ? 'none' : '';
       }
     } catch (e) { /* sessionStorage disabled — fall back to sidebar.js fetch */ }
+
+    // Fast Re-Apply (Q3): show a pending/declined card for an in-flight
+    // re-loan. Runs async; harmless if there's none.
+    try { loadReapplyStatus(hasActive); } catch (e) { /* non-critical */ }
 
     // Branch: active loan → show the loan card; otherwise → show
     // the "Up to $X if approved" hero. Never both.

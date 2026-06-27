@@ -3972,6 +3972,39 @@ def submit_reapply(event: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+def get_reapply_my_status(event: Dict[str, Any]) -> Dict[str, Any]:
+    """GET /api/my-reapply/status — lifecycle of this customer's latest
+    re-loan so the dashboard can show a pending / declined card. cid is
+    taken from the JWT; we ask cif-apply for the report's state. Fails
+    soft (state="none") so a hiccup never breaks the dashboard."""
+    claims = _claims(event)
+    cid = _customer_id(claims)
+    if not cid:
+        return _json_response(401, {"ok": False, "error": "no_customer_id"})
+    status_url = CIF_APPLY_REAPPLY_URL + "-status"  # …/api/portal-reapply-status
+    try:
+        st, parsed, _raw = _http(status_url, "POST", body={
+            "secret": REAPPLY_SHARED_SECRET, "customer_id": cid,
+        }, timeout=12)
+    except Exception as exc:  # pragma: no cover - network
+        log.warning("reapply status lookup failed cid=%s: %s", cid, exc)
+        return _json_response(200, {"ok": True, "state": "none"})
+    if st != 200 or not isinstance(parsed, dict) or not parsed.get("ok") \
+            or not parsed.get("found"):
+        return _json_response(200, {"ok": True, "state": "none"})
+    if parsed.get("funded"):
+        state = "funded"        # active-loan card takes over; no RL card
+    elif parsed.get("declined"):
+        state = "declined"
+    else:
+        state = "pending"
+    return _json_response(200, {
+        "ok": True, "state": state,
+        "amount": parsed.get("amount"),
+        "submittedAt": parsed.get("submittedAt"),
+    })
+
+
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     # Keep-warm ping (EventBridge schedule) — return immediately so the
     # container stays warm without touching Vergent.
@@ -4018,6 +4051,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return get_reapply_prefill(event)
         if path.endswith("/my-reapply/submit") and method == "POST":
             return submit_reapply(event)
+        if path.endswith("/my-reapply/status") and method == "GET":
+            return get_reapply_my_status(event)
         if path.endswith("/my-loans/active") and method == "GET":
             return get_active_loan(event)
         if path.endswith("/my-loans/activity") and method == "GET":

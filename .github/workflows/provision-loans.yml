@@ -79,6 +79,7 @@ jobs:
             "POST /api/my-loan/new"
             "GET /api/my-reapply/prefill"
             "POST /api/my-reapply/submit"
+            "GET /api/my-reapply/status"
             "GET /api/my-esign/pending"
             "POST /api/my-esign/resend"
             "GET /api/my-esign/document"
