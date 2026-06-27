@@ -124,6 +124,7 @@
       setupAmount();
       renderBanks();
       renderBankFile(d.bankOnFile);
+      loadCards();
       $('#rlLoading').hidden = true;
       $('#rlWizard').hidden = false;
       showStep(1);
@@ -293,6 +294,31 @@
     setT('rlBfRouting', bf.routingNumber);
     setT('rlBfAccount', bf.accountNumber);
     panel.hidden = false;
+  }
+
+  // Debit card(s) on file (from Vergent, via the payments machinery).
+  function renderCards(cards) {
+    var panel = $('#rlCardFile'), root = $('#rlCardList');
+    if (!panel || !root) return;
+    panel.hidden = false;
+    if (!cards || !cards.length) {
+      root.innerHTML = '<div class="rl-onfile-row"><span>No debit card on file</span><span></span></div>';
+      return;
+    }
+    root.innerHTML = cards.map(function (c) {
+      var exp = (c.expMonth && c.expYear)
+        ? (' · ' + c.expMonth + '/' + String(c.expYear).slice(-2)) : '';
+      return '<div class="rl-onfile-row"><span>' + escapeHtml(c.brand || 'Card') +
+        '</span><span>•••• ' + escapeHtml(c.last4 || '') + exp + '</span></div>';
+    }).join('');
+  }
+  function loadCards() {
+    api('/api/my-cards').then(function (r) {
+      var cards = ((r.data && r.data.cards) || []).filter(function (c) {
+        return c && c.isActive !== false;
+      });
+      renderCards(cards);
+    }).catch(function () { /* leave the panel hidden on error */ });
   }
 
   // ---------- Step 2: banks ----------
