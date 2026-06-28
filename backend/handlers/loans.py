@@ -2012,24 +2012,38 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
             break
     if isinstance(out_rec, dict):
         cand_ids: List[Any] = []
-        for k in ("hdr_id", "HdrId", "LoanId", "loanId", "Id", "id",
+        for k in ("hdr_id", "HdrId", "root_hdr_id", "original_hdr_id",
+                  "LoanId", "loanId", "Id", "id",
                   "PublicLoanId", "LoanNumber", "loanNumber"):
             v = out_rec.get(k)
             if v not in (None, "", 0) and v not in cand_ids:
                 cand_ids.append(v)
         plan["candidateIds"] = cand_ids
-        for lid in cand_ids[:4]:
-            path = f"/V1/DynamicRepaymentPlan/{lid}/GetExistingSchedule"
+        # Try a few endpoint shapes with the primary (hdr) id, plus
+        # GetExistingSchedule with any other candidate ids. Always capture the
+        # body/snippet so a 500 tells us WHY (vs. a bare status).
+        attempts: List[str] = []
+        if cand_ids:
+            pid = cand_ids[0]
+            attempts += [
+                f"/V1/DynamicRepaymentPlan/{pid}/GetExistingSchedule",
+                f"/V1/DynamicRepaymentPlan/{pid}/GetSchedule",
+                f"/V1/DynamicRepaymentPlan/{pid}",
+                f"/V1/DynamicRepaymentPlan/GetExistingSchedule?hdrId={pid}",
+            ]
+        for lid in cand_ids[1:3]:
+            attempts.append(f"/V1/DynamicRepaymentPlan/{lid}/GetExistingSchedule")
+        for path in attempts:
             try:
                 stp, bodyp = _v1_get(path)
             except Exception as excp:
-                plan[path] = {"error": str(excp)[:120]}
+                plan[path] = {"error": str(excp)[:160]}
                 continue
             entry: Dict[str, Any] = {"status": stp}
             if isinstance(bodyp, (dict, list)):
                 entry["body"] = bodyp
-            elif bodyp is not None:
-                entry["snippet"] = str(bodyp)[:400]
+            else:
+                entry["snippet"] = str(bodyp)[:500] if bodyp is not None else "<empty body>"
             plan[path] = entry
     out["paymentPlanProbe"] = plan
 
