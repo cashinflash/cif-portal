@@ -4350,6 +4350,15 @@ body.cif-modal-open .app-tabbar { display: none; }
 .loan-card-balance { margin: 0; font-size: 2.4rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .loan-card-balance small { font-size: 1.3rem; font-weight: 700; vertical-align: 12px; margin-right: 2px; }
 .loan-card-due { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* "Due in N days" pill — brand-amber when within a week, red when past due. */
+.loan-card-duepill { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 11px; border-radius: 999px; font-size: .74rem; font-weight: 800; letter-spacing: .01em; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.26); color: #eafff2; }
+.loan-card-duepill.is-soon { background: linear-gradient(180deg, #F8B23C, #E78C12); border-color: transparent; color: #3d2400; }
+.loan-card-duepill.is-late { background: linear-gradient(180deg, #FF6B6B, #E23B3B); border-color: transparent; color: #fff; }
+.loan-card-duepill[hidden] { display: none; }
+/* Home active-loan card: center the two figures on mobile (matches the Loans 2x2). */
+@media (max-width: 899px) {
+  .home-loan .loan-card-fig { text-align: center; }
+}
 .loan-card-rule { height: 1px; background: rgba(255,255,255,.2); margin: 20px 0 16px; }
 .loan-card-note { display: flex; align-items: center; gap: 8px; margin: 0; font-size: .85rem; color: rgba(255,255,255,.85); line-height: 1.35; }
 .loan-card-note svg { flex: 0 0 auto; }

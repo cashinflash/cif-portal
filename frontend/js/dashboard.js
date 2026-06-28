@@ -715,7 +715,10 @@
     if (empty) empty.hidden = true;
     if (body) body.hidden = false;
 
-    setText(qs('[data-loan-balance]', card), formatCurrencyPrecise(loan.balance).replace(/^\$/, ''));
+    // On a payment plan the headline "Amount Due" is the next installment;
+    // otherwise it's the full balance (regular card — unchanged).
+    var displayDue = (loan.onPaymentPlan && loan.amountDue != null) ? loan.amountDue : loan.balance;
+    setText(qs('[data-loan-balance]', card), formatCurrencyPrecise(displayDue).replace(/^\$/, ''));
     setText(qs('[data-loan-pay-amount]', card), formatCurrencyPrecise(loan.balance));
     setText(qs('[data-loan-principal]', card), formatCurrencyPrecise(loan.principal));
     setText(qs('[data-loan-next-due]', card), formatDate(loan.nextDueDate));
@@ -724,7 +727,7 @@
 
     // Home "Make a payment" card lives OUTSIDE #activeLoanCard — query the
     // document so its amount-due + due-date mirror the loan card.
-    setText(document.querySelector('[data-loan-pay-balance]'), formatCurrencyPrecise(loan.balance).replace(/^\$/, ''));
+    setText(document.querySelector('[data-loan-pay-balance]'), formatCurrencyPrecise(displayDue).replace(/^\$/, ''));
     setText(document.querySelector('[data-loan-pay-due]'), formatDate(loan.nextDueDate));
 
     // Public loan id tag next to the "Active loan" heading.
@@ -853,33 +856,32 @@
   }
 
   function renderCountdown(card, loan) {
-    const el = qs('[data-loan-countdown]', card);
-    if (!el) return;
-    el.classList.remove('is-soon', 'is-late');
-    if (!loan.nextDueDate) { el.hidden = true; return; }
-    const due = new Date(loan.nextDueDate);
-    if (isNaN(due.getTime())) { el.hidden = true; return; }
-    // Compare dates at day-granularity — ignore clock time so "today" stays "today" all day.
-    const today = new Date();
-    const a = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
-    const b = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-    const days = Math.round((a - b) / 86400000);
-    let text;
-    if (days < 0) {
-      text = Math.abs(days) + (Math.abs(days) === 1 ? ' day' : ' days') + ' past due';
-      el.classList.add('is-late');
-    } else if (days === 0) {
-      text = 'Due today';
-      el.classList.add('is-soon');
-    } else if (days === 1) {
-      text = 'Due tomorrow';
-      el.classList.add('is-soon');
-    } else {
-      text = 'Due in ' + days + ' days';
-      if (days <= 3) el.classList.add('is-soon');
+    const els = (card || document).querySelectorAll('[data-loan-countdown]');
+    if (!els.length) return;
+    let text = '', cls = '';
+    if (loan.nextDueDate) {
+      const due = new Date(loan.nextDueDate);
+      if (!isNaN(due.getTime())) {
+        // Day-granularity compare so "today" stays "today" all day.
+        const today = new Date();
+        const a = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+        const b = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+        const days = Math.round((a - b) / 86400000);
+        if (days < 0) {
+          text = Math.abs(days) + (Math.abs(days) === 1 ? ' day' : ' days') + ' past due';
+          cls = 'is-late';
+        } else if (days === 0) { text = 'Due today'; cls = 'is-soon'; }
+        else if (days === 1) { text = 'Due tomorrow'; cls = 'is-soon'; }
+        else { text = 'Due in ' + days + ' days'; if (days <= 7) cls = 'is-soon'; }
+      }
     }
-    el.textContent = text;
-    el.hidden = false;
+    els.forEach(function (el) {
+      el.classList.remove('is-soon', 'is-late');
+      if (!text) { el.hidden = true; return; }
+      if (cls) el.classList.add(cls);
+      el.textContent = text;
+      el.hidden = false;
+    });
   }
 
   // ---------- My loans list ----------

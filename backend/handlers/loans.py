@@ -497,6 +497,12 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "payoffAmount": payoff,
         "amountDue": amount_due,
         "minAmountDue": min_due,
+        # On a repayment plan the next payment is less than the full payoff;
+        # a regular loan has the whole balance due at once (amountDue == payoff).
+        "onPaymentPlan": (
+            amount_due is not None and payoff is not None
+            and amount_due + 0.01 < payoff
+        ),
         "nextDueDate": _format_iso(hdr.get("DueDate") or hdr.get("NextPaymentDate")),
         "nextDueAmount": next_due,
         "originationDate": _format_iso(hdr.get("OriginationDate")),
