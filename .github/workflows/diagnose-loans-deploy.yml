@@ -1,0 +1,81 @@
+name: Diagnose loans Lambda deploy
+
+# One-shot diagnostic: figure out why the deployed loans Lambda appears to run
+# OLDER code than the repo HEAD (the ?debug=signing probe is missing
+# loanDetailProbe even though it's committed + the deploy step reports success).
+# Auto-runs when this file is pushed (path-filtered to itself). Read-only —
+# inspects config + downloads the live code package and greps it. No changes.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - '.github/workflows/diagnose-loans-deploy.yml'
+
+env:
+  AWS_REGION: us-east-1
+  FN: cif-portal-loans-dev
+  HTTP_API_ID: anh066l1wf
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Function configuration
+        run: |
+          set -e
+          echo "### Function configuration"
+          aws lambda get-function-configuration --function-name "$FN" \
+            --query '{LastModified:LastModified,State:State,StateReason:StateReason,LastUpdateStatus:LastUpdateStatus,LastUpdateStatusReason:LastUpdateStatusReason,Runtime:Runtime,Handler:Handler,CodeSize:CodeSize,CodeSha256:CodeSha256,Version:Version}' \
+            --output table
+
+      - name: Published versions (is API Gateway maybe pinned to one?)
+        run: |
+          aws lambda list-versions-by-function --function-name "$FN" \
+            --query 'Versions[].{Version:Version,LastModified:LastModified,Sha:CodeSha256}' --output table || true
+          echo "--- aliases ---"
+          aws lambda list-aliases --function-name "$FN" \
+            --query 'Aliases[].{Name:Name,Version:FunctionVersion}' --output table || true
+
+      - name: Which integration does GET /api/my-loans/active use?
+        run: |
+          set -e
+          ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
+            --query "Items[?RouteKey=='GET /api/my-loans/active'].Target | [0]" --output text)
+          echo "Route target: $ROUTE_ID"
+          INTEG_ID="${ROUTE_ID#integrations/}"
+          echo "Integration id: $INTEG_ID"
+          aws apigatewayv2 get-integration --api-id "$HTTP_API_ID" --integration-id "$INTEG_ID" \
+            --query '{Uri:IntegrationUri,Type:IntegrationType,Payload:PayloadFormatVersion}' --output table
+
+      - name: Download the LIVE code package and grep it
+        run: |
+          set -e
+          URL=$(aws lambda get-function --function-name "$FN" --query 'Code.Location' --output text)
+          curl -s "$URL" -o /tmp/live.zip
+          echo "Downloaded $(stat -c%s /tmp/live.zip) bytes"
+          mkdir -p /tmp/live && cd /tmp/live && unzip -oq /tmp/live.zip
+          echo "### Markers in the LIVE deployed handlers/loans.py"
+          echo "loanDetailProbe   : $(grep -c 'loanDetailProbe'   handlers/loans.py || true)"
+          echo "disbursementProbe : $(grep -c 'disbursementProbe' handlers/loans.py || true)  (new name)"
+          echo "disbursementDocs  : $(grep -c 'disbursementDocs'  handlers/loans.py || true)  (OLD name)"
+          echo "_fetch_loans_winner_idx (perf) : $(grep -c '_fetch_loans_winner_idx' handlers/loans.py || true)"
+          echo "ThreadPoolExecutor in _patch  : $(grep -c 'patch-fees parallel'      handlers/loans.py || true)"
+          echo "--- last-modified of the file inside the package ---"
+          ls -l --time-style=full-iso handlers/loans.py
+
+      - name: Compare to repo HEAD
+        run: |
+          echo "### Repo HEAD markers (what SHOULD be live)"
+          echo "commit: $(git rev-parse HEAD)"
+          echo "loanDetailProbe   : $(grep -c 'loanDetailProbe'   backend/handlers/loans.py || true)"
+          echo "_fetch_loans_winner_idx : $(grep -c '_fetch_loans_winner_idx' backend/handlers/loans.py || true)"
