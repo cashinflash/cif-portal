@@ -224,12 +224,10 @@
         : (loan.loanFee != null ? loan.loanFee : null)));
       if (fee != null) setText(qs('[data-pay-fee]'), money(fee));
       if (body) body.hidden = false;
-      // Pre-fill amount with next-due or balance.
-      const amountInput = qs('#payAmount');
-      if (amountInput && !amountInput.value) {
-        const preset = Number(loan.nextDueAmount || loan.balance || 0);
-        if (preset > 0) amountInput.value = preset.toFixed(2);
-      }
+      // Lock the payment amount to the full amount due (no partial/custom
+      // amounts). setLockedAmount() reads state.loan and writes both the hidden
+      // #payAmount (used by submit/validate) and the read-only display.
+      setLockedAmount();
       // If this customer is awaiting signature (known synchronously from the
       // preflight flag), rebuild the card to the pending layout NOW — same
       // synchronous tick that rendered the default summary — so the old version
@@ -556,6 +554,22 @@
     if (addBankBtn) addBankBtn.style.display = (state.bankAccounts.length >= 3) ? 'none' : '';
   }
 
+  // Payment amount is LOCKED to the full amount due — customers can't pick a
+  // partial/custom amount. Writes the hidden #payAmount (read by submit +
+  // validation) and the read-only on-screen figure from the current loan. For a
+  // payment-plan customer the amount due is the current installment; otherwise
+  // it's the full balance — the same figure shown as "Amount Due" on the card.
+  function setLockedAmount() {
+    var loan = state.loan;
+    var due = loan ? ((loan.onPaymentPlan && loan.amountDue != null) ? loan.amountDue : loan.balance) : null;
+    var n = (due != null && !isNaN(Number(due))) ? Number(due) : null;
+    var inp = qs('#payAmount');
+    if (inp) inp.value = (n != null && n > 0) ? n.toFixed(2) : '';
+    var disp = qs('[data-pay-amount-display]');
+    if (disp) disp.textContent = (n != null && n > 0) ? n.toFixed(2) : '0.00';
+    return n;
+  }
+
   function applyMethodSelection() {
     const btn = qs('#payChargeBtn');
     const hasSel = !!state.selectedMethodId || !!state.selectedBankId;
@@ -569,7 +583,10 @@
       // "Pay now" if neither is a positive number.
       var amtRaw = qs('#payAmount') && qs('#payAmount').value;
       var amt = parseFloat(String(amtRaw || '').replace(/[^\d.]/g, ''));
-      if ((!amt || isNaN(amt) || amt <= 0) && state.loan) amt = Number(state.loan.balance);
+      if ((!amt || isNaN(amt) || amt <= 0) && state.loan) {
+        amt = (state.loan.onPaymentPlan && state.loan.amountDue != null)
+          ? Number(state.loan.amountDue) : Number(state.loan.balance);
+      }
       btn.textContent = (amt && !isNaN(amt) && amt > 0) ? ('Pay now ' + money(amt)) : 'Pay now';
     }
     document.querySelectorAll('.pay-method').forEach(function (el) {
@@ -1247,7 +1264,7 @@
   function resetForPayAgain() {
     var decline = qs('#payDecline'); if (decline) decline.hidden = true;
     qs('#payReceipt').hidden = true;
-    const amt = qs('#payAmount'); if (amt) amt.value = '';
+    setLockedAmount();  // re-lock to the full amount due (no manual entry)
     const cvv = qs('#payCvv');    if (cvv) cvv.value = '';
     const err = qs('#payError'); if (err) { err.hidden = true; err.textContent = ''; }
     const note = qs('#payCardAddedNote'); if (note) { note.hidden = true; note.textContent = ''; }

@@ -371,13 +371,16 @@
 
               <div class="pay-fieldrow">
                 <div class="pay-field-amount">
-                  <label class="pay-field-label" for="payAmount">Amount</label>
-                  <div class="pay-amount-wrap">
-                    <span class="pay-amount-prefix">$</span>
-                    <input type="text" inputmode="decimal" id="payAmount" name="amount"
-                           class="pay-input pay-input--amount"
-                           placeholder="0.00" autocomplete="off">
+                  <p class="pay-field-label">Amount due</p>
+                  <!-- Payment amount is LOCKED to the full amount due — no partial
+                       or custom amounts. The hidden #payAmount keeps the existing
+                       submit/validate logic intact; its value + this display are
+                       set from the loan summary (setLockedAmount in payments.js). -->
+                  <div class="pay-amount-locked" style="display:flex;align-items:baseline;gap:1px;font-size:1.9rem;font-weight:800;letter-spacing:-.02em;">
+                    <span style="font-size:1.1rem;font-weight:700;opacity:.6;">$</span><span data-pay-amount-display>0.00</span>
                   </div>
+                  <p style="margin:4px 0 0;font-size:12px;opacity:.7;">This is your full amount due.</p>
+                  <input type="hidden" id="payAmount" name="amount" value="">
                 </div>
                 <!-- CVV moved into the payment-confirmation modal (entered at
                      authorize time, bank-style) — see #payCardConfirmModal. -->
@@ -704,6 +707,6 @@
   <script src="/js/cif-loancache.js?v=20260628b"></script>
   <script src="/js/cif-ach.js?v=20260626c"></script>
   <script src="/js/cif-esign.js?v=20260628b"></script>
-  <script src="/js/payments.js?v=20260628b"></script>
+  <script src="/js/payments.js?v=20260628c"></script>
 </body>
 </html>

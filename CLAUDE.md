@@ -123,6 +123,17 @@ never flashes before dashboard.js fills it.
 (`#F59E0B → #E07C02`, dark text). (Tried navy, too heavy under the green card;
 amber keeps the "tap me" warmth.)
 
+### Payments: amount is LOCKED (no partial/custom amounts)
+The pay form has **no editable amount field**. `#payAmount` is now a **hidden**
+input; `setLockedAmount()` (payments.js) writes it + a read-only `[data-pay-
+amount-display]` figure from the current loan. The locked value = the same
+"Amount Due" the card shows: a payment-plan customer's current **installment**
+(`amountDue`) or otherwise the full **balance**. Called from `renderLoanSummary`
+and `resetForPayAgain`; the "Pay now $X" button + confirm modals read the same
+value, so everything stays consistent. (If we ever want plan customers to pay
+the full payoff instead of the installment, change `setLockedAmount` to use
+`loan.balance` always.)
+
 ### Past-due styling
 Card `is-pastdue` deep red `#D23636 → #8F1B1B` (was coral/pink). Pill green dot
 → **red "!" badge** (`.loan-card-pill.dash-pill--past-due::after { content:"!"; background:#dc2626 }`).
