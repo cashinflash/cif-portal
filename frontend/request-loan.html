@@ -49,7 +49,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260620b">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260627b">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260627c">
   <!-- Plaid Link SDK (same as dashboard.html) -->
   <script async src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
   <script>
@@ -154,7 +154,7 @@
     .rl-bank-name { font-weight:800; color:var(--rl-ink); font-size:.96rem; }
     .rl-bank-meta { color:var(--rl-mut); font-size:.83rem; }
     .rl-link { display:block; width:100%; background:none; border:none; color:var(--rl-grn);
-      font-weight:800; font-size:.92rem; font-family:inherit; cursor:pointer; padding:8px 0; text-align:left; }
+      font-weight:800; font-size:.92rem; font-family:inherit; cursor:pointer; padding:8px 0; text-align:center; }
     .rl-link:hover { color:var(--rl-grn-d); text-decoration:underline; }
 
     /* Bank-on-file (from Vergent) read-only panel */
@@ -245,6 +245,10 @@
     .rl-done .rl-btn { max-width:280px; margin:0 auto; }
 
     @media (max-width:560px) {
+      /* The brief loading screen fills the viewport so the page can't be
+         scrolled behind it on phones. */
+      .rl-loading:not([hidden]) { position:fixed; inset:0; min-height:0; z-index:50;
+        background:#fff; padding:24px; overscroll-behavior:none; }
       .rl-main { padding-left:16px; padding-right:16px; }
       .rl-card { padding:22px 18px; border-radius:18px; }
       .rl-grid { grid-template-columns:1fr; gap:13px; }
@@ -281,8 +285,8 @@
     .rl-eyebrow { color:var(--rl-grn); font-weight:800; letter-spacing:.09em; font-size:.72rem;
       text-transform:uppercase; margin:0 0 7px; }
     .rl-title { font-size:1.7rem; line-height:1.16; font-weight:800; letter-spacing:-.02em;
-      color:var(--rl-ink); margin:0 0 18px; }
-    .rl-title-brk { display:none; }  /* desktop: title flows naturally; mobile shows the break */
+      color:var(--rl-ink); margin:0 0 18px; text-align:center; }
+    .rl-title-brk { display:inline; }  /* two-line hero title on all viewports */
     .rl-legal { text-align:center; color:#9aa3af; font-size:.78rem; line-height:1.5;
       margin:26px auto 0; max-width:560px; }
 
@@ -453,7 +457,7 @@
         <h2>Verify your bank</h2>
         <p class="rl-sub">We securely review your most recent bank activity through Plaid. Your bank login is never shared with us.</p>
         <div id="rlBankList" class="rl-banklist"></div>
-        <button class="rl-link" id="rlConnectBank" type="button">Connect a different bank</button>
+        <button class="rl-link" id="rlConnectBank" type="button">Connect your bank</button>
         <div id="rlBankMatch" class="rl-bankmatch" hidden></div>
         <div id="rlBankFile" class="rl-onfile" hidden>
           <p class="rl-onfile-h">Bank account on file</p>
@@ -549,6 +553,6 @@
   <script src="/js/session.js"></script>
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
-  <script src="/js/reapply.js?v=20260627o"></script>
+  <script src="/js/reapply.js?v=20260627p"></script>
 </body>
 </html>

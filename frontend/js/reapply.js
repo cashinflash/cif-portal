@@ -557,6 +557,10 @@
   function renderBanks() {
     var root = $('#rlBankList');
     if (!root) return;
+    // Label the connect button for context: nothing linked yet vs. adding another.
+    var connectBtn = $('#rlConnectBank');
+    if (connectBtn) connectBtn.textContent = state.banks.length
+      ? 'Connect a different bank' : 'Connect your bank';
     if (!state.banks.length) {
       root.innerHTML = '<p class="rl-muted">No bank connected yet. Connect your bank below. '
         + 'It only takes a moment and keeps your application secure.</p>';
