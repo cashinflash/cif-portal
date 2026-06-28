@@ -38,13 +38,14 @@
       try { t = sessionStorage.getItem('cif_id_token'); } catch (e) {}
       if (!t) { out.textContent = 'Not signed in. Open /login.html, sign into the test account, then come back here.'; return; }
       statusEl.textContent = 'Running…';
-      fetch('/api/my-loans/active?debug=signing', { headers: { Authorization: 'Bearer ' + t, Accept: 'application/json' } })
+      fetch('/api/my-loans/active?debug=signing&_=' + Date.now(), { cache: 'no-store', headers: { Authorization: 'Bearer ' + t, Accept: 'application/json' } })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           var dbg = d && d.debug ? d.debug : d;
           var picked = {
             fundingProbe: dbg && dbg.fundingProbe,
             paymentPlanProbe: dbg && dbg.paymentPlanProbe,
+            loanDetailProbe: dbg && dbg.loanDetailProbe,
             disbursementDocs: dbg && dbg.disbursementProbe,
             outstandingHeader: dbg && dbg.disbursementProbe && dbg.disbursementProbe.outstandingHeaderScrubbed
           };
