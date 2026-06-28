@@ -2054,6 +2054,39 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
             plan[path] = entry
     out["paymentPlanProbe"] = plan
 
+    # Loan-detail / schedule probe — hunt for an endpoint that returns the
+    # actual installment list (Payments/Schedule[]) or a feeId we could feed to
+    # GetLeadPaySchedule. Captures keys + schedule-ish fields. Temporary.
+    detail: Dict[str, Any] = {}
+    if out_hdr:
+        for path in (
+            f"/V1/{cid}/loan/{out_hdr}",
+            f"/V1/loan/{out_hdr}",
+            f"/V1/GetLoan/{out_hdr}",
+            f"/V1/{cid}/loan/{out_hdr}/schedule",
+            f"/V1/{cid}/loan/{out_hdr}/payments",
+            f"/V1/RepaymentPlan/{out_hdr}/GetExistingSchedule",
+        ):
+            try:
+                std, bodyd, rawd = _v1_request("GET", path, return_raw=True)
+            except Exception as excd:
+                detail[path] = {"error": str(excd)[:160]}
+                continue
+            entry: Dict[str, Any] = {"status": std}
+            if isinstance(bodyd, dict):
+                entry["keys"] = sorted(list(bodyd.keys()))[:60]
+                for sk in ("Payments", "Schedule", "Installments",
+                           "PaymentSchedule", "FeeId", "feeId", "RPP"):
+                    if sk in bodyd:
+                        entry[sk] = bodyd[sk]
+            elif isinstance(bodyd, list):
+                entry["len"] = len(bodyd)
+                entry["sample"] = bodyd[0] if bodyd else None
+            else:
+                entry["raw"] = (str(rawd)[:300] if rawd else "<empty>")
+            detail[path] = entry
+    out["loanDetailProbe"] = detail
+
     # Funding-method probe (Vergent GetFundingStatus → Results[].FundingMethod).
     # Run on a CARD-disbursed loan and a CASH-disbursed loan and compare the
     # FundingMethod value to find the card-vs-cash signal. Methods/ids only —
