@@ -142,7 +142,8 @@
       var bannerActive = document.querySelector('.app-loan-banner');
       if (bannerActive) bannerActive.style.display = hasActiveLoan ? 'none' : '';
       setText(qs('[data-pay-loan-id]', card), (loan.publicId || loan.id || '—'));
-      setText(qs('[data-pay-balance]', card), money(loan.balance));
+      var displayDue = (loan.onPaymentPlan && loan.amountDue != null) ? loan.amountDue : loan.balance;
+      setText(qs('[data-pay-balance]', card), money(displayDue));
       var _funded = (loan.principal != null ? loan.principal
         : (loan.principalBalance != null ? loan.principalBalance : null));
       setText(qs('[data-pay-funded]', card), _funded != null ? money(_funded) : '—');
@@ -152,6 +153,32 @@
         // so show just the date (the amount is already the big "Amount due").
         caption.textContent = loan.nextDueDate ? formatDate(loan.nextDueDate) : '—';
       }
+      // "Due in N days" pill — amber within a week, red past due.
+      (function () {
+        var els = card.querySelectorAll('[data-loan-countdown]');
+        if (!els.length) return;
+        var text = '', cls = '';
+        if (loan.nextDueDate) {
+          var due = new Date(loan.nextDueDate);
+          if (!isNaN(due.getTime())) {
+            var today = new Date();
+            var a = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+            var b = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+            var days = Math.round((a - b) / 86400000);
+            if (days < 0) { text = Math.abs(days) + (Math.abs(days) === 1 ? ' day' : ' days') + ' past due'; cls = 'is-late'; }
+            else if (days === 0) { text = 'Due today'; cls = 'is-soon'; }
+            else if (days === 1) { text = 'Due tomorrow'; cls = 'is-soon'; }
+            else { text = 'Due in ' + days + ' days'; if (days <= 7) cls = 'is-soon'; }
+          }
+        }
+        Array.prototype.forEach.call(els, function (el) {
+          el.classList.remove('is-soon', 'is-late');
+          if (!text) { el.hidden = true; return; }
+          if (cls) el.classList.add(cls);
+          el.textContent = text; el.hidden = false;
+        });
+      })();
+
       const pill = qs('[data-pay-loan-status]', card);
       // Past-due detection IDENTICAL to Home + Loans (statusPillClass): the
       // status string alone doesn't always say "past due" — Vergent flags it via
