@@ -110,8 +110,12 @@
   };
 
   // ---------- Loan summary ----------
-  function loadLoan() {
-    return api('/api/my-payment/loan-summary').then(function (data) {
+  var PAY_ENDPOINT = '/api/my-payment/loan-summary';
+
+  // Render the pay-page summary card from a loan-summary payload. Extracted so
+  // the SWR cache (cif-loancache.js) can paint it INSTANTLY from cache, then
+  // again from the fresh fetch. Returns the loan object (or null when none).
+  function renderLoanSummary(data) {
       const card = qs('#paySummary');
       const body = qs('.pay-summary-body', card);
       const empty = qs('.pay-summary-empty', card);
@@ -234,6 +238,18 @@
         CifEsign.gateCard(card, loan);
       }
       return loan;
+  }
+
+  function loadLoan() {
+    // Stale-while-revalidate: paint the summary INSTANTLY from cache (so
+    // navigating to Payments is instant), then refresh in the background. The
+    // cache is cleared on a successful payment, so a post-payment refresh never
+    // shows a stale balance.
+    var cached = window.CifLoanCache && CifLoanCache.get(PAY_ENDPOINT);
+    if (cached) { try { renderLoanSummary(cached); } catch (e) { /* fall through to fetch */ } }
+    return api(PAY_ENDPOINT).then(function (data) {
+      if (window.CifLoanCache) CifLoanCache.set(PAY_ENDPOINT, data);
+      return renderLoanSummary(data);
     });
   }
 
@@ -990,6 +1006,10 @@
           } else {
             sessionStorage.setItem(SUCCESS_KEY, JSON.stringify(receipt));
           }
+          // The balance just changed — drop the SWR cache so the post-payment
+          // reload here AND the next page (Home/Loans) fetch fresh, never a
+          // stale pre-payment balance. loadLoan() re-populates it immediately.
+          if (window.CifLoanCache) CifLoanCache.clear();
           return loadLoan()
             .catch(function () {})
             .then(function () { showReceipt(receipt); });

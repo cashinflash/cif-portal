@@ -199,6 +199,10 @@
   function _complete() {
     try { if (_signWin && !_signWin.closed) _signWin.close(); } catch (e) { /* ignore */ }
     _signWin = null;
+    // The loan just flipped from pending-signature to active — drop the SWR
+    // loan cache so the Home dashboard fetches the fresh active card instead of
+    // re-painting the cached "Pending Loan" state.
+    try { if (window.CifLoanCache) CifLoanCache.clear(); } catch (e) { /* ignore */ }
     try { window.location.assign('/dashboard.html'); }
     catch (e) { try { window.location.reload(); } catch (e2) { /* ignore */ } }
   }

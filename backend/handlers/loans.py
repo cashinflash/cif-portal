@@ -152,6 +152,13 @@ _apim_token_exp: float = 0.0
 
 TOKEN_TTL_SECS = 60 * 60  # refresh once an hour even though Timeout is 24h
 
+# Remembered index of the _fetch_all_loans candidate endpoint that last
+# returned data. We try the known-good shape FIRST so we don't re-pay the
+# fallback chain's wasted round-trips on every request. The working endpoint
+# shape is a Vergent API capability (same for every customer), so one
+# module-level hint is correct and self-healing across warm invocations.
+_fetch_loans_winner_idx: int = 0
+
 # Front-end origin allowed to call our API. Locked down from "*" so a
 # malicious site can't relay a logged-in customer's browser into our
 # API. Override via env var when adding a custom domain. Browsers will
@@ -607,9 +614,18 @@ def _fetch_all_loans(cid: str) -> List[Dict[str, Any]]:
         f"/V1/{cid}/loans?includePrevious=true&numresults=200",
         f"/V1/{cid}/loans",
     )
-    for path in candidates:
-        status, body = _v1_get(path)
+    # Try the last-known-good endpoint first (self-healing), then the rest in
+    # order. Saves 1-2 wasted Vergent round-trips per request when the broadest
+    # candidate isn't the one this Vergent tenant actually serves.
+    global _fetch_loans_winner_idx
+    order = list(range(len(candidates)))
+    if 0 <= _fetch_loans_winner_idx < len(candidates):
+        order.remove(_fetch_loans_winner_idx)
+        order.insert(0, _fetch_loans_winner_idx)
+    for i in order:
+        status, body = _v1_get(candidates[i])
         if status == 200 and isinstance(body, list):
+            _fetch_loans_winner_idx = i
             shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
             return [l for l in shaped if _is_visible_loan(l)]
     return []
@@ -636,25 +652,39 @@ def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
     Mutates the list in place. Best-effort — failures (network,
     unexpected shape, etc.) leave fees=null and the UI just shows "—".
     Each missing-fee loan triggers one extra v1 GetCustomerLoanHistory
-    call, which is fine for the typical CIF customer with 1-3 loans.
+    call; those calls are fired CONCURRENTLY (see below) so total wall
+    time is ~one call regardless of how many paid-off loans a customer
+    has.
     """
+    # Collect the loans that actually need a history call.
+    targets = []
     for loan in loans:
         if loan.get("fees") is not None:
             continue
         principal = _to_number(loan.get("principal"))
         hdr_id = loan.get("id")
-        store_id = loan.get("storeId")
         if not principal or not hdr_id or principal <= 0:
             continue
+        targets.append(loan)
+    if not targets:
+        return
 
+    # Pre-warm the v1 token ONCE up front so the worker threads all reuse the
+    # cached token + userId (module globals) rather than each racing to fetch a
+    # fresh one. On a warm container this is already populated — a no-op.
+    if _v1_token is None or _v1_user_id is None:
+        _get_v1_token()
+    uid = _v1_user_id or 0
+
+    def _patch_one(loan: Dict[str, Any]) -> None:
+        principal = _to_number(loan.get("principal"))
+        hdr_id = loan.get("id")
+        store_id = loan.get("storeId")
         # Direct raw v1 call — Vergent's transactions store the fee
         # under a `Fee` column distinct from `Amount`, and the running
         # balance is in `Balance`. Peak balance = principal + total
         # fees, so we derive fees from that. Works for any loan type
         # without needing to know which "Type" string is the fee row.
-        if _v1_user_id is None:
-            _get_v1_token()
-        uid = _v1_user_id or 0
         params = urllib.parse.urlencode({
             "custId": cid,
             "HdrId": hdr_id,
@@ -667,9 +697,9 @@ def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
         except Exception as e:
             log.warning("patch-fees history error hdr_id=%s err=%s",
                         hdr_id, type(e).__name__)
-            continue
+            return
         if status != 200:
-            continue
+            return
         rows: List[Dict[str, Any]] = []
         if isinstance(body, list):
             rows = [r for r in body if isinstance(r, dict)]
@@ -680,7 +710,7 @@ def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
                     rows = [r for r in v if isinstance(r, dict)]
                     break
         if not rows:
-            continue
+            return
 
         # Max Balance across all non-voided rows = principal + total
         # fees ever charged. Excludes voided transactions so we don't
@@ -708,6 +738,25 @@ def _patch_missing_fees(cid: str, loans: List[Dict[str, Any]]) -> None:
             loan["fees"] = derived_fee
             log.info("patched fees hdr_id=%s max_balance=%.2f fee_sum=%.2f principal=%.2f fees=%.2f",
                      hdr_id, max_balance, fee_sum, principal, derived_fee)
+
+    # Fire the per-loan history calls CONCURRENTLY — each is independent, each
+    # mutates a different loan dict, and _http is stateless (one urllib request
+    # per call), so this is thread-safe. Collapses N sequential ~1s Vergent
+    # round-trips into ~1. Every worker is fully self-guarded (a failure just
+    # leaves that loan's fees=null → UI shows "—", exactly as before), and we
+    # fall back to sequential if the pool can't start.
+    if len(targets) == 1:
+        _patch_one(targets[0])
+        return
+    try:
+        # ThreadPoolExecutor is imported at module top.
+        with ThreadPoolExecutor(max_workers=min(len(targets), 6)) as ex:
+            list(ex.map(_patch_one, targets))
+    except Exception as e:
+        log.warning("patch-fees parallel failed (%s); running sequentially",
+                    type(e).__name__)
+        for loan in targets:
+            _patch_one(loan)
 
 
 # ─────────────────────────────────────────

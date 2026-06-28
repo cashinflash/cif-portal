@@ -155,14 +155,21 @@
     var detail = qs('#loansDetailView');
     if (detail) detail.hidden = true;
 
+    // Stale-while-revalidate: paint the list INSTANTLY from the last cached
+    // payload, then refresh in the background. See cif-loancache.js.
+    var cached = window.CifLoanCache && CifLoanCache.get(ACTIVE_ENDPOINT);
+    if (cached) {
+      try { renderList((cached && cached.allLoans) || []); } catch (e) { /* fall through */ }
+    }
     api(ACTIVE_ENDPOINT, token)
       .then(function (data) {
+        if (window.CifLoanCache) CifLoanCache.set(ACTIVE_ENDPOINT, data);
         var loans = (data && data.allLoans) || [];
         renderList(loans);
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
-        renderListError();
+        if (!cached) renderListError();
       });
   }
 
@@ -601,13 +608,25 @@
     setText(qs('.app-pagetitle-mobile'), 'Loan #' + loanId);
     setText(qs('.app-pagesub-mobile'), 'Full loan details, payments, and documents.');
 
+    var findLoan = function (data) {
+      var loans = (data && data.allLoans) || [];
+      return loans.find(function (l) {
+        return String(l.id) === String(loanId) ||
+               String(l.publicId || '') === String(loanId);
+      });
+    };
+    // Instant paint of the detail summary from cache. Documents load only on
+    // the fresh response below, so they're never stale or double-fetched.
+    var cached = window.CifLoanCache && CifLoanCache.get(ACTIVE_ENDPOINT);
+    var paintedFromCache = false;
+    if (cached) {
+      var cloan = findLoan(cached);
+      if (cloan) { try { renderDetail(cloan); paintedFromCache = true; } catch (e) {} }
+    }
     api(ACTIVE_ENDPOINT, token)
       .then(function (data) {
-        var loans = (data && data.allLoans) || [];
-        var loan = loans.find(function (l) {
-          return String(l.id) === String(loanId) ||
-                 String(l.publicId || '') === String(loanId);
-        });
+        if (window.CifLoanCache) CifLoanCache.set(ACTIVE_ENDPOINT, data);
+        var loan = findLoan(data);
         if (!loan) {
           renderDetailNotFound();
           return;
@@ -624,7 +643,8 @@
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
-        renderDetailError();
+        // Don't paint an error over a good cached detail view.
+        if (!paintedFromCache) renderDetailError();
       });
   }
 

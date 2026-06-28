@@ -451,13 +451,23 @@
 
   // ---------- Active loan ----------
   function loadActiveLoan() {
+    // Stale-while-revalidate: paint the card INSTANTLY from the last cached
+    // payload (so navigating back to Home is instant), then refresh in the
+    // background. The first load of a session still fetches normally; every
+    // navigation after is instant. See cif-loancache.js.
+    var cached = window.CifLoanCache && CifLoanCache.get(ACTIVE_ENDPOINT);
+    if (cached) {
+      try { renderDashboardForData(cached); } catch (e) { /* fall through to fetch */ }
+    }
     api(ACTIVE_ENDPOINT, token)
       .then(function (data) {
+        if (window.CifLoanCache) CifLoanCache.set(ACTIVE_ENDPOINT, data);
         renderDashboardForData(data);
       })
       .catch(function (err) {
         if (err && err.message === 'unauthorized') return;
-        renderDashboardForData(null);
+        // Only fall back to the empty/error state if we had nothing cached.
+        if (!cached) renderDashboardForData(null);
       });
   }
 
