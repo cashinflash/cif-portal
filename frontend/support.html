@@ -23,6 +23,14 @@
       }
       function gate() {
         if (valid()) return false;
+        // Admin "View as customer": impersonation.js (below) stashes the
+        // operator JWT + token from the URL fragment on parse. Don't bounce
+        // to login — allow it on first load (fragment present) and on later
+        // navigation (token already saved in sessionStorage).
+        try {
+          if ((window.location.hash || '').indexOf('impersonationToken=') >= 0) return false;
+          if (sessionStorage.getItem('cif_impersonation_token')) return false;
+        } catch (e) {}
         try { document.documentElement.style.visibility = 'hidden'; } catch (e) {}
         window.location.replace('/login.html');
         return true;
