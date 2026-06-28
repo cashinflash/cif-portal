@@ -2103,17 +2103,55 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
             plan[path] = entry
     out["paymentPlanProbe"] = plan
 
-    # Loan-detail / schedule probe — hunt for an endpoint that returns the
-    # actual installment list (Payments/Schedule[]) or a feeId we could feed to
-    # GetLeadPaySchedule. Captures keys + schedule-ish fields. Temporary.
+    # Loan-detail / schedule probe. /V1/loan/{hdr} returns 200 with nested
+    # LoanDetail/Properties — the repayment-plan installments, if Vergent
+    # exposes them at all, live somewhere in that tree. For a dict response we
+    # (a) map the nested structure one level deep and (b) hunt the whole tree
+    # for any ARRAY of objects that looks like a schedule (date/amount/payment-
+    # ish keys), returning a PII-scrubbed sample. Temporary diagnostic.
+    _SENSITIVE = ("ssn", "social", "account", "routing", "aba", "dob", "birth",
+                  "card", "cvv", "tax", "ein", "license", "password", "token",
+                  "secret", "addr", "phone", "email", "firstname", "lastname",
+                  "fullname", "middlename", "routingnumber")
+    _SCHED_KEYS = ("date", "due", "amount", "payment", "principal", "fee",
+                   "installment", "balance")
+
+    def _redact(v, depth=0):
+        if depth > 6:
+            return "<deep>"
+        if isinstance(v, dict):
+            r = {}
+            for k, vv in v.items():
+                r[k] = "***" if any(t in k.lower() for t in _SENSITIVE) else _redact(vv, depth + 1)
+            return r
+        if isinstance(v, list):
+            return [_redact(x, depth + 1) for x in v[:3]]
+        return v
+
+    def _find_arrays(obj, path, acc, depth=0):
+        if depth > 8:
+            return
+        if isinstance(obj, dict):
+            for k, vv in obj.items():
+                _find_arrays(vv, (path + "." + k) if path else k, acc, depth + 1)
+        elif isinstance(obj, list):
+            first = obj[0] if obj else None
+            e = {"path": path, "len": len(obj)}
+            if isinstance(first, dict):
+                e["firstKeys"] = sorted(list(first.keys()))[:40]
+                if any(any(t in k.lower() for t in _SCHED_KEYS) for k in first.keys()):
+                    e["scheduleLike"] = True
+                    e["sample"] = _redact(first)
+            acc.append(e)
+            for x in obj[:5]:
+                if isinstance(x, dict):
+                    _find_arrays(x, path + "[]", acc, depth + 1)
+
     detail: Dict[str, Any] = {}
     if out_hdr:
         for path in (
-            f"/V1/{cid}/loan/{out_hdr}",
             f"/V1/loan/{out_hdr}",
-            f"/V1/GetLoan/{out_hdr}",
-            f"/V1/{cid}/loan/{out_hdr}/schedule",
-            f"/V1/{cid}/loan/{out_hdr}/payments",
+            f"/V1/{cid}/loan/{out_hdr}",
             f"/V1/RepaymentPlan/{out_hdr}/GetExistingSchedule",
         ):
             try:
@@ -2124,13 +2162,26 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
             entry: Dict[str, Any] = {"status": std}
             if isinstance(bodyd, dict):
                 entry["keys"] = sorted(list(bodyd.keys()))[:60]
-                for sk in ("Payments", "Schedule", "Installments",
-                           "PaymentSchedule", "FeeId", "feeId", "RPP"):
-                    if sk in bodyd:
-                        entry[sk] = bodyd[sk]
+                nested: Dict[str, Any] = {}
+                for k, vv in bodyd.items():
+                    if isinstance(vv, dict):
+                        nested[k] = sorted(list(vv.keys()))[:40]
+                    elif isinstance(vv, list):
+                        nested[k] = f"[list len={len(vv)}]"
+                if nested:
+                    entry["nestedKeys"] = nested
+                arrays: List[Dict[str, Any]] = []
+                _find_arrays(bodyd, "", arrays)
+                sched = [a for a in arrays if a.get("scheduleLike")]
+                if sched:
+                    entry["scheduleArrays"] = sched
+                elif arrays:
+                    entry["allArrays"] = [{"path": a["path"], "len": a["len"],
+                                           "firstKeys": a.get("firstKeys")}
+                                          for a in arrays if a["len"]][:25]
             elif isinstance(bodyd, list):
                 entry["len"] = len(bodyd)
-                entry["sample"] = bodyd[0] if bodyd else None
+                entry["sample"] = _redact(bodyd[0]) if bodyd else None
             else:
                 entry["raw"] = (str(rawd)[:300] if rawd else "<empty>")
             detail[path] = entry
