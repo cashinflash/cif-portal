@@ -109,6 +109,10 @@
     return api('/api/my-reapply/prefill').then(function (res) {
       if (!res.ok || !res.data || !res.data.ok) throw new Error('prefill_failed');
       var d = res.data;
+      // First-timers (no prior loans) shouldn't see "another loan".
+      var lead = $('#rlTitleLead');
+      if (lead) lead.textContent = (d.hasPriorLoans === false)
+        ? 'Ready for your first loan?' : 'Ready for another loan?';
       var p = d.prefill || {};
       state.min = d.minAmount || 100;
       state.max = d.maxAmount || 255;

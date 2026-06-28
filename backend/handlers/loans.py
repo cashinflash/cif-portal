@@ -3920,8 +3920,16 @@ def get_reapply_prefill(event: Dict[str, Any]) -> Dict[str, Any]:
         "accountMask": c.get("accountMask") or "",
         "linkedAt": c.get("linkedAt") or "",
     } for c in conns if c.get("itemId")]
+    # First-time vs returning — drives the page title ("your first loan" vs
+    # "another loan"). Safe default on error: assume returning.
+    try:
+        has_prior_loans = len(_fetch_all_loans(cid)) > 0
+    except Exception as exc:  # pragma: no cover - network
+        log.warning("reapply prior-loans check failed cid=%s: %s", cid, exc)
+        has_prior_loans = True
     return _json_response(200, {
         "ok": True,
+        "hasPriorLoans": has_prior_loans,
         "prefill": {
             "firstName": info.get("firstName", ""),
             "lastName": info.get("lastName", ""),
