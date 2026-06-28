@@ -4306,6 +4306,14 @@ body.cif-modal-open .app-tabbar { display: none; }
   position: relative; border-radius: 22px; padding: 22px 22px 14px;
   background: linear-gradient(150deg, #1FA050 0%, #0E8741 58%, #0C7137 100%);
   color: #fff; box-shadow: 0 12px 30px rgba(14,135,65,.22); overflow: hidden;
+  isolation: isolate;
+}
+/* Subtle decorative blob in the top-right corner — sits BEHIND the content
+   (isolation + z-index:-1) and is clipped by the card's overflow:hidden. */
+.loan-card::after {
+  content: ""; position: absolute; top: -70px; right: -55px;
+  width: 190px; height: 190px; border-radius: 50%;
+  background: rgba(255,255,255,.06); z-index: -1; pointer-events: none;
 }
 .loan-card-skel { display: flex; flex-direction: column; gap: 14px; }
 .loan-card-skel-line { height: 14px; border-radius: 7px; background: rgba(255,255,255,.22); }
