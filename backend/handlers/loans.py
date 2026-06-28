@@ -2035,15 +2035,16 @@ def _debug_signing(cid: str) -> Dict[str, Any]:
             attempts.append(f"/V1/DynamicRepaymentPlan/{lid}/GetExistingSchedule")
         for path in attempts:
             try:
-                stp, bodyp = _v1_get(path)
+                stp, bodyp, rawp = _v1_request("GET", path, return_raw=True)
             except Exception as excp:
                 plan[path] = {"error": str(excp)[:160]}
                 continue
             entry: Dict[str, Any] = {"status": stp}
             if isinstance(bodyp, (dict, list)):
                 entry["body"] = bodyp
-            else:
-                entry["snippet"] = str(bodyp)[:500] if bodyp is not None else "<empty body>"
+            # Capture the RAW response text — Vergent 500s carry the real error
+            # there (e.g. a null-ref / "no schedule"), which _v1_get discarded.
+            entry["raw"] = (str(rawp)[:700] if rawp else "<empty>")
             plan[path] = entry
     out["paymentPlanProbe"] = plan
 
