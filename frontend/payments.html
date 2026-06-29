@@ -407,22 +407,44 @@
             <!-- RIGHT: Payment breakdown -->
             <div class="app-surface pay-breakdown-card">
               <div class="pay-card-head">
-                <h2 class="home-card-title">Payment breakdown</h2>
-                <p class="home-card-sub">Here's what makes up your balance.</p>
+                <h2 class="home-card-title" data-breakdown-title>Payment breakdown</h2>
+                <p class="home-card-sub" data-breakdown-sub>Here's what makes up your balance.</p>
               </div>
               <dl class="pay-breakdown">
-                <div class="pay-breakdown-row">
-                  <dt>Principal</dt>
-                  <dd data-pay-principal>&mdash;</dd>
+                <!-- Full breakdown: a regular loan, or "Pay off full balance"
+                     on a plan. -->
+                <div data-breakdown-full>
+                  <div class="pay-breakdown-row">
+                    <dt>Principal</dt>
+                    <dd data-pay-principal>&mdash;</dd>
+                  </div>
+                  <div class="pay-breakdown-row">
+                    <dt>Loan fee</dt>
+                    <dd data-pay-fee>&mdash;</dd>
+                  </div>
+                  <div class="pay-breakdown-rule"></div>
+                  <div class="pay-breakdown-row pay-breakdown-total">
+                    <dt>Total due</dt>
+                    <dd data-pay-total>&mdash;</dd>
+                  </div>
                 </div>
-                <div class="pay-breakdown-row">
-                  <dt>Loan fee</dt>
-                  <dd data-pay-fee>&mdash;</dd>
-                </div>
-                <div class="pay-breakdown-rule"></div>
-                <div class="pay-breakdown-row pay-breakdown-total">
-                  <dt>Total due</dt>
-                  <dd data-pay-total>&mdash;</dd>
+                <!-- Plan-payment view: shown when "Plan payment" is chosen.
+                     Vergent doesn't expose the installment's principal/fee
+                     split, so we show only figures we can stand behind. -->
+                <div data-breakdown-plan hidden>
+                  <div class="pay-breakdown-row pay-breakdown-total">
+                    <dt>Payment amount</dt>
+                    <dd data-pay-plan-amount>&mdash;</dd>
+                  </div>
+                  <div class="pay-breakdown-rule"></div>
+                  <div class="pay-breakdown-row">
+                    <dt>Remaining balance after</dt>
+                    <dd data-pay-plan-remaining>&mdash;</dd>
+                  </div>
+                  <div class="pay-breakdown-row">
+                    <dt>Full loan balance</dt>
+                    <dd data-pay-plan-fullbalance>&mdash;</dd>
+                  </div>
                 </div>
               </dl>
             </div>
@@ -721,6 +743,6 @@
   <script src="/js/cif-loancache.js?v=20260628b"></script>
   <script src="/js/cif-ach.js?v=20260626c"></script>
   <script src="/js/cif-esign.js?v=20260628b"></script>
-  <script src="/js/payments.js?v=20260628d"></script>
+  <script src="/js/payments.js?v=20260628e"></script>
 </body>
 </html>

@@ -138,6 +138,12 @@ written by `setLockedAmount()` (payments.js):
 Called from `renderLoanSummary` + `resetForPayAgain`; the "Pay now $X" button +
 confirm modals all read `#payAmount`, so everything stays consistent.
 
+The **breakdown card adapts** to the choice (`renderBreakdown()`): "Pay off full
+balance"/regular → Principal + Loan fee + Total payoff; "Plan payment" → "This
+payment" (Payment amount + Remaining balance after + Full loan balance). We do
+NOT show a principal/fee split for an installment — Vergent doesn't expose it, so
+the plan view only shows figures we can derive (`payoff - installment`).
+
 **Backend fix (the plan-charge bug):** the pay page
 (`/api/my-payment/loan-summary` → `_fetch_active_loan`) used the plain
 `/V1/{cid}/loans` list, which returns `AmountDue == PayoffAmount` (no plan

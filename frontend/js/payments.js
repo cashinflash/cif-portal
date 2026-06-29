@@ -210,24 +210,12 @@
       // matching Home — independent of the pill so it works even if absent.
       card.classList.toggle('is-pastdue-soft', _soft);
       card.classList.toggle('is-pastdue', _past && !_soft);
-      // Payment breakdown (defensive — every element is optional). Total is
-      // the balance; principal/fee are shown only when the API surfaces them,
-      // otherwise they stay as an em-dash placeholder (do NOT overwrite with
-      // a wrong value).
-      const totalEl = qs('[data-pay-total]');
-      if (totalEl) totalEl.textContent = money(loan.balance);
-      const principal = (loan.principal != null ? loan.principal
-        : (loan.principalBalance != null ? loan.principalBalance : null));
-      if (principal != null) setText(qs('[data-pay-principal]'), money(principal));
-      const fee = (loan.fees != null ? loan.fees
-        : (loan.fee != null ? loan.fee
-        : (loan.loanFee != null ? loan.loanFee : null)));
-      if (fee != null) setText(qs('[data-pay-fee]'), money(fee));
       if (body) body.hidden = false;
-      // Lock the payment amount to the full amount due (no partial/custom
-      // amounts). setLockedAmount() reads state.loan and writes both the hidden
-      // #payAmount (used by submit/validate) and the read-only display.
+      // Lock the amount (no partial/custom entry) + render the breakdown to
+      // match. setLockedAmount() writes the hidden #payAmount; renderBreakdown()
+      // shows the full-balance or plan-payment view for the current choice.
       setLockedAmount();
+      renderBreakdown();
       // If this customer is awaiting signature (known synchronously from the
       // preflight flag), rebuild the card to the pending layout NOW — same
       // synchronous tick that rendered the default summary — so the old version
@@ -599,6 +587,53 @@
     }
     if (inp) inp.value = (n != null && !isNaN(n) && n > 0) ? n.toFixed(2) : '';
     return n;
+  }
+
+  // Payment breakdown card — adapts to the choice (defensive; every element is
+  // optional). Regular loan / "pay off full balance" → Principal + Loan fee +
+  // Total payoff. "Plan payment" → Payment amount + Remaining balance after +
+  // Full loan balance. We don't get the installment's principal/fee split from
+  // Vergent, so the plan view shows only figures we can stand behind.
+  function renderBreakdown() {
+    var loan = state.loan;
+    if (!loan) return;
+    var payoff = (loan.balance != null) ? Number(loan.balance)
+      : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
+    var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
+    var isPlan = !!loan.onPaymentPlan && installment != null && payoff != null
+      && installment + 0.01 < payoff;
+    var sel = document.querySelector('input[name="payPlanChoice"]:checked');
+    var planChosen = isPlan && !(sel && sel.value === 'payoff');
+
+    // Full-breakdown figures (also the non-plan default).
+    var principal = (loan.principal != null) ? loan.principal
+      : (loan.principalBalance != null ? loan.principalBalance : null);
+    var fee = (loan.fees != null) ? loan.fees
+      : (loan.fee != null ? loan.fee : (loan.loanFee != null ? loan.loanFee : null));
+    if (principal != null) setText(qs('[data-pay-principal]'), money(principal));
+    if (fee != null) setText(qs('[data-pay-fee]'), money(fee));
+    var totalEl = qs('[data-pay-total]'); if (totalEl && payoff != null) totalEl.textContent = money(payoff);
+
+    var fullG = qs('[data-breakdown-full]');
+    var planG = qs('[data-breakdown-plan]');
+    var title = qs('[data-breakdown-title]');
+    var sub = qs('[data-breakdown-sub]');
+
+    if (planChosen) {
+      var remaining = (payoff != null && installment != null) ? Math.max(0, payoff - installment) : null;
+      setText(qs('[data-pay-plan-amount]'), installment != null ? money(installment) : '—');
+      setText(qs('[data-pay-plan-remaining]'), remaining != null ? money(remaining) : '—');
+      setText(qs('[data-pay-plan-fullbalance]'), payoff != null ? money(payoff) : '—');
+      if (title) title.textContent = 'This payment';
+      if (sub) sub.textContent = "Here's what you're paying now.";
+      if (fullG) fullG.hidden = true;
+      if (planG) planG.hidden = false;
+    } else {
+      if (title) title.textContent = 'Payment breakdown';
+      if (sub) sub.textContent = "Here's what makes up your balance.";
+      if (planG) planG.hidden = true;
+      if (fullG) fullG.hidden = false;
+    }
   }
 
   function applyMethodSelection() {
@@ -1436,6 +1471,7 @@
     document.addEventListener('change', function (e) {
       if (e.target && e.target.name === 'payPlanChoice') {
         setLockedAmount();
+        renderBreakdown();
         applyMethodSelection();
       }
     });
