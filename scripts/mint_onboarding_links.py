@@ -22,7 +22,7 @@ Usage:
   python mint_onboarding_links.py --csv customers.csv --out links.csv
 
   # options:
-  --origin   portal origin (default https://d1zucrj1ouu3c.cloudfront.net)
+  --origin   portal origin (default https://my.cashinflash.com)
   --exp-days link lifetime in days (default 14)
 """
 import argparse
@@ -37,7 +37,7 @@ import time
 import boto3
 
 SECRET_NAME_DEFAULT = "cif-portal/onboard-signing-secret"
-ORIGIN_DEFAULT = "https://d1zucrj1ouu3c.cloudfront.net"
+ORIGIN_DEFAULT = "https://my.cashinflash.com"
 
 
 def _b64u(b: bytes) -> str:
@@ -103,9 +103,9 @@ def main() -> int:
 
     out = open(args.out, "w", newline="") if args.out else sys.stdout
     w = csv.writer(out)
-    w.writerow(["email", "url"])
+    w.writerow(["email", "firstName", "url"])
     for cid, email, first, last in rows:
-        w.writerow([email, mint(secret, cid=cid, email=email, first=first,
+        w.writerow([email, first, mint(secret, cid=cid, email=email, first=first,
                                 last=last, exp=exp, origin=args.origin)])
     if args.out:
         out.close()

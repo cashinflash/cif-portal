@@ -15,7 +15,7 @@ on:
       portal_origin:
         description: "Frontend origin allowed by CORS (e.g. https://portal.cashinflash.com)"
         required: true
-        default: "https://d1zucrj1ouu3c.cloudfront.net"
+        default: "https://my.cashinflash.com"
 
 env:
   AWS_REGION: us-east-1
