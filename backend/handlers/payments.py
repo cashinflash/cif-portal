@@ -67,6 +67,7 @@ from handlers.loans import (
     APIM_BASE,
     CORS_HEADERS,
     V1_BASE,
+    _apply_plan_installment,
     _claims,
     _customer_id,
     _fetch_all_loans,
@@ -678,6 +679,9 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(200, {"loan": None})
 
     loan = _fetch_active_loan(cid)
+    # Surface the remembered plan installment so the pay page shows the next
+    # payment even after the current one is paid (Vergent hides it between dates).
+    _apply_plan_installment(loan)
     return _json_response(200, {"loan": loan})
 
 

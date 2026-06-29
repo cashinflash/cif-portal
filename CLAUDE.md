@@ -162,8 +162,30 @@ principal/fee split when it no longer sums to the paid-down balance ("Balance
 remaining" instead of "Total due"). The chooser/installment view returns
 automatically when `AmountDue` repopulates on the next due date. **Vergent does
 NOT expose the *next* installment amount between due dates** — only "$0 due now"
-+ the remaining payoff; showing the next installment early would need us to
-persist it ourselves (not built).
++ the remaining payoff.
+
+### Plan installment memory (Req 4A — persist the next installment)
+Since Vergent hides the next installment between due dates, we remember it.
+`_apply_plan_installment(loan)` (loans.py) writes the installment to DynamoDB
+(`cif-portal-plan-installments-dev`, key `loanId`, TTL `expiresAt`) the first
+time it sees a real installment due, and recalls it (capped at the remaining
+balance) once `amountDue` drops to 0 — exposing it as `loan.planInstallment`.
+Best-effort (try/except): if the store is unavailable the UI just falls back to
+the balance + pay-off. Wired into `get_active_loan` (loans Lambda) AND
+`get_loan_summary` (payments Lambda — `_apply_plan_installment` is imported from
+loans.py). Front end: cards/chooser/breakdown use `amountDue>0 ? amountDue :
+planInstallment` as the installment. Infra: `provision-plan-installments.yml`
+(idempotent; creates the table + an ADDITIVE inline IAM policy
+`cif-portal-plan-installments-rw` on the loans + payments roles — separate
+policy name, never touches existing perms).
+
+### Dashboard auto-poll for a freshly-created loan (Req 2)
+After online signing, Vergent takes ~1 min to create the loan + e-sign doc +
+populate its queue; the portal only checked on page load. `startPendingPoll()`
+(dashboard.js) polls `/api/my-loans/active` every 8s (≤ ~1.5 min, paused when
+the tab is hidden) while no active loan is showing, and flips to the pending /
+active card the moment Vergent has it — no manual reload. Stops as soon as a
+loan appears. The Vergent-side creation time itself can't be sped up.
 
 **Backend fix (the plan-charge bug):** the pay page
 (`/api/my-payment/loan-summary` → `_fetch_active_loan`) used the plain

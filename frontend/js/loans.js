@@ -221,7 +221,11 @@
     setText(qs('[data-loan-funded]', card), fmtCurrency(_planActive ? loan.balance : loan.principal));
     // Plan installment only when one is actually due (amountDue > 0); after a
     // plan payment Vergent reports amountDue = 0 (caught up) → show the balance.
-    var displayDue = (loan.hasPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
+    // Next plan payment: live amountDue when due, else remembered planInstallment
+    // between due dates; otherwise the balance.
+    var _inst = (loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue
+      : (loan.planInstallment != null && loan.planInstallment > 0 ? loan.planInstallment : null);
+    var displayDue = (loan.hasPaymentPlan && _inst != null) ? _inst : loan.balance;
     setText(qs('[data-loan-balance]', card), fmtCurrency(displayDue));
     setText(qs('[data-loan-next-due]', card), loan.nextDueDate ? fmtDate(loan.nextDueDate) : '—');
 

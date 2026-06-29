@@ -148,7 +148,11 @@
       setText(qs('[data-pay-loan-id]', card), (loan.publicId || loan.id || '—'));
       // Plan installment only when one is actually due (amountDue > 0); after a
       // plan payment Vergent reports amountDue = 0 (caught up) → show the balance.
-      var displayDue = (loan.hasPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
+      // Next plan payment: live amountDue when due, else remembered
+      // planInstallment between due dates; otherwise the balance.
+      var _inst = (loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue
+        : (loan.planInstallment != null && loan.planInstallment > 0 ? loan.planInstallment : null);
+      var displayDue = (loan.hasPaymentPlan && _inst != null) ? _inst : loan.balance;
       setText(qs('[data-pay-balance]', card), money(displayDue));
       // When a repayment plan is active, the first figure becomes "Remaining
       // Balance" (the payoff) instead of the original "Loan Amount".
@@ -578,7 +582,10 @@
     }
     var payoff = (loan.balance != null) ? Number(loan.balance)
       : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
-    var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
+    // Live amountDue when an installment is actually due, else the remembered
+    // plan installment (shown between due dates after a payment).
+    var installment = (loan.amountDue != null && Number(loan.amountDue) > 0.005) ? Number(loan.amountDue)
+      : (loan.planInstallment != null ? Number(loan.planInstallment) : null);
     // Show the two-option chooser ONLY when an active repayment plan exists
     // (Vergent RPP flag) AND a real installment is due now (positive + smaller
     // than payoff). A non-plan loan never shows it; after a plan payment Vergent
@@ -611,7 +618,10 @@
     if (!loan) return;
     var payoff = (loan.balance != null) ? Number(loan.balance)
       : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
-    var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
+    // Live amountDue when an installment is actually due, else the remembered
+    // plan installment (shown between due dates after a payment).
+    var installment = (loan.amountDue != null && Number(loan.amountDue) > 0.005) ? Number(loan.amountDue)
+      : (loan.planInstallment != null ? Number(loan.planInstallment) : null);
     var installmentDue = !!loan.hasPaymentPlan && installment != null && installment > 0.005
       && payoff != null && installment + 0.01 < payoff;
     var sel = document.querySelector('input[name="payPlanChoice"]:checked');

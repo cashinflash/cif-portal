@@ -2260,6 +2260,81 @@ def _attach_pending_signature(cid: str, loan: Optional[Dict[str, Any]]) -> None:
         loan["lifecycle"] = "active"
 
 
+# ─────────────────────────────────────────
+# Plan-installment memory (DynamoDB)
+# ─────────────────────────────────────────
+# Vergent stops reporting the next installment's amount once the current one is
+# paid (it returns $0 due + the remaining payoff until the next due date). So we
+# remember the installment the first time we see it and surface it as
+# `planInstallment` between due dates. Best-effort: ANY failure just leaves the
+# field unset and the UI falls back to the balance + pay-off (pre-persistence
+# behaviour) — never raises.
+_PLAN_TABLE = os.environ.get("PLAN_INSTALLMENTS_TABLE", "cif-portal-plan-installments-dev")
+_ddb_plan = None
+
+
+def _plan_ddb():
+    global _ddb_plan
+    if _ddb_plan is None:
+        _ddb_plan = boto3.client(
+            "dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    return _ddb_plan
+
+
+def _remember_plan_installment(loan_id: Any, amount: Optional[float]) -> None:
+    if not loan_id or amount is None:
+        return
+    try:
+        exp = int(time.time()) + 120 * 24 * 3600  # 120-day TTL (DynamoDB GC)
+        _plan_ddb().put_item(TableName=_PLAN_TABLE, Item={
+            "loanId": {"S": str(loan_id)},
+            "installment": {"N": str(round(float(amount), 2))},
+            "expiresAt": {"N": str(exp)},
+        })
+    except Exception as e:
+        log.info("plan-installment remember skipped loan=%s err=%s", loan_id, type(e).__name__)
+
+
+def _recall_plan_installment(loan_id: Any) -> Optional[float]:
+    if not loan_id:
+        return None
+    try:
+        r = _plan_ddb().get_item(TableName=_PLAN_TABLE, Key={"loanId": {"S": str(loan_id)}})
+        item = r.get("Item")
+        if item and "installment" in item:
+            return float(item["installment"]["N"])
+    except Exception as e:
+        log.info("plan-installment recall skipped loan=%s err=%s", loan_id, type(e).__name__)
+    return None
+
+
+def _apply_plan_installment(loan: Optional[Dict[str, Any]]) -> None:
+    """Set loan['planInstallment'] so the next plan payment shows even after the
+    current installment is paid. Only for loans with an active plan (RPP=Y).
+    Best-effort; mutates in place."""
+    if not loan or not loan.get("hasPaymentPlan"):
+        return
+    loan_id = loan.get("id")
+    payoff = _to_number(loan.get("payoffAmount"))
+    if payoff is None:
+        payoff = _to_number(loan.get("balance"))
+    amount_due = _to_number(loan.get("amountDue"))
+    # A real installment is due now → that IS the installment; remember it.
+    if (amount_due is not None and amount_due > 0.005
+            and payoff is not None and amount_due + 0.01 < payoff):
+        loan["planInstallment"] = round(amount_due, 2)
+        _remember_plan_installment(loan_id, amount_due)
+        return
+    # Caught up (nothing due right now) but the plan's still active → recall the
+    # stored installment, capped at the remaining balance (handles the final,
+    # smaller payment).
+    recalled = _recall_plan_installment(loan_id)
+    if recalled is not None and recalled > 0.005:
+        if payoff is not None and recalled > payoff:
+            recalled = payoff
+        loan["planInstallment"] = round(recalled, 2)
+
+
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -2290,6 +2365,9 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     # Flag the active loan if it's still awaiting the customer's e-signature
     # (so the dashboard/loans pages can show a "sign" state, not a healthy card).
     _attach_pending_signature(cid, active)
+    # Remember/recall the plan installment so the next payment shows after the
+    # current one is paid (Vergent hides it between due dates).
+    _apply_plan_installment(active)
     return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
 
 

@@ -471,6 +471,34 @@
       });
   }
 
+  // ---------- Auto-poll for a freshly-created loan ----------
+  // After a customer applies/signs online, Vergent takes ~1 min to create the
+  // loan + e-sign doc + populate its pending queue. The portal only checked on
+  // page load, so the flip to "pending / review & sign" lagged. While there's no
+  // active loan yet, poll briefly so it appears on its own — no manual reload.
+  // Bounded (every 8s, ~1.5 min) and paused while the tab is hidden.
+  var _pendingPollTimer = null;
+  var _pendingPollTries = 0;
+  function startPendingPoll() {
+    if (_pendingPollTimer || window.__cifActiveLoan) return;
+    _pendingPollTries = 0;
+    _pendingPollTimer = setInterval(function () {
+      _pendingPollTries++;
+      if (_pendingPollTries > 12 || window.__cifActiveLoan) { stopPendingPoll(); return; }
+      if (document.visibilityState === 'hidden') return;
+      api(ACTIVE_ENDPOINT, token).then(function (data) {
+        if (data && data.loan) {
+          stopPendingPoll();
+          if (window.CifLoanCache) CifLoanCache.set(ACTIVE_ENDPOINT, data);
+          renderDashboardForData(data);
+        }
+      }).catch(function () { /* transient — keep polling */ });
+    }, 8000);
+  }
+  function stopPendingPoll() {
+    if (_pendingPollTimer) { clearInterval(_pendingPollTimer); _pendingPollTimer = null; }
+  }
+
   function renderDashboardForData(data) {
     const card = qs('#activeLoanCard');
     const hero = qs('#dashBorrowHero');
@@ -543,6 +571,9 @@
     // While the loan is awaiting signature, treat it as not-yet-payable — hide
     // the active-only pay CTAs so the Review & sign prompt is the clear action.
     window.__cifActiveLoan = hasActive;
+    // Auto-poll for a just-created loan when none is showing yet; stop once one
+    // appears (covers funded AND pending-signature loans).
+    if (hasActive) stopPendingPoll(); else startPendingPoll();
     var _pendingSig = hasActive && data && data.loan && window.CifEsign && CifEsign.isPending(data.loan);
     // Persist + flag synchronously so the dashboard preflight can hide the pay
     // CTAs on the NEXT load with no flash (see the inline script in <head>).
@@ -730,7 +761,11 @@
     // Show the plan installment only when one is actually due now (amountDue > 0).
     // After a plan payment Vergent reports amountDue = 0 (caught up); fall back to
     // the remaining balance so the card never shows a misleading $0.00.
-    var displayDue = (loan.hasPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
+    // Next plan payment: the live amountDue when one's due, else the remembered
+    // installment (planInstallment) between due dates; otherwise the balance.
+    var _inst = (loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue
+      : (loan.planInstallment != null && loan.planInstallment > 0 ? loan.planInstallment : null);
+    var displayDue = (loan.hasPaymentPlan && _inst != null) ? _inst : loan.balance;
     setText(qs('[data-loan-balance]', card), formatCurrencyPrecise(displayDue).replace(/^\$/, ''));
     setText(qs('[data-loan-pay-amount]', card), formatCurrencyPrecise(loan.balance));
     setText(qs('[data-loan-principal]', card), formatCurrencyPrecise(loan.principal));
