@@ -369,22 +369,36 @@
                 </button>
               </div>
 
-              <div class="pay-fieldrow">
-                <div class="pay-field-amount">
-                  <p class="pay-field-label">Amount due</p>
-                  <!-- Payment amount is LOCKED to the full amount due — no partial
-                       or custom amounts. The hidden #payAmount keeps the existing
-                       submit/validate logic intact; its value + this display are
-                       set from the loan summary (setLockedAmount in payments.js). -->
-                  <div class="pay-amount-locked" style="display:flex;align-items:baseline;gap:1px;font-size:1.9rem;font-weight:800;letter-spacing:-.02em;">
-                    <span style="font-size:1.1rem;font-weight:700;opacity:.6;">$</span><span data-pay-amount-display>0.00</span>
-                  </div>
-                  <p style="margin:4px 0 0;font-size:12px;opacity:.7;">This is your full amount due.</p>
-                  <input type="hidden" id="payAmount" name="amount" value="">
+              <!-- Amount is never free-entry. A regular loan pays the full
+                   balance (no control needed — the breakdown below + the Pay
+                   button carry the figure). A payment-plan customer gets a
+                   two-way choice: their scheduled installment, or pay off the
+                   whole balance. The hidden #payAmount (set by setLockedAmount
+                   in payments.js) is what submit/validate read. -->
+              <div class="pay-fieldrow" id="payPlanChoiceRow" hidden>
+                <div style="width:100%;">
+                  <p class="pay-field-label" style="margin:0 0 8px;font-weight:700;">How much would you like to pay?</p>
+                  <label data-plan-opt style="display:flex;align-items:center;gap:10px;border:2px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;">
+                    <input type="radio" name="payPlanChoice" value="installment" checked style="accent-color:#16a34a;width:18px;height:18px;flex:none;">
+                    <span style="display:flex;flex-direction:column;">
+                      <span style="font-weight:700;">Plan payment</span>
+                      <span style="font-size:12px;opacity:.7;">Your scheduled payment</span>
+                    </span>
+                    <strong data-plan-installment style="margin-left:auto;font-size:1.05rem;">$0.00</strong>
+                  </label>
+                  <label data-plan-opt style="display:flex;align-items:center;gap:10px;border:2px solid #e2e8f0;border-radius:12px;padding:12px 14px;cursor:pointer;">
+                    <input type="radio" name="payPlanChoice" value="payoff" style="accent-color:#16a34a;width:18px;height:18px;flex:none;">
+                    <span style="display:flex;flex-direction:column;">
+                      <span style="font-weight:700;">Pay off full balance</span>
+                      <span style="font-size:12px;opacity:.7;">Close out the loan</span>
+                    </span>
+                    <strong data-plan-payoff style="margin-left:auto;font-size:1.05rem;">$0.00</strong>
+                  </label>
                 </div>
                 <!-- CVV moved into the payment-confirmation modal (entered at
                      authorize time, bank-style) — see #payCardConfirmModal. -->
               </div>
+              <input type="hidden" id="payAmount" name="amount" value="">
 
               <p id="payCardAddedNote" hidden class="pay-cardadded-note"></p>
               <p class="pay-error" id="payError" hidden></p>
@@ -707,6 +721,6 @@
   <script src="/js/cif-loancache.js?v=20260628b"></script>
   <script src="/js/cif-ach.js?v=20260626c"></script>
   <script src="/js/cif-esign.js?v=20260628b"></script>
-  <script src="/js/payments.js?v=20260628c"></script>
+  <script src="/js/payments.js?v=20260628d"></script>
 </body>
 </html>

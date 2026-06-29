@@ -64,6 +64,7 @@ from handlers.loans import (
     V1_BASE,
     _claims,
     _customer_id,
+    _fetch_all_loans,
     _get_apim_token,
     _get_creds,
     _get_v1_token,
@@ -544,15 +545,21 @@ def _create_omniapay_session(customer_id: str,
 # Loan lookup — shared by loan-summary + payment validation
 # ─────────────────────────────────────────
 def _fetch_active_loan(cid: str) -> Optional[Dict[str, Any]]:
-    """Return the customer's first outstanding loan (shaped), or None."""
-    status, body = _v1_get(f"/V1/{cid}/loans")
-    if status != 200 or not isinstance(body, list):
+    """Return the customer's first outstanding loan (shaped), or None.
+
+    Sources from the dashboard's richer multi-endpoint fetch (_fetch_all_loans)
+    so the repayment-plan AmountDue — the reduced installment — comes through.
+    The plain /V1/{cid}/loans list returns the full payoff as AmountDue, which
+    made the pay page lock to the full balance for payment-plan customers
+    instead of their installment.
+    """
+    loans = _fetch_all_loans(cid)
+    if not loans:
         return None
-    shaped = [_shape_v1_loan(item) for item in body if isinstance(item, dict)]
-    outstanding = [l for l in shaped if l.get("isOutstanding")]
+    outstanding = [l for l in loans if l.get("isOutstanding")]
     if outstanding:
         return outstanding[0]
-    return shaped[0] if shaped else None
+    return loans[0]
 
 
 # ─────────────────────────────────────────

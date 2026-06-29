@@ -554,19 +554,50 @@
     if (addBankBtn) addBankBtn.style.display = (state.bankAccounts.length >= 3) ? 'none' : '';
   }
 
-  // Payment amount is LOCKED to the full amount due — customers can't pick a
-  // partial/custom amount. Writes the hidden #payAmount (read by submit +
-  // validation) and the read-only on-screen figure from the current loan. For a
-  // payment-plan customer the amount due is the current installment; otherwise
-  // it's the full balance — the same figure shown as "Amount Due" on the card.
+  // Highlight the selected plan option (green border) — inline, no CSS dep.
+  function stylePlanOpts() {
+    var opts = document.querySelectorAll('[data-plan-opt]');
+    Array.prototype.forEach.call(opts, function (lbl) {
+      var r = lbl.querySelector('input[type="radio"]');
+      var on = !!(r && r.checked);
+      lbl.style.borderColor = on ? '#16a34a' : '#e2e8f0';
+      lbl.style.background = on ? 'rgba(22,163,74,.05)' : '';
+    });
+  }
+
+  // Payment amount is never free-entry — no partial/custom amounts.
+  //  • Regular loan  → locked to the full balance (the choice row stays hidden;
+  //    the breakdown + Pay button carry the figure).
+  //  • Payment plan  → a two-way choice: the scheduled installment (amountDue)
+  //    or pay off the full balance (payoff). The selected radio drives it.
+  // Writes the hidden #payAmount that submit/validate read. Returns the amount.
   function setLockedAmount() {
     var loan = state.loan;
-    var due = loan ? ((loan.onPaymentPlan && loan.amountDue != null) ? loan.amountDue : loan.balance) : null;
-    var n = (due != null && !isNaN(Number(due))) ? Number(due) : null;
     var inp = qs('#payAmount');
-    if (inp) inp.value = (n != null && n > 0) ? n.toFixed(2) : '';
-    var disp = qs('[data-pay-amount-display]');
-    if (disp) disp.textContent = (n != null && n > 0) ? n.toFixed(2) : '0.00';
+    var row = qs('#payPlanChoiceRow');
+    if (!loan) {
+      if (inp) inp.value = '';
+      if (row) row.hidden = true;
+      return null;
+    }
+    var payoff = (loan.balance != null) ? Number(loan.balance)
+      : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
+    var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
+    var isPlan = !!loan.onPaymentPlan && installment != null && payoff != null
+      && installment + 0.01 < payoff;
+    var n;
+    if (isPlan) {
+      if (row) row.hidden = false;
+      var di = qs('[data-plan-installment]'); if (di) di.textContent = money(installment);
+      var dp = qs('[data-plan-payoff]');      if (dp) dp.textContent = money(payoff);
+      var sel = document.querySelector('input[name="payPlanChoice"]:checked');
+      n = (sel && sel.value === 'payoff') ? payoff : installment;
+      stylePlanOpts();
+    } else {
+      if (row) row.hidden = true;
+      n = payoff;  // regular loan → full balance, no choice
+    }
+    if (inp) inp.value = (n != null && !isNaN(n) && n > 0) ? n.toFixed(2) : '';
     return n;
   }
 
@@ -1399,12 +1430,14 @@
     if (zipInput) zipInput.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 5); });
     const cvvInput = qs('#payCvv');
     if (cvvInput) cvvInput.addEventListener('input', function () { this.value = (this.value || '').replace(/\D/g, '').slice(0, 4); });
-    const amtInput = qs('#payAmount');
-    if (amtInput) amtInput.addEventListener('blur', function () {
-      const v = parseFloat(String(this.value || '').replace(/[^\d.]/g, ''));
-      if (!isNaN(v) && v > 0) this.value = v.toFixed(2);
-      // Keep the Pay-now button label ($amount) in sync with the field.
-      applyMethodSelection();
+    // Payment-plan amount choice (installment vs full payoff) → re-lock the
+    // hidden amount + refresh the Pay-now button label. The amount is no longer
+    // user-editable, so the old free-text blur handler is gone.
+    document.addEventListener('change', function (e) {
+      if (e.target && e.target.name === 'payPlanChoice') {
+        setLockedAmount();
+        applyMethodSelection();
+      }
     });
 
     // Load loan + methods in parallel.

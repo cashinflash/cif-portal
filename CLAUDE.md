@@ -123,16 +123,27 @@ never flashes before dashboard.js fills it.
 (`#F59E0B → #E07C02`, dark text). (Tried navy, too heavy under the green card;
 amber keeps the "tap me" warmth.)
 
-### Payments: amount is LOCKED (no partial/custom amounts)
-The pay form has **no editable amount field**. `#payAmount` is now a **hidden**
-input; `setLockedAmount()` (payments.js) writes it + a read-only `[data-pay-
-amount-display]` figure from the current loan. The locked value = the same
-"Amount Due" the card shows: a payment-plan customer's current **installment**
-(`amountDue`) or otherwise the full **balance**. Called from `renderLoanSummary`
-and `resetForPayAgain`; the "Pay now $X" button + confirm modals read the same
-value, so everything stays consistent. (If we ever want plan customers to pay
-the full payoff instead of the installment, change `setLockedAmount` to use
-`loan.balance` always.)
+### Payments: amount is LOCKED — no free entry (+ plan: installment vs payoff)
+The pay form has **no editable amount field**. `#payAmount` is a **hidden** input
+written by `setLockedAmount()` (payments.js):
+- **Regular loan** → locked to the full **balance** (no control shown; the
+  breakdown card + Pay button carry the figure; the old top "Amount due" display
+  was removed).
+- **Payment-plan loan** (`onPaymentPlan`) → a two-way radio choice
+  `#payPlanChoiceRow` (`name="payPlanChoice"` = `installment` | `payoff`): pay the
+  scheduled **installment** (`amountDue`) or **pay off** the full balance. The
+  selected radio drives `#payAmount`; a delegated `change` listener re-locks +
+  refreshes the Pay button. Default = installment.
+
+Called from `renderLoanSummary` + `resetForPayAgain`; the "Pay now $X" button +
+confirm modals all read `#payAmount`, so everything stays consistent.
+
+**Backend fix (the plan-charge bug):** the pay page
+(`/api/my-payment/loan-summary` → `_fetch_active_loan`) used the plain
+`/V1/{cid}/loans` list, which returns `AmountDue == PayoffAmount` (no plan
+installment) → it locked to the full balance for plan customers. `_fetch_active_loan`
+now sources from `_fetch_all_loans` (the same richer endpoint Home uses), so the
+plan-adjusted `amountDue` comes through.
 
 ### Past-due styling
 Card `is-pastdue` deep red `#D23636 → #8F1B1B` (was coral/pink). Pill green dot
