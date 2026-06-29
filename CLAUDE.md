@@ -37,6 +37,14 @@ GitHub ops use the **GitHub MCP tools** (`mcp__github__*`) — no `gh` CLI. To
 check a deploy: `mcp__github__actions_list` (list_workflow_runs / list_workflow_jobs).
 The list payloads are huge — they get saved to a file; parse with python/jq.
 
+**Cross-Lambda deploy gotcha:** `deploy.yml` ships a per-Lambda zip and only
+redeploys a function when *its own* handler file changes (path-filtered). But
+`payments.py` imports shared helpers from `loans.py` (`_shape_v1_loan`,
+`_fetch_all_loans`, …). So a change to `loans.py` reaches the loans Lambda but
+NOT the payments Lambda until `payments.py` is also touched (a comment bump
+forces the co-deploy). Always edit `payments.py` too when changing a shared
+`loans.py` helper the pay page relies on.
+
 ## Cache-busting convention (IMPORTANT)
 
 CSS + JS are referenced with `?v=YYYYMMDD<letter>` and **bumped on every change**

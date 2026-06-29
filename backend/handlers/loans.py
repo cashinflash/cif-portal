@@ -504,12 +504,16 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "payoffAmount": payoff,
         "amountDue": amount_due,
         "minAmountDue": min_due,
-        # On a repayment plan the next payment is less than the full payoff;
-        # a regular loan has the whole balance due at once (amountDue == payoff).
+        # Heuristic kept for back-compat (next payment < full payoff). NOT
+        # reliable for fresh loans where amountDue can be < payoff without a
+        # plan — use `hasPaymentPlan` (Vergent's authoritative RPP flag) to
+        # decide whether a repayment plan is actually active.
         "onPaymentPlan": (
             amount_due is not None and payoff is not None
             and amount_due + 0.01 < payoff
         ),
+        # Authoritative "an active repayment plan exists" flag from Vergent.
+        "hasPaymentPlan": (str(hdr.get("RPP", "")).strip().upper() == "Y"),
         "nextDueDate": _format_iso(hdr.get("DueDate") or hdr.get("NextPaymentDate")),
         "nextDueAmount": next_due,
         "originationDate": _format_iso(hdr.get("OriginationDate")),

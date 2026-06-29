@@ -213,10 +213,15 @@
     if (body) body.hidden = false;
 
     setText(qs('[data-loan-public-id]', card), loan.publicId || loan.id || '—');
-    setText(qs('[data-loan-funded]', card), fmtCurrency(loan.principal));
+    // When a repayment plan is active, the first figure becomes "Remaining
+    // Balance" (the payoff) instead of the original "Loan Amount".
+    var _planActive = !!loan.hasPaymentPlan;
+    var _fundedLabel = qs('[data-loan-funded-label]', card);
+    if (_fundedLabel) _fundedLabel.textContent = _planActive ? 'Remaining Balance' : 'Loan Amount';
+    setText(qs('[data-loan-funded]', card), fmtCurrency(_planActive ? loan.balance : loan.principal));
     // Plan installment only when one is actually due (amountDue > 0); after a
     // plan payment Vergent reports amountDue = 0 (caught up) → show the balance.
-    var displayDue = (loan.onPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
+    var displayDue = (loan.hasPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
     setText(qs('[data-loan-balance]', card), fmtCurrency(displayDue));
     setText(qs('[data-loan-next-due]', card), loan.nextDueDate ? fmtDate(loan.nextDueDate) : '—');
 

@@ -58,6 +58,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Reuse everything from the loans handler rather than re-implementing.
 # Both files ship in the same zip so the import resolves at cold start.
+# NOTE: this Lambda bundles handlers.loans and reuses _shape_v1_loan / _fetch_all_loans.
+# deploy.yml ships a per-Lambda zip and only redeploys THIS function when
+# payments.py changes — so a change to loans.py (e.g. the `hasPaymentPlan` field
+# below) reaches the payments page only if payments.py is also touched to force a
+# co-deploy. Keep that in mind when editing shared loans.py helpers.
 from handlers.loans import (
     APIM_BASE,
     CORS_HEADERS,

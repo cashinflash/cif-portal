@@ -148,10 +148,16 @@
       setText(qs('[data-pay-loan-id]', card), (loan.publicId || loan.id || '—'));
       // Plan installment only when one is actually due (amountDue > 0); after a
       // plan payment Vergent reports amountDue = 0 (caught up) → show the balance.
-      var displayDue = (loan.onPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
+      var displayDue = (loan.hasPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
       setText(qs('[data-pay-balance]', card), money(displayDue));
-      var _funded = (loan.principal != null ? loan.principal
-        : (loan.principalBalance != null ? loan.principalBalance : null));
+      // When a repayment plan is active, the first figure becomes "Remaining
+      // Balance" (the payoff) instead of the original "Loan Amount".
+      var _planActive = !!loan.hasPaymentPlan;
+      var _fundedLabel = qs('[data-pay-funded-label]', card);
+      if (_fundedLabel) _fundedLabel.textContent = _planActive ? 'Remaining Balance' : 'Loan Amount';
+      var _funded = _planActive ? loan.balance
+        : (loan.principal != null ? loan.principal
+          : (loan.principalBalance != null ? loan.principalBalance : null));
       setText(qs('[data-pay-funded]', card), _funded != null ? money(_funded) : '—');
       const caption = qs('[data-pay-caption]', card);
       if (caption) {
@@ -573,9 +579,11 @@
     var payoff = (loan.balance != null) ? Number(loan.balance)
       : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
     var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
-    // A real installment is due now (positive + smaller than payoff). After a
-    // plan payment Vergent reports amountDue = 0 → no choice, just the payoff.
-    var installmentDue = installment != null && installment > 0.005
+    // Show the two-option chooser ONLY when an active repayment plan exists
+    // (Vergent RPP flag) AND a real installment is due now (positive + smaller
+    // than payoff). A non-plan loan never shows it; after a plan payment Vergent
+    // reports amountDue = 0 → no choice, just the payoff.
+    var installmentDue = !!loan.hasPaymentPlan && installment != null && installment > 0.005
       && payoff != null && installment + 0.01 < payoff;
     var n;
     if (installmentDue) {
@@ -604,7 +612,7 @@
     var payoff = (loan.balance != null) ? Number(loan.balance)
       : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
     var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
-    var installmentDue = installment != null && installment > 0.005
+    var installmentDue = !!loan.hasPaymentPlan && installment != null && installment > 0.005
       && payoff != null && installment + 0.01 < payoff;
     var sel = document.querySelector('input[name="payPlanChoice"]:checked');
     var planChosen = installmentDue && !(sel && sel.value === 'payoff');
