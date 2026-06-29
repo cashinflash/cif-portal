@@ -144,6 +144,19 @@ payment" (Payment amount + Remaining balance after + Full loan balance). We do
 NOT show a principal/fee split for an installment — Vergent doesn't expose it, so
 the plan view only shows figures we can derive (`payoff - installment`).
 
+**Caught-up plans (`amountDue == 0`):** after a plan installment is paid, Vergent
+reports `AmountDue: 0` (nothing due *right now*) + the reduced `PayoffAmount`.
+The portal treats **`amountDue > 0`** as "an installment is due now": all three
+cards fall back to the **balance** (never a misleading $0.00 — see the `&&
+loan.amountDue > 0` guard on every `displayDue`), the pay page hides the
+two-option chooser and offers a single pay-off, and the breakdown hides the
+principal/fee split when it no longer sums to the paid-down balance ("Balance
+remaining" instead of "Total due"). The chooser/installment view returns
+automatically when `AmountDue` repopulates on the next due date. **Vergent does
+NOT expose the *next* installment amount between due dates** — only "$0 due now"
++ the remaining payoff; showing the next installment early would need us to
+persist it ourselves (not built).
+
 **Backend fix (the plan-charge bug):** the pay page
 (`/api/my-payment/loan-summary` → `_fetch_active_loan`) used the plain
 `/V1/{cid}/loans` list, which returns `AmountDue == PayoffAmount` (no plan

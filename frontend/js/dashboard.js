@@ -727,7 +727,10 @@
 
     // On a payment plan the headline "Amount Due" is the next installment;
     // otherwise it's the full balance (regular card — unchanged).
-    var displayDue = (loan.onPaymentPlan && loan.amountDue != null) ? loan.amountDue : loan.balance;
+    // Show the plan installment only when one is actually due now (amountDue > 0).
+    // After a plan payment Vergent reports amountDue = 0 (caught up); fall back to
+    // the remaining balance so the card never shows a misleading $0.00.
+    var displayDue = (loan.onPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
     setText(qs('[data-loan-balance]', card), formatCurrencyPrecise(displayDue).replace(/^\$/, ''));
     setText(qs('[data-loan-pay-amount]', card), formatCurrencyPrecise(loan.balance));
     setText(qs('[data-loan-principal]', card), formatCurrencyPrecise(loan.principal));

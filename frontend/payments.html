@@ -414,17 +414,23 @@
                 <!-- Full breakdown: a regular loan, or "Pay off full balance"
                      on a plan. -->
                 <div data-breakdown-full>
-                  <div class="pay-breakdown-row">
-                    <dt>Principal</dt>
-                    <dd data-pay-principal>&mdash;</dd>
+                  <!-- Principal/fee split — shown only when it still sums to the
+                       balance (an unpaid loan). Once payments are made the
+                       original split no longer matches the remaining payoff, so
+                       renderBreakdown() hides this and shows just the balance. -->
+                  <div data-breakdown-split>
+                    <div class="pay-breakdown-row">
+                      <dt>Principal</dt>
+                      <dd data-pay-principal>&mdash;</dd>
+                    </div>
+                    <div class="pay-breakdown-row">
+                      <dt>Loan fee</dt>
+                      <dd data-pay-fee>&mdash;</dd>
+                    </div>
+                    <div class="pay-breakdown-rule"></div>
                   </div>
-                  <div class="pay-breakdown-row">
-                    <dt>Loan fee</dt>
-                    <dd data-pay-fee>&mdash;</dd>
-                  </div>
-                  <div class="pay-breakdown-rule"></div>
                   <div class="pay-breakdown-row pay-breakdown-total">
-                    <dt>Total due</dt>
+                    <dt data-pay-total-label>Total due</dt>
                     <dd data-pay-total>&mdash;</dd>
                   </div>
                 </div>
@@ -743,6 +749,6 @@
   <script src="/js/cif-loancache.js?v=20260628b"></script>
   <script src="/js/cif-ach.js?v=20260626c"></script>
   <script src="/js/cif-esign.js?v=20260628b"></script>
-  <script src="/js/payments.js?v=20260628e"></script>
+  <script src="/js/payments.js?v=20260628f"></script>
 </body>
 </html>

@@ -146,7 +146,9 @@
       var bannerActive = document.querySelector('.app-loan-banner');
       if (bannerActive) bannerActive.style.display = hasActiveLoan ? 'none' : '';
       setText(qs('[data-pay-loan-id]', card), (loan.publicId || loan.id || '—'));
-      var displayDue = (loan.onPaymentPlan && loan.amountDue != null) ? loan.amountDue : loan.balance;
+      // Plan installment only when one is actually due (amountDue > 0); after a
+      // plan payment Vergent reports amountDue = 0 (caught up) → show the balance.
+      var displayDue = (loan.onPaymentPlan && loan.amountDue != null && loan.amountDue > 0) ? loan.amountDue : loan.balance;
       setText(qs('[data-pay-balance]', card), money(displayDue));
       var _funded = (loan.principal != null ? loan.principal
         : (loan.principalBalance != null ? loan.principalBalance : null));
@@ -571,10 +573,12 @@
     var payoff = (loan.balance != null) ? Number(loan.balance)
       : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
     var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
-    var isPlan = !!loan.onPaymentPlan && installment != null && payoff != null
-      && installment + 0.01 < payoff;
+    // A real installment is due now (positive + smaller than payoff). After a
+    // plan payment Vergent reports amountDue = 0 → no choice, just the payoff.
+    var installmentDue = installment != null && installment > 0.005
+      && payoff != null && installment + 0.01 < payoff;
     var n;
-    if (isPlan) {
+    if (installmentDue) {
       if (row) row.hidden = false;
       var di = qs('[data-plan-installment]'); if (di) di.textContent = money(installment);
       var dp = qs('[data-plan-payoff]');      if (dp) dp.textContent = money(payoff);
@@ -600,39 +604,55 @@
     var payoff = (loan.balance != null) ? Number(loan.balance)
       : (loan.payoffAmount != null ? Number(loan.payoffAmount) : null);
     var installment = (loan.amountDue != null) ? Number(loan.amountDue) : null;
-    var isPlan = !!loan.onPaymentPlan && installment != null && payoff != null
-      && installment + 0.01 < payoff;
+    var installmentDue = installment != null && installment > 0.005
+      && payoff != null && installment + 0.01 < payoff;
     var sel = document.querySelector('input[name="payPlanChoice"]:checked');
-    var planChosen = isPlan && !(sel && sel.value === 'payoff');
+    var planChosen = installmentDue && !(sel && sel.value === 'payoff');
 
-    // Full-breakdown figures (also the non-plan default).
-    var principal = (loan.principal != null) ? loan.principal
-      : (loan.principalBalance != null ? loan.principalBalance : null);
-    var fee = (loan.fees != null) ? loan.fees
-      : (loan.fee != null ? loan.fee : (loan.loanFee != null ? loan.loanFee : null));
-    if (principal != null) setText(qs('[data-pay-principal]'), money(principal));
-    if (fee != null) setText(qs('[data-pay-fee]'), money(fee));
-    var totalEl = qs('[data-pay-total]'); if (totalEl && payoff != null) totalEl.textContent = money(payoff);
+    var principal = (loan.principal != null) ? Number(loan.principal)
+      : (loan.principalBalance != null ? Number(loan.principalBalance) : null);
+    var fee = (loan.fees != null) ? Number(loan.fees)
+      : (loan.fee != null ? Number(loan.fee) : (loan.loanFee != null ? Number(loan.loanFee) : null));
 
     var fullG = qs('[data-breakdown-full]');
     var planG = qs('[data-breakdown-plan]');
+    var splitG = qs('[data-breakdown-split]');
     var title = qs('[data-breakdown-title]');
     var sub = qs('[data-breakdown-sub]');
+    var totalLabel = qs('[data-pay-total-label]');
 
     if (planChosen) {
+      // "This payment": only figures we can stand behind (no installment
+      // principal/fee split — Vergent doesn't expose it).
       var remaining = (payoff != null && installment != null) ? Math.max(0, payoff - installment) : null;
       setText(qs('[data-pay-plan-amount]'), installment != null ? money(installment) : '—');
       setText(qs('[data-pay-plan-remaining]'), remaining != null ? money(remaining) : '—');
       setText(qs('[data-pay-plan-fullbalance]'), payoff != null ? money(payoff) : '—');
       if (title) title.textContent = 'This payment';
       if (sub) sub.textContent = "Here's what you're paying now.";
-      if (fullG) fullG.hidden = true;
       if (planG) planG.hidden = false;
-    } else {
-      if (title) title.textContent = 'Payment breakdown';
+      if (fullG) fullG.hidden = true;
+      return;
+    }
+
+    // Full / payoff view. The original principal + fee only describe the balance
+    // on an UNPAID loan; once payments have been made they no longer sum to the
+    // remaining payoff — so hide the split and show just the balance.
+    if (planG) planG.hidden = true;
+    if (fullG) fullG.hidden = false;
+    if (principal != null) setText(qs('[data-pay-principal]'), money(principal));
+    if (fee != null) setText(qs('[data-pay-fee]'), money(fee));
+    if (qs('[data-pay-total]') && payoff != null) qs('[data-pay-total]').textContent = money(payoff);
+    var splitMatches = (principal != null && fee != null && payoff != null
+      && Math.abs((principal + fee) - payoff) < 0.02);
+    if (splitG) splitG.hidden = !splitMatches;
+    if (title) title.textContent = 'Payment breakdown';
+    if (splitMatches) {
       if (sub) sub.textContent = "Here's what makes up your balance.";
-      if (planG) planG.hidden = true;
-      if (fullG) fullG.hidden = false;
+      if (totalLabel) totalLabel.textContent = 'Total due';
+    } else {
+      if (sub) sub.textContent = 'Your remaining balance.';
+      if (totalLabel) totalLabel.textContent = 'Balance remaining';
     }
   }
 
@@ -649,10 +669,7 @@
       // "Pay now" if neither is a positive number.
       var amtRaw = qs('#payAmount') && qs('#payAmount').value;
       var amt = parseFloat(String(amtRaw || '').replace(/[^\d.]/g, ''));
-      if ((!amt || isNaN(amt) || amt <= 0) && state.loan) {
-        amt = (state.loan.onPaymentPlan && state.loan.amountDue != null)
-          ? Number(state.loan.amountDue) : Number(state.loan.balance);
-      }
+      if ((!amt || isNaN(amt) || amt <= 0) && state.loan) amt = Number(state.loan.balance);
       btn.textContent = (amt && !isNaN(amt) && amt > 0) ? ('Pay now ' + money(amt)) : 'Pay now';
     }
     document.querySelectorAll('.pay-method').forEach(function (el) {
