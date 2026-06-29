@@ -1657,7 +1657,7 @@ def get_payment_config(event: Dict[str, Any]) -> Dict[str, Any]:
     origin = (
         headers.get("origin")
         or headers.get("Origin")
-        or "https://d1zucrj1ouu3c.cloudfront.net"
+        or "https://my.cashinflash.com"
     )
 
     session = _create_omniapay_session(customer_id=str(cid),

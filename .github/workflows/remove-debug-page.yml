@@ -1,0 +1,37 @@
+name: Remove debug page from S3
+
+# One-off cleanup. deploy.yml syncs the frontend WITHOUT --delete, so removing
+# debug.html from the repo doesn't remove it from S3. This deletes it from the
+# bucket + invalidates it from CloudFront. Auto-runs when this file is pushed.
+# Safe to delete this workflow afterwards.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - '.github/workflows/remove-debug-page.yml'
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: cif-portal-frontend-dev-730667140069
+  CF_DISTRIBUTION: EOV9K12LFKK8T
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Remove debug.html from S3 + invalidate CloudFront
+        run: |
+          aws s3 rm "s3://${S3_BUCKET}/debug.html" --no-cli-pager || echo "debug.html already absent"
+          aws cloudfront create-invalidation \
+            --distribution-id "$CF_DISTRIBUTION" \
+            --paths "/debug.html" \
+            --no-cli-pager
+          echo "debug.html removed from S3 and invalidated."

@@ -51,7 +51,7 @@ IMPERSONATIONS_TABLE = os.environ.get(
 )
 
 PORTAL_ORIGIN = os.environ.get(
-    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+    "PORTAL_ORIGIN", "https://my.cashinflash.com"
 )
 
 TOKEN_TTL_SECONDS = 15 * 60  # 15 minutes

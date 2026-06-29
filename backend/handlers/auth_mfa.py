@@ -90,7 +90,7 @@ _apim_token_exp: float = 0.0
 TOKEN_TTL = 60 * 60
 
 ALLOWED_ORIGIN = os.environ.get(
-    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+    "PORTAL_ORIGIN", "https://my.cashinflash.com"
 )
 
 CORS = {
@@ -593,11 +593,11 @@ def _send_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional[str]]
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:34px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://my.cashinflash.com/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 40px 20px;">
           <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your sign-in code is: {code}</h1>
-          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Didn't try to sign in? Please <a href="https://d1zucrj1ouu3c.cloudfront.net/forgot.html" style="color:#0E8741;text-decoration:underline;">reset your password</a>.</p>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Didn't try to sign in? Please <a href="https://my.cashinflash.com/forgot.html" style="color:#0E8741;text-decoration:underline;">reset your password</a>.</p>
           <p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#1a1a2e;">Please do not provide this code to anyone. A Cash in Flash Representative will <strong>never</strong> ask you to provide them with your sign-in code.</p>
           <p style="margin:0 0 4px;font-size:14px;line-height:1.55;color:#1a1a2e;">If you still have questions, contact our Customer Service Team at <a href="tel:+18889999859" style="color:#1a1a2e;font-weight:600;text-decoration:underline;">(888) 999-9859</a>.</p>
         </td></tr>
@@ -905,7 +905,7 @@ def _send_reset_email(to: str, code: str) -> Tuple[bool, Optional[str], Optional
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:34px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://my.cashinflash.com/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 40px 20px;">
           <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your password reset code is: {code}</h1>
@@ -1099,7 +1099,7 @@ def _send_signup_email(to: str, code: str) -> Tuple[bool, Optional[str], Optiona
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#ffffff;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:34px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://my.cashinflash.com/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 40px 20px;">
           <h1 style="margin:0 0 16px;font-size:21px;font-weight:700;color:#0E8741;line-height:1.25;">Your verification code is: {code}</h1>

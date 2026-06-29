@@ -125,7 +125,7 @@ PROFILE_REQUESTS_TABLE = os.environ.get(
 )
 ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "info@cashinflash.com")
 SES_SENDER_EMAIL = os.environ.get("SES_SENDER_EMAIL", "no-reply@cashinflash.com")
-PORTAL_PUBLIC_URL = os.environ.get("PORTAL_PUBLIC_URL", "https://d1zucrj1ouu3c.cloudfront.net")
+PORTAL_PUBLIC_URL = os.environ.get("PORTAL_PUBLIC_URL", "https://my.cashinflash.com")
 # Fast Re-Apply — the additive cif-apply intake endpoint. The portal
 # resolves the logged-in customer's identity + linked bank SERVER-SIDE and
 # hands cif-apply a re-loan, which runs the SAME engine + dashboard
@@ -164,7 +164,7 @@ _fetch_loans_winner_idx: int = 0
 # API. Override via env var when adding a custom domain. Browsers will
 # still block any cross-origin request that doesn't echo this back.
 ALLOWED_ORIGIN = os.environ.get(
-    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+    "PORTAL_ORIGIN", "https://my.cashinflash.com"
 )
 
 CORS_HEADERS = {
@@ -1160,7 +1160,7 @@ def _send_customer_confirmation(claims: Dict[str, Any], field: str,
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://my.cashinflash.com/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 36px 8px;">
           <p style="margin:0 0 6px;font-size:12px;color:#0E8741;letter-spacing:.08em;text-transform:uppercase;font-weight:700;">Account update received</p>
@@ -1224,7 +1224,7 @@ def _send_email_verify_code(to_email: str, code: str) -> Tuple[bool, str]:
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:32px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://my.cashinflash.com/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
         <tr><td style="padding:32px 36px 8px;">
           <p style="margin:0 0 8px;font-size:13px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;font-weight:600;">Verification code</p>
@@ -1419,7 +1419,7 @@ def _send_email_applied_alert(claims: Dict[str, Any], new_email: str) -> None:
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://my.cashinflash.com/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 36px 8px;">
           <p style="margin:0 0 6px;font-size:12px;color:#0E8741;letter-spacing:.08em;text-transform:uppercase;font-weight:700;">Email updated</p>
@@ -1822,7 +1822,7 @@ def _send_password_changed_alert(claims: Dict[str, Any]) -> None:
     <tr><td align="center">
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;">
         <tr><td align="center" style="background:#0E8741;padding:36px 24px;">
-          <img src="https://d1zucrj1ouu3c.cloudfront.net/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
+          <img src="https://my.cashinflash.com/images/cif-mark-white.png" alt="Cash in Flash" width="48" height="50" style="display:block;width:48px;height:50px;border:0;">
         </td></tr>
         <tr><td style="padding:36px 36px 8px;">
           <p style="margin:0 0 6px;font-size:12px;color:#0E8741;letter-spacing:.08em;text-transform:uppercase;font-weight:700;">Security alert</p>
@@ -1931,290 +1931,6 @@ def change_password(event: Dict[str, Any]) -> Dict[str, Any]:
 
     log.info("password changed sub=%s", sub)
     return _json_response(200, {"ok": True})
-
-
-def _debug_signing(cid: str) -> Dict[str, Any]:
-    """TEMPORARY Step-0 diagnostic for the e-sign feature. PII-SAFE: only
-    surfaces status/signing/funding-shaped scalar fields from the raw v1
-    loan records, the e-sign pending list, and a reachability probe of the
-    CustomerPortal 'Full' endpoint. No names/SSN/address ever leave here.
-    Remove once the pending-signature detection fields are confirmed."""
-    out: Dict[str, Any] = {}
-
-    # 1) Raw v1 loan records — scrub to status/signing/funding-ish scalars.
-    raw_loans: List[Any] = []
-    used_path = None
-    for path in (f"/V1/{cid}/loans/all",
-                 f"/V1/{cid}/loans?includePrevious=true&numresults=200",
-                 f"/V1/{cid}/loans"):
-        st, body = _v1_get(path)
-        if st == 200 and isinstance(body, list):
-            raw_loans = body
-            used_path = path
-            break
-    key_tokens = ("status", "sign", "fund", "outstanding", "sub", "stage",
-                  "workflow", "rescind", "hdrid", "loanid", "publicid",
-                  "publicloanid", "class", "approved", "sent", "complete",
-                  "pending")
-
-    def scrub(rec: Dict[str, Any]) -> Dict[str, Any]:
-        hdr = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
-        flat: Dict[str, Any] = {}
-        for k, v in hdr.items():
-            if v is not None and not isinstance(v, (str, int, float, bool)):
-                continue
-            if any(t in k.lower() for t in key_tokens):
-                flat[k] = v
-        return flat
-
-    out["rawLoansPath"] = used_path
-    out["loanCount"] = len(raw_loans)
-    out["loanFields"] = [scrub(r) for r in raw_loans if isinstance(r, dict)]
-    if raw_loans and isinstance(raw_loans[0], dict):
-        first = raw_loans[0].get("LoanHeader") if isinstance(raw_loans[0].get("LoanHeader"), dict) else raw_loans[0]
-        out["allKeysFirstRecord"] = sorted(first.keys())
-
-    # 2) E-sign pending list (ids + doc name + date + signingUrl — PII-light).
-    out["esignPending"] = _fetch_pending_esign(cid)
-
-    # 3) Reachability probe — can the SERVICE token reach CustomerPortal/Full
-    #    (the only place isSigningPending/isSigningComplete are documented)?
-    probe: Dict[str, Any] = {}
-    try:
-        st, body, raw = _http(f"{V1_BASE}/CustomerPortal/Customer/Loans/Full",
-                              "GET", headers={"Token": _get_v1_token() or ""})
-        probe["status"] = st
-        if isinstance(body, list) and body and isinstance(body[0], dict):
-            h = body[0]
-            probe["sample"] = {k: h.get(k) for k in (
-                "isSigningPending", "isSigningComplete", "isFundingApproved",
-                "isFundingSent", "loanSubStatus", "loanSubStatusId") if k in h}
-        else:
-            probe["bodySnippet"] = (raw or "")[:160]
-    except Exception as exc:  # best-effort probe — never break the diagnostic
-        probe["error"] = str(exc)[:120]
-    out["customerPortalFullProbe"] = probe
-
-    # Disbursement-method probe (cash-extend customers don't "receive funds" on
-    # signing). The method isn't on the loan header, so look in the loan's docs
-    # + transaction history. PII-light: only type/description/method-ish fields.
-    out_hdr = None
-    for rec in raw_loans:
-        h2 = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
-        if isinstance(h2, dict) and h2.get("IsStatusOutstanding"):
-            out_hdr = h2.get("hdr_id") or h2.get("HdrId")
-            break
-    disb = {"hdr": out_hdr}
-    if out_hdr:
-        keys = ("type", "desc", "method", "disburs", "trans", "fund", "cash",
-                "kind", "category", "doc", "file", "title", "status")
-        for path in (f"/V1/customer/{cid}/docs/loan/{out_hdr}",
-                     f"/V1/customer/{cid}/loan/{out_hdr}/history",
-                     f"/V1/{cid}/loan/{out_hdr}/history",
-                     f"/V1/customer/{cid}/loan/{out_hdr}/transactions"):
-            try:
-                st2, body2 = _v1_get(path)
-            except Exception as exc2:
-                disb[path] = {"error": str(exc2)[:80]}
-                continue
-            entry = {"status": st2}
-            if isinstance(body2, list):
-                rows = []
-                for it in body2[:25]:
-                    if not isinstance(it, dict):
-                        continue
-                    rows.append({k: it.get(k) for k in it.keys()
-                                 if any(t in k.lower() for t in keys)
-                                 and isinstance(it.get(k), (str, int, float, bool))})
-                entry["rows"] = rows
-            elif body2 is not None:
-                entry["snippet"] = str(body2)[:200]
-            disb[path] = entry
-
-    # Full outstanding-loan header, PII-scrubbed (denylist of personal-data key
-    # tokens; scalars only; strings truncated). Run this on a CASH loan and a
-    # CARD/ACH loan and diff the two — the field that differs is the disbursement
-    # method we can key the e-sign copy on. Temp diagnostic; scoped to caller's
-    # own JWT; no name/SSN/card/phone/email/address ever included.
-    _PII = ("name", "first", "last", "middle", "fname", "lname", "ssn",
-            "social", "tin", "taxid", "dob", "birth", "gender", "addr",
-            "street", "city", "zip", "postal", "county", "country", "phone",
-            "mobile", "cell", "fax", "email", "mail", "account", "acct",
-            "routing", "aba", "micr", "card", "pan", "cvv", "license",
-            "passport", "username", "ipaddress", "url", "uri", "signature",
-            "photo", "image")
-    hdr_all = {}
-    for rec in raw_loans:
-        h4 = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
-        if isinstance(h4, dict) and h4.get("IsStatusOutstanding"):
-            for k, v in h4.items():
-                if any(t in k.lower() for t in _PII):
-                    continue
-                if isinstance(v, bool) or isinstance(v, (int, float)):
-                    hdr_all[k] = v
-                elif isinstance(v, str):
-                    hdr_all[k] = v[:80]
-            break
-    disb["outstandingHeaderScrubbed"] = hdr_all
-    out["disbursementProbe"] = disb
-
-    # Payment-plan schedule probe (Vergent DynamicRepaymentPlan/GetExistingSchedule).
-    # Enroll a TEST loan in a payment plan in Vergent, then run this to capture
-    # the exact installment shape (dates + amounts) and which loan-id the
-    # endpoint expects. Schedule data is amounts/dates only — no PII. Temporary.
-    plan: Dict[str, Any] = {}
-    out_rec = None
-    for rec in raw_loans:
-        h5 = rec.get("LoanHeader") if isinstance(rec.get("LoanHeader"), dict) else rec
-        if isinstance(h5, dict) and h5.get("IsStatusOutstanding"):
-            out_rec = h5
-            break
-    if isinstance(out_rec, dict):
-        cand_ids: List[Any] = []
-        for k in ("hdr_id", "HdrId", "root_hdr_id", "original_hdr_id",
-                  "LoanId", "loanId", "Id", "id",
-                  "PublicLoanId", "LoanNumber", "loanNumber"):
-            v = out_rec.get(k)
-            if v not in (None, "", 0) and v not in cand_ids:
-                cand_ids.append(v)
-        plan["candidateIds"] = cand_ids
-        # Try a few endpoint shapes with the primary (hdr) id, plus
-        # GetExistingSchedule with any other candidate ids. Always capture the
-        # body/snippet so a 500 tells us WHY (vs. a bare status).
-        attempts: List[str] = []
-        if cand_ids:
-            pid = cand_ids[0]
-            attempts += [
-                f"/V1/DynamicRepaymentPlan/{pid}/GetExistingSchedule",
-                f"/V1/DynamicRepaymentPlan/{pid}/GetSchedule",
-                f"/V1/DynamicRepaymentPlan/{pid}",
-                f"/V1/DynamicRepaymentPlan/GetExistingSchedule?hdrId={pid}",
-            ]
-        for lid in cand_ids[1:3]:
-            attempts.append(f"/V1/DynamicRepaymentPlan/{lid}/GetExistingSchedule")
-        for path in attempts:
-            try:
-                stp, bodyp, rawp = _v1_request("GET", path, return_raw=True)
-            except Exception as excp:
-                plan[path] = {"error": str(excp)[:160]}
-                continue
-            entry: Dict[str, Any] = {"status": stp}
-            if isinstance(bodyp, (dict, list)):
-                entry["body"] = bodyp
-            # Capture the RAW response text — Vergent 500s carry the real error
-            # there (e.g. a null-ref / "no schedule"), which _v1_get discarded.
-            entry["raw"] = (str(rawp)[:700] if rawp else "<empty>")
-            plan[path] = entry
-    out["paymentPlanProbe"] = plan
-
-    # Loan-detail / schedule probe. /V1/loan/{hdr} returns 200 with nested
-    # LoanDetail/Properties — the repayment-plan installments, if Vergent
-    # exposes them at all, live somewhere in that tree. For a dict response we
-    # (a) map the nested structure one level deep and (b) hunt the whole tree
-    # for any ARRAY of objects that looks like a schedule (date/amount/payment-
-    # ish keys), returning a PII-scrubbed sample. Temporary diagnostic.
-    _SENSITIVE = ("ssn", "social", "account", "routing", "aba", "dob", "birth",
-                  "card", "cvv", "tax", "ein", "license", "password", "token",
-                  "secret", "addr", "phone", "email", "firstname", "lastname",
-                  "fullname", "middlename", "routingnumber")
-    _SCHED_KEYS = ("date", "due", "amount", "payment", "principal", "fee",
-                   "installment", "balance")
-
-    def _redact(v, depth=0):
-        if depth > 6:
-            return "<deep>"
-        if isinstance(v, dict):
-            r = {}
-            for k, vv in v.items():
-                r[k] = "***" if any(t in k.lower() for t in _SENSITIVE) else _redact(vv, depth + 1)
-            return r
-        if isinstance(v, list):
-            return [_redact(x, depth + 1) for x in v[:3]]
-        return v
-
-    def _find_arrays(obj, path, acc, depth=0):
-        if depth > 8:
-            return
-        if isinstance(obj, dict):
-            for k, vv in obj.items():
-                _find_arrays(vv, (path + "." + k) if path else k, acc, depth + 1)
-        elif isinstance(obj, list):
-            first = obj[0] if obj else None
-            e = {"path": path, "len": len(obj)}
-            if isinstance(first, dict):
-                e["firstKeys"] = sorted(list(first.keys()))[:40]
-                if any(any(t in k.lower() for t in _SCHED_KEYS) for k in first.keys()):
-                    e["scheduleLike"] = True
-                    e["sample"] = _redact(first)
-            acc.append(e)
-            for x in obj[:5]:
-                if isinstance(x, dict):
-                    _find_arrays(x, path + "[]", acc, depth + 1)
-
-    detail: Dict[str, Any] = {}
-    if out_hdr:
-        for path in (
-            f"/V1/loan/{out_hdr}",
-            f"/V1/{cid}/loan/{out_hdr}",
-            f"/V1/RepaymentPlan/{out_hdr}/GetExistingSchedule",
-        ):
-            try:
-                std, bodyd, rawd = _v1_request("GET", path, return_raw=True)
-            except Exception as excd:
-                detail[path] = {"error": str(excd)[:160]}
-                continue
-            entry: Dict[str, Any] = {"status": std}
-            if isinstance(bodyd, dict):
-                entry["keys"] = sorted(list(bodyd.keys()))[:60]
-                nested: Dict[str, Any] = {}
-                for k, vv in bodyd.items():
-                    if isinstance(vv, dict):
-                        nested[k] = sorted(list(vv.keys()))[:40]
-                    elif isinstance(vv, list):
-                        nested[k] = f"[list len={len(vv)}]"
-                if nested:
-                    entry["nestedKeys"] = nested
-                arrays: List[Dict[str, Any]] = []
-                _find_arrays(bodyd, "", arrays)
-                sched = [a for a in arrays if a.get("scheduleLike")]
-                if sched:
-                    entry["scheduleArrays"] = sched
-                elif arrays:
-                    entry["allArrays"] = [{"path": a["path"], "len": a["len"],
-                                           "firstKeys": a.get("firstKeys")}
-                                          for a in arrays if a["len"]][:25]
-            elif isinstance(bodyd, list):
-                entry["len"] = len(bodyd)
-                entry["sample"] = _redact(bodyd[0]) if bodyd else None
-            else:
-                entry["raw"] = (str(rawd)[:300] if rawd else "<empty>")
-            detail[path] = entry
-    out["loanDetailProbe"] = detail
-
-    # Funding-method probe (Vergent GetFundingStatus → Results[].FundingMethod).
-    # Run on a CARD-disbursed loan and a CASH-disbursed loan and compare the
-    # FundingMethod value to find the card-vs-cash signal. Methods/ids only —
-    # no PII. Temporary.
-    fund: Dict[str, Any] = {"hdr": out_hdr}
-    if out_hdr:
-        for path in (f"/V1/GetFundingStatus?HdrId={out_hdr}",
-                     f"/V1/GetFundingStatus?hdrId={out_hdr}",
-                     f"/V1/GetFundingStatus?TrackingNumber={out_hdr}",
-                     f"/V1/GetFundingStatus/{out_hdr}",
-                     f"/V1/{out_hdr}/GetFundingStatus"):
-            try:
-                stf, bodyf = _v1_get(path)
-            except Exception as excf:
-                fund[path] = {"error": str(excf)[:120]}
-                continue
-            entry2: Dict[str, Any] = {"status": stf}
-            if isinstance(bodyf, (dict, list)):
-                entry2["body"] = bodyf
-            elif bodyf is not None:
-                entry2["snippet"] = str(bodyf)[:400]
-            fund[path] = entry2
-    out["fundingProbe"] = fund
-    return out
 
 
 def _attach_pending_signature(cid: str, loan: Optional[Dict[str, Any]]) -> None:
@@ -2340,12 +2056,6 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
-
-    # TEMP Step-0 diagnostic (e-sign field discovery). PII-safe; scoped to the
-    # caller's own JWT customer id. Remove after fields are confirmed.
-    qs = event.get("queryStringParameters") or {}
-    if qs.get("debug") == "signing":
-        return _json_response(200, {"debug": _debug_signing(cid)})
 
     shaped = _fetch_all_loans(cid)
     if not shaped:

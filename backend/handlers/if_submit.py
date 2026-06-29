@@ -96,7 +96,7 @@ _V1_TOKEN_TTL = 60 * 60  # one hour
 TTL_SECONDS = 30 * 24 * 60 * 60
 
 ALLOWED_ORIGIN = os.environ.get(
-    "PORTAL_ORIGIN", "https://d1zucrj1ouu3c.cloudfront.net"
+    "PORTAL_ORIGIN", "https://my.cashinflash.com"
 )
 
 CORS_HEADERS = {
