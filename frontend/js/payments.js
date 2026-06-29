@@ -577,7 +577,7 @@
     var row = qs('#payPlanChoiceRow');
     if (!loan) {
       if (inp) inp.value = '';
-      if (row) row.hidden = true;
+      if (row) row.style.display = 'none';  // inline beats .pay-fieldrow's display
       return null;
     }
     var payoff = (loan.balance != null) ? Number(loan.balance)
@@ -594,14 +594,14 @@
       && payoff != null && installment + 0.01 < payoff;
     var n;
     if (installmentDue) {
-      if (row) row.hidden = false;
+      if (row) row.style.display = '';  // revert to .pay-fieldrow layout
       var di = qs('[data-plan-installment]'); if (di) di.textContent = money(installment);
       var dp = qs('[data-plan-payoff]');      if (dp) dp.textContent = money(payoff);
       var sel = document.querySelector('input[name="payPlanChoice"]:checked');
       n = (sel && sel.value === 'payoff') ? payoff : installment;
       stylePlanOpts();
     } else {
-      if (row) row.hidden = true;
+      if (row) row.style.display = 'none';  // inline beats .pay-fieldrow's display
       n = payoff;  // regular loan → full balance, no choice
     }
     if (inp) inp.value = (n != null && !isNaN(n) && n > 0) ? n.toFixed(2) : '';

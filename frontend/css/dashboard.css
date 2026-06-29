@@ -4851,7 +4851,10 @@ html:not(.cif-has-active-loan) .home-pay { display: none; }
 .home-pay-amt { margin: 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; color: #0E8741; font-variant-numeric: tabular-nums; }
 .home-pay-due { margin: 0; font-size: 1.05rem; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .home-pay-due svg { color: #0E8741; }
-.home-pay-countdown { display: block; margin-top: 5px; text-align: center; font-size: .78rem; font-weight: 700; color: #6b7280; }
+/* padding-left offsets the countdown by the date's calendar icon (15px) + gap
+   (6px) so its centered text lines up under the date TEXT, not the icon+date
+   group's center. */
+.home-pay-countdown { display: block; margin-top: 5px; text-align: center; padding-left: 21px; font-size: .78rem; font-weight: 700; color: #6b7280; }
 .home-pay-countdown.is-soon { color: #b45309; }
 .home-pay-countdown.is-late { color: #b42318; }
 .home-pay-rule { height: 1px; background: #eef1f4; margin: 18px 0; }

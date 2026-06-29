@@ -49,7 +49,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260627f">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260629a">
   <style>
     /* Card payment confirmation modal — centered (not a bottom-sheet) + lively. */
     .pay-cc-modal { align-items: center !important; padding: 18px; }
@@ -375,7 +375,7 @@
                    two-way choice: their scheduled installment, or pay off the
                    whole balance. The hidden #payAmount (set by setLockedAmount
                    in payments.js) is what submit/validate read. -->
-              <div class="pay-fieldrow" id="payPlanChoiceRow" hidden>
+              <div class="pay-fieldrow" id="payPlanChoiceRow" hidden style="display:none;">
                 <div style="width:100%;">
                   <p class="pay-field-label" style="margin:0 0 8px;font-weight:700;">How much would you like to pay?</p>
                   <label data-plan-opt style="display:flex;align-items:center;gap:10px;border:2px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;">
@@ -749,6 +749,6 @@
   <script src="/js/cif-loancache.js?v=20260628b"></script>
   <script src="/js/cif-ach.js?v=20260626c"></script>
   <script src="/js/cif-esign.js?v=20260628b"></script>
-  <script src="/js/payments.js?v=20260628h"></script>
+  <script src="/js/payments.js?v=20260628i"></script>
 </body>
 </html>
