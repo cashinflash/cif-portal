@@ -1997,6 +1997,80 @@ def _plan_ddb():
     return _ddb_plan
 
 
+# ── Presence (admin "online" dot) ─────────────────────────────────────────
+# Lightweight heartbeat: the portal frontend pings /api/presence/ping every
+# ~45s while the customer's tab is visible, stamping lastSeenAt here. The admin
+# customers page reads it to show an online/offline dot. Fully additive +
+# best-effort: a failure anywhere just means "no dot", never a broken flow.
+_PRESENCE_TABLE = os.environ.get("PRESENCE_TABLE", "cif-portal-presence-dev")
+_PRESENCE_ONLINE_MS = 90 * 1000        # "online" = pinged within the last 90s
+_ddb_presence = None
+
+
+def _presence_ddb():
+    global _ddb_presence
+    if _ddb_presence is None:
+        _ddb_presence = boto3.client(
+            "dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    return _ddb_presence
+
+
+def record_presence(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/presence/ping (Cognito-JWT authed). Stamp the caller's
+    last-seen time. Best-effort; never raises into the customer's session."""
+    claims = _claims(event)
+    sub = claims.get("sub") or claims.get("cognito:username")
+    if not sub:
+        return _json_response(401, {"error": "no_claims"})
+    item = {
+        "sub": {"S": str(sub)},
+        "lastSeenAt": {"N": str(int(time.time() * 1000))},
+        # TTL well past the 90s online window so rows GC on their own.
+        "expiresAt": {"N": str(int(time.time()) + 900)},
+    }
+    cid = _customer_id(claims)
+    if cid:
+        item["customerId"] = {"S": str(cid)}
+    try:
+        _presence_ddb().put_item(TableName=_PRESENCE_TABLE, Item=item)
+    except Exception as e:
+        log.info("presence ping skipped sub=%s err=%s", sub, type(e).__name__)
+    return _json_response(200, {"ok": True})
+
+
+def _annotate_presence(rows: List[Dict[str, Any]]) -> None:
+    """Add `online` (bool) + `lastSeenMs` to each portal-source row from the
+    presence table. Batched read; best-effort (rows default to offline)."""
+    for r in rows:
+        if r.get("source") == "portal":
+            r.setdefault("online", False)
+    subs = [r.get("cognitoSub") for r in rows
+            if r.get("source") == "portal" and r.get("cognitoSub")]
+    if not subs:
+        return
+    now_ms = int(time.time() * 1000)
+    seen: Dict[str, int] = {}
+    try:
+        for i in range(0, len(subs), 100):     # batch_get_item caps at 100 keys
+            chunk = subs[i:i + 100]
+            resp = _presence_ddb().batch_get_item(RequestItems={
+                _PRESENCE_TABLE: {"Keys": [{"sub": {"S": str(s)}} for s in chunk]}
+            })
+            for it in resp.get("Responses", {}).get(_PRESENCE_TABLE, []):
+                s = (it.get("sub") or {}).get("S")
+                ls = (it.get("lastSeenAt") or {}).get("N")
+                if s and ls:
+                    seen[s] = int(ls)
+    except Exception as e:
+        log.info("presence read skipped err=%s", type(e).__name__)
+        return
+    for r in rows:
+        ls = seen.get(r.get("cognitoSub"))
+        if ls:
+            r["lastSeenMs"] = ls
+            r["online"] = (now_ms - ls) <= _PRESENCE_ONLINE_MS
+
+
 def _remember_plan_installment(loan_id: Any, amount: Optional[float]) -> None:
     if not loan_id or amount is None:
         return
@@ -3469,6 +3543,13 @@ def search_admin_customers(event: Dict[str, Any]) -> Dict[str, Any]:
     else:
         rows, err_detail = _search_portal_customers(q)
 
+    # Online/offline dot data for the customers page (best-effort; never
+    # affects the customer list itself).
+    try:
+        _annotate_presence(rows)
+    except Exception:
+        pass
+
     body = {"q": q, "source": source, "results": rows}
     if err_detail:
         # Surface the upstream error so the dashboard can display
@@ -4178,6 +4259,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         if blocked:
             return blocked
 
+        if path.endswith("/presence/ping") and method == "POST":
+            return record_presence(event)
         if path.endswith("/my-profile") and method == "GET":
             return get_my_profile(event)
         if path.endswith("/my-profile/email") and method == "PUT":
