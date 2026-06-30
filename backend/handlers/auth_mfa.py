@@ -1411,7 +1411,46 @@ def _onboard_mint_link(event: Dict[str, Any]) -> Dict[str, Any]:
         return _resp(500, {"error": "mint_unavailable"})
     url = ALLOWED_ORIGIN.rstrip("/") + "/onboard.html#t=" + token
     log.info("onboard mint-link cid=%s already=%s to=%s", cid, already, _mask_email(v_email))
-    return _resp(200, {"url": url, "masked": _mask_email(v_email), "alreadyRegistered": already})
+    # `email` (full, Vergent's on-file address) is returned so the caller can
+    # send the invite to the customer's correct inbox without the operator
+    # typing it — the cid and the destination email come from the SAME Vergent
+    # record, so there is no chance of cross-wiring a link to the wrong person.
+    return _resp(200, {"url": url, "email": v_email, "masked": _mask_email(v_email), "alreadyRegistered": already})
+
+
+def _onboard_status(event: Dict[str, Any]) -> Dict[str, Any]:
+    """POST /api/auth/onboard/status   (server-to-server; X-Api-Key header)
+
+    Body: {"customerId": "..."}  or  {"email": "..."}
+    Returns {registered, masked, firstName, customerId}. Lets the operator
+    dashboard show whether a Vergent customer already has a portal account,
+    WITHOUT minting a link or sending anything.
+    """
+    headers = {(k or "").lower(): v for k, v in (event.get("headers") or {}).items()}
+    provided = (headers.get("x-api-key") or "").strip()
+    expected = _onboard_api_key()
+    if not expected or not provided or not hmac.compare_digest(provided, expected):
+        return _resp(401, {"error": "unauthorized"})
+
+    body = _parse(event)
+    cid = str(body.get("customerId") or "").strip()
+    email_in = (body.get("email") or "").strip().lower()
+    if not cid and email_in:
+        cid = (_find_vergent_customer_id_by_email(email_in) or "").strip()
+    if not cid:
+        return _resp(404, {"error": "customer_not_found"})
+
+    cust = _vergent_get_customer(cid)
+    v_email = ((cust or {}).get("EmailAddr") or email_in or "").strip().lower()
+    first = ((cust or {}).get("FirstName") or (cust or {}).get("First")
+             or (cust or {}).get("FName") or "").strip()
+    if not v_email or "@" not in v_email:
+        return _resp(200, {"registered": False, "masked": "", "firstName": first,
+                           "customerId": cid, "noEmail": True})
+    status = _user_status(v_email)
+    registered = bool(status) and status not in ("FORCE_CHANGE_PASSWORD", "UNCONFIRMED")
+    return _resp(200, {"registered": registered, "masked": _mask_email(v_email),
+                       "firstName": first, "customerId": cid})
 
 
 def _onboard_complete(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1533,6 +1572,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _onboard_complete(event)
         if path.endswith("/auth/onboard/mint-link"):
             return _onboard_mint_link(event)
+        if path.endswith("/auth/onboard/status"):
+            return _onboard_status(event)
         return _resp(404, {"error": "not_found"})
     except Exception as exc:
         log.exception("auth_mfa unexpected error: %s", exc)

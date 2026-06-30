@@ -134,9 +134,11 @@ jobs:
             "POST /api/auth/onboard/verify"
             "POST /api/auth/onboard/complete"
             "POST /api/auth/onboard/mint-link"
+            "POST /api/auth/onboard/status"
             "OPTIONS /api/auth/onboard/verify"
             "OPTIONS /api/auth/onboard/complete"
             "OPTIONS /api/auth/onboard/mint-link"
+            "OPTIONS /api/auth/onboard/status"
           )
           for RK in "${ROUTES[@]}"; do
             RID=$(aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
