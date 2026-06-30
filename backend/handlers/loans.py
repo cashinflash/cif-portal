@@ -3613,6 +3613,20 @@ def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
     phone = (attrs.get("phone_number") or "").strip()
     first = (attrs.get("given_name") or "").strip()
     last = (attrs.get("family_name") or "").strip()
+    # Legacy accounts onboarded before mint-link carried the last name were
+    # created with an empty family_name → the page showed first-only. Backfill
+    # the DISPLAY from Vergent when family_name is missing. Best-effort; only
+    # fires for those older accounts (new signups store family_name), so the
+    # common list-all path stays free of per-row Vergent calls.
+    if (not last) and cid:
+        try:
+            from handlers import auth_mfa as _am
+            _cu = _am._vergent_get_customer(str(cid)) or {}
+            last = (_cu.get("LastName") or _cu.get("Last") or _cu.get("LName") or "").strip()
+            if not first:
+                first = (_cu.get("FirstName") or _cu.get("First") or _cu.get("FName") or "").strip()
+        except Exception:
+            pass
     cognito_status = (user.get("Status") or "").strip() or None
     created = user.get("UserCreateDate")
     signup_at = None

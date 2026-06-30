@@ -1401,21 +1401,27 @@ def _onboard_mint_link(event: Dict[str, Any]) -> Dict[str, Any]:
         return _resp(422, {"error": "no_email_on_file"})
     first = ((cust or {}).get("FirstName") or (cust or {}).get("First")
              or (cust or {}).get("FName") or "").strip()
+    last = ((cust or {}).get("LastName") or (cust or {}).get("Last")
+            or (cust or {}).get("LName") or "").strip()
 
     status = _user_status(v_email)
     already = bool(status) and status not in ("FORCE_CHANGE_PASSWORD", "UNCONFIRMED")
 
     exp = int(time.time()) + ONBOARD_TTL_DAYS * 86400
-    token = _sign_onboard({"cid": cid, "email": v_email, "fn": first, "ln": "", "exp": exp})
+    # Carry the last name in the token so _onboard_complete creates the Cognito
+    # account with family_name set — otherwise the customers page (and
+    # impersonation) only ever sees a first name.
+    token = _sign_onboard({"cid": cid, "email": v_email, "fn": first, "ln": last, "exp": exp})
     if not token:
         return _resp(500, {"error": "mint_unavailable"})
     url = ALLOWED_ORIGIN.rstrip("/") + "/onboard.html#t=" + token
     log.info("onboard mint-link cid=%s already=%s to=%s", cid, already, _mask_email(v_email))
-    # `email` (full, Vergent's on-file address) is returned so the caller can
-    # send the invite to the customer's correct inbox without the operator
-    # typing it — the cid and the destination email come from the SAME Vergent
+    # `email` (full, Vergent's on-file address) + `firstName` are returned so the
+    # caller can send the invite to the customer's correct inbox and greet them
+    # by name — the cid and the destination both come from the SAME Vergent
     # record, so there is no chance of cross-wiring a link to the wrong person.
-    return _resp(200, {"url": url, "email": v_email, "masked": _mask_email(v_email), "alreadyRegistered": already})
+    return _resp(200, {"url": url, "email": v_email, "firstName": first,
+                       "masked": _mask_email(v_email), "alreadyRegistered": already})
 
 
 def _onboard_status(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -1468,6 +1474,16 @@ def _onboard_complete(event: Dict[str, Any]) -> Dict[str, Any]:
     last = (p.get("ln") or "").strip()
     if not vcid:
         return _resp(400, {"error": "invalid_token_payload"})
+
+    # Backfill the name from Vergent if the token didn't carry it (links minted
+    # before mint-link started stamping the last name). Ensures the Cognito
+    # account gets given_name + family_name so the customers page shows both.
+    if not first or not last:
+        _cu = _vergent_get_customer(vcid) or {}
+        if not first:
+            first = (_cu.get("FirstName") or _cu.get("First") or _cu.get("FName") or "").strip()
+        if not last:
+            last = (_cu.get("LastName") or _cu.get("Last") or _cu.get("LName") or "").strip()
 
     # Key the account to Vergent's on-file email so creation always satisfies
     # the PreSignUp email-match guard — the token email is only for display, so
