@@ -1,10 +1,10 @@
 name: Diagnose onboard routing
 
-# Read-only diagnostic. Dumps the API Gateway routes for the onboard group
-# and the CloudFront behavior/origin map so we can see why a POST to
-# /api/auth/onboard/mint-link returns an S3 AccessDenied (i.e. is reaching
-# the S3 origin instead of API Gateway). Auto-runs when this file is pushed.
-# Safe to delete afterwards — it changes nothing.
+# Read-only diagnostic. Curls the LIVE mint-link endpoint to see whether the
+# default URL (https://my.cashinflash.com/api/auth/onboard/mint-link) reaches
+# the Lambda (expect JSON 401 on a bogus key) or falls through to S3 (403 XML).
+# This distinguishes "cif-apply's ONBOARD_MINT_URL is wrong" from "routing is
+# actually broken". Auto-runs when this file is pushed. Changes nothing.
 on:
   workflow_dispatch:
   push:
@@ -13,44 +13,25 @@ on:
     paths:
       - '.github/workflows/diagnose-onboard-routing.yml'
 
-env:
-  AWS_REGION: us-east-1
-  HTTP_API_ID: anh066l1wf
-  CF_DISTRIBUTION: EOV9K12LFKK8T
-
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: API Gateway routes (onboard + a known-working sample)
+      - name: Curl live mint-link with a bogus key (default URL)
         run: |
-          echo "=== ALL routes containing 'onboard' ==="
-          aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
-            --query "Items[?contains(RouteKey, 'onboard')].RouteKey" --output json
+          echo "=== POST https://my.cashinflash.com/api/auth/onboard/mint-link (bogus key) ==="
+          curl -sS -i -X POST 'https://my.cashinflash.com/api/auth/onboard/mint-link' \
+            -H 'Content-Type: application/json' \
+            -H 'X-Api-Key: diagnostic-bogus-key-not-real' \
+            -d '{"customerId":"000000"}' --max-time 30 || echo "[curl exit $?]"
           echo ""
-          echo "=== known-working auth routes (for comparison) ==="
-          aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
-            --query "Items[?contains(RouteKey, '/api/auth/')].RouteKey" --output json
-          echo ""
-          echo "=== total route count ==="
-          aws apigatewayv2 get-routes --api-id "$HTTP_API_ID" \
-            --query "length(Items)" --output text
+          echo "=== For contrast: POST to the bare domain root (expected S3 403) ==="
+          curl -sS -i -X POST 'https://my.cashinflash.com/' \
+            -H 'Content-Type: application/json' -d '{}' --max-time 30 | head -20 || echo "[curl exit $?]"
 
-      - name: CloudFront origins + behaviors
+      - name: Curl a known-working auth route (login, bogus body)
         run: |
-          aws cloudfront get-distribution-config --id "$CF_DISTRIBUTION" \
-            --query 'DistributionConfig.Origins.Items[].{Id:Id,Domain:DomainName}' \
-            --output json
-          echo "=== DEFAULT behavior target ==="
-          aws cloudfront get-distribution-config --id "$CF_DISTRIBUTION" \
-            --query 'DistributionConfig.DefaultCacheBehavior.TargetOriginId' --output text
-          echo "=== ordered cache behaviors (PathPattern -> TargetOriginId) ==="
-          aws cloudfront get-distribution-config --id "$CF_DISTRIBUTION" \
-            --query 'DistributionConfig.CacheBehaviors.Items[].{Path:PathPattern,Target:TargetOriginId}' \
-            --output json
+          echo "=== POST https://my.cashinflash.com/api/auth/login (bogus body) ==="
+          curl -sS -i -X POST 'https://my.cashinflash.com/api/auth/login' \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"diagnostic@example.com","password":"x"}' --max-time 30 | head -25 || echo "[curl exit $?]"
