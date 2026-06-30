@@ -1,0 +1,54 @@
+name: Diagnose onboard routing
+
+# Read-only. Replicates cif-apply's EXACT mint-link request (Python http.client,
+# HTTP/1.1) and dumps response headers, to see why cif-apply gets an S3 403 at a
+# URL that returns 401 JSON via curl. Auto-runs when this file is pushed.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - '.github/workflows/diagnose-onboard-routing.yml'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Python http.client (exactly replicates cif-apply) x3
+        run: |
+          python3 - <<'PY'
+          import http.client, ssl, json
+          from urllib.parse import urlparse
+          base = "https://my.cashinflash.com/api/auth/onboard/mint-link"
+          u = urlparse(base)
+          data = json.dumps({"customerId": "000000"}).encode()
+          for i in range(3):
+              conn = http.client.HTTPSConnection(u.netloc, timeout=20,
+                                                 context=ssl.create_default_context())
+              conn.request("POST", u.path, body=data, headers={
+                  "Content-Type": "application/json",
+                  "X-Api-Key": "diagnostic-bogus-key",
+                  "Content-Length": str(len(data)),
+              })
+              r = conn.getresponse()
+              body = r.read().decode("utf-8", "replace")
+              print(f"--- attempt {i+1}: HTTP {r.status} ---")
+              for k in ("server","via","x-cache","x-amz-cf-pop","content-type"):
+                  print(f"  {k}: {r.getheader(k)}")
+              print(f"  body[:120]: {body[:120]}")
+              conn.close()
+          PY
+
+      - name: curl HTTP/1.1 vs HTTP/2 to the same URL
+        run: |
+          echo "=== curl --http1.1 ==="
+          curl -sS -o /dev/null -w "status=%{http_code} http=%{http_version}\n" \
+            --http1.1 -X POST 'https://my.cashinflash.com/api/auth/onboard/mint-link' \
+            -H 'Content-Type: application/json' -H 'X-Api-Key: bogus' \
+            -d '{"customerId":"000000"}' --max-time 30
+          echo "=== curl --http2 ==="
+          curl -sS -o /dev/null -w "status=%{http_code} http=%{http_version}\n" \
+            --http2 -X POST 'https://my.cashinflash.com/api/auth/onboard/mint-link' \
+            -H 'Content-Type: application/json' -H 'X-Api-Key: bogus' \
+            -d '{"customerId":"000000"}' --max-time 30
