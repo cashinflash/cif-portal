@@ -2003,7 +2003,9 @@ def _plan_ddb():
 # customers page reads it to show an online/offline dot. Fully additive +
 # best-effort: a failure anywhere just means "no dot", never a broken flow.
 _PRESENCE_TABLE = os.environ.get("PRESENCE_TABLE", "cif-portal-presence-dev")
-_PRESENCE_ONLINE_MS = 90 * 1000        # "online" = pinged within the last 90s
+_PRESENCE_ONLINE_MS = 90 * 1000          # "online" = pinged within the last 90s
+_PRESENCE_RETENTION_S = 30 * 24 * 3600   # keep "last seen" ~30 days so the admin
+                                         # page stays rich during quiet stretches
 _ddb_presence = None
 
 
@@ -2025,8 +2027,11 @@ def record_presence(event: Dict[str, Any]) -> Dict[str, Any]:
     item = {
         "sub": {"S": str(sub)},
         "lastSeenAt": {"N": str(int(time.time() * 1000))},
-        # TTL well past the 90s online window so rows GC on their own.
-        "expiresAt": {"N": str(int(time.time()) + 900)},
+        # Retain the row ~30 days so the admin page always shows a rich
+        # "last seen" (Seen 2h ago / yesterday / 3d ago) even when nobody's
+        # online right now. "Active now" is still gated on the 90s window in
+        # _annotate_presence; this only controls how long the row survives.
+        "expiresAt": {"N": str(int(time.time()) + _PRESENCE_RETENTION_S)},
     }
     cid = _customer_id(claims)
     if cid:
