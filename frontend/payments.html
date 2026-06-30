@@ -643,19 +643,20 @@
         </div>
       </section>
 
-      <!-- ACH reminder modal — shown before submitting a bank payment. -->
-      <div class="profile-modal" id="payAchModal" hidden>
+      <!-- Bank (ACH) payment confirmation modal — matches the card modal's
+           design exactly (centered, green hero). No CVV (bank); shows the
+           5-business-day clearing note in place of the security-code field. -->
+      <div class="profile-modal pay-cc-modal" id="payAchModal" hidden>
         <button type="button" class="profile-modal-backdrop" id="payAchBackdrop" aria-label="Close"></button>
-        <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="payAchTitle">
-          <div class="profile-modal-head">
-            <h3 class="profile-modal-title" id="payAchTitle">Confirm bank payment</h3>
+        <div class="profile-modal-card pay-cc-card" role="dialog" aria-modal="true" aria-labelledby="payAchTitle">
+          <div class="pay-cc-hero">
+            <span class="pay-cc-hero-ico" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="8" y1="14" x2="8" y2="17"/><line x1="12" y1="14" x2="12" y2="17"/><line x1="16" y1="14" x2="16" y2="17"/></svg></span>
+            <h3 class="pay-cc-title" id="payAchTitle">Confirm your payment</h3>
+            <div class="pay-cc-amount" id="payAchAmount">$0.00</div>
+            <div class="pay-cc-cardline">from your bank account <strong id="payAchBank">checking</strong></div>
           </div>
-          <div class="profile-modal-body">
-            <p class="profile-modal-intro">
-              You're paying <strong id="payAchAmount">$0.00</strong> from your bank account
-              <strong id="payAchBank">checking</strong>.
-            </p>
-            <div class="pay-ach-note">
+          <div class="pay-cc-body">
+            <div class="pay-ach-note" style="margin-top:0">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>
               <div>
                 Bank (ACH) payments take about <strong>5 business days</strong> to clear.
@@ -664,9 +665,10 @@
                 returned (for example, for insufficient funds).
               </div>
             </div>
-            <div class="profile-modal-actions" style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-              <button type="button" class="btn-login" id="payAchCancel">Cancel</button>
-              <button type="button" class="btn-apply" id="payAchConfirm">Submit payment</button>
+            <div class="pay-cc-secure"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Secure &amp; encrypted</div>
+            <div class="pay-cc-actions">
+              <button type="button" class="pay-cc-cancel" id="payAchCancel">Cancel</button>
+              <button type="button" class="pay-cc-pay" id="payAchConfirm">Submit payment</button>
             </div>
           </div>
         </div>
