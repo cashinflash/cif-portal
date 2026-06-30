@@ -1227,7 +1227,20 @@ def _signup_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
         return _resp(500, {"error": "confirm_failed"})
 
     _delete_session(session_id)
-    return _resp(200, {"ok": True})
+    # Auto-login: the email code just proved inbox ownership, so issue tokens
+    # directly (no second login + MFA round). Mirrors onboard/complete. If this
+    # step fails the account is still set up — the page falls back to login.
+    tokens, err = _admin_initiate_password_auth(email, password)
+    if err or not tokens:
+        log.warning("signup auto-login failed for %s: %s", _mask_email(email), err)
+        return _resp(200, {"ok": True, "autoLogin": False})
+    return _resp(200, {
+        "ok": True,
+        "autoLogin": True,
+        "idToken": tokens.get("IdToken"),
+        "accessToken": tokens.get("AccessToken"),
+        "refreshToken": tokens.get("RefreshToken"),
+    })
 
 
 # ─────────────────────────────────────────

@@ -487,7 +487,19 @@ confirmForm.addEventListener('submit', async (e) => {
       const data = await r.json().catch(() => ({}));
       if (r.status === 200 && data.ok) {
         sessionStorage.removeItem('cif_signup_context');
-        // Account is active — send them to sign in (password + MFA).
+        // Auto-login: the email code just proved inbox ownership, so the
+        // backend issued tokens — drop them straight into the dashboard
+        // instead of bouncing back to login + a second MFA round.
+        if (data.autoLogin && data.idToken) {
+          try {
+            sessionStorage.setItem('cif_id_token', data.idToken);
+            if (data.accessToken) sessionStorage.setItem('cif_access_token', data.accessToken);
+            if (data.refreshToken) sessionStorage.setItem('cif_refresh_token', data.refreshToken);
+          } catch (e) { /* ignore */ }
+          window.location.href = '/dashboard.html';
+          return;
+        }
+        // Fallback: account active but auto-login unavailable — sign in.
         sessionStorage.setItem('cif_pending_email', pendingEmail);
         window.location.href = '/login.html';
         return;

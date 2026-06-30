@@ -3521,7 +3521,7 @@ def _search_portal_customers(q: str) -> Tuple[List[Dict[str, Any]], Optional[str
             return rows, f"{type(exc).__name__}: {str(exc)[:200]}"
         # Sort newest signups first so the most recent registrations
         # are visible at the top.
-        rows.sort(key=lambda r: r.get("signupAt") or "", reverse=True)
+        rows.sort(key=lambda r: r.get("signupTs") or 0, reverse=True)
         return rows, None
 
     digits_only = q.isdigit()
@@ -3629,12 +3629,28 @@ def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
             pass
     cognito_status = (user.get("Status") or "").strip() or None
     created = user.get("UserCreateDate")
+    # Operator-facing format: MM/DD/YYYY at h:mm AM/PM, in Pacific (the
+    # business' timezone) since Cognito stamps UserCreateDate in UTC. Falls
+    # back to a plain MM/DD/YYYY date if tz data is unavailable.
     signup_at = None
     if created is not None:
         try:
-            signup_at = created.strftime("%Y-%m-%d")
+            from zoneinfo import ZoneInfo
+            signup_at = created.astimezone(
+                ZoneInfo("America/Los_Angeles")).strftime("%m/%d/%Y at %I:%M %p")
         except Exception:
-            signup_at = str(created)[:10]
+            try:
+                signup_at = created.strftime("%m/%d/%Y")
+            except Exception:
+                signup_at = str(created)[:10]
+    # Numeric sort key (epoch) so list-all sorts newest-first regardless of the
+    # human-friendly MM/DD/YYYY signupAt string.
+    signup_ts = 0
+    try:
+        if created is not None:
+            signup_ts = int(created.timestamp())
+    except Exception:
+        signup_ts = 0
     return {
         "source": "portal",
         "customerId": str(cid) if cid else None,
@@ -3646,6 +3662,7 @@ def _shape_cognito_customer_row(user: Dict[str, Any]) -> Dict[str, Any]:
         "phoneLast4": (phone[-4:] if phone else None),
         "statusName": cognito_status,
         "signupAt": signup_at,
+        "signupTs": signup_ts,
     }
 
 
