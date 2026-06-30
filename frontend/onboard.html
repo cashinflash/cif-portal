@@ -4,87 +4,193 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
-  <title>Set up your portal · Cash in Flash</title>
+  <title>Set up your account · Cash in Flash</title>
   <link rel="icon" type="image/png" href="/images/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <style>
-    :root { --green:#0E8741; --green-dark:#0C7137; --navy:#1a1a2e; --muted:#6b7280; }
+    :root {
+      --green:#0E8741; --green-dark:#0C7137; --green-soft:#e8f5ee;
+      --navy:#0d2233; --ink:#1a2b3a; --muted:#6b7c8a; --line:#e6ecf1;
+    }
     * { box-sizing:border-box; }
-    html,body { margin:0; padding:0; }
-    body { font-family:Inter,system-ui,-apple-system,sans-serif; background:#eef1f5; color:var(--navy);
-      min-height:100vh; min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:20px; }
-    .ob-card { width:100%; max-width:420px; background:#fff; border:1px solid #e7ebf0; border-radius:20px;
-      box-shadow:0 20px 50px rgba(15,23,42,.10); padding:30px 26px; }
-    .ob-logo { display:block; margin:0 auto 22px; height:26px; width:auto; }
-    .ob-h1 { margin:0 0 6px; font-size:1.4rem; font-weight:800; letter-spacing:-.01em; text-align:center; }
-    .ob-sub { margin:0 0 22px; color:var(--muted); font-size:.95rem; line-height:1.5; text-align:center; }
-    .ob-sub strong { color:var(--navy); }
-    .ob-field { display:block; margin-bottom:14px; }
-    .ob-field span { display:block; font-size:.85rem; font-weight:600; margin-bottom:6px; }
-    .ob-input { width:100%; padding:13px 14px; border:1px solid #d7dde3; border-radius:12px; font-size:1rem;
-      font-family:inherit; }
-    .ob-input:focus { outline:none; border-color:var(--green); box-shadow:0 0 0 3px rgba(14,135,65,.12); }
-    .ob-reqs { margin:2px 0 16px; padding-left:18px; color:var(--muted); font-size:.8rem; line-height:1.7; }
-    .ob-reqs li.ok { color:var(--green); }
-    .ob-btn { width:100%; border:none; background:var(--green); color:#fff; font-family:inherit; font-weight:700;
-      font-size:1rem; padding:14px; border-radius:12px; cursor:pointer; }
+    html, body { margin:0; padding:0; }
+    body {
+      font-family:Inter, system-ui, -apple-system, sans-serif;
+      color:var(--ink);
+      background:#eaf1ee;
+      background:linear-gradient(165deg,#f1f5f8 0%, #e7f2ec 58%, #ddeee3 100%);
+      min-height:100vh; min-height:100dvh;
+      display:flex; align-items:center; justify-content:center;
+      padding:24px 18px;
+      -webkit-font-smoothing:antialiased;
+    }
+
+    /* Card -------------------------------------------------------------- */
+    .ob-card {
+      width:100%; max-width:440px;
+      background:#fff; border-radius:24px;
+      box-shadow:0 1px 2px rgba(13,61,40,.04), 0 24px 60px rgba(13,61,40,.12);
+      overflow:hidden;
+    }
+    /* Brand header band */
+    .ob-head {
+      background:linear-gradient(135deg,#0E8741 0%, #0a6e34 100%);
+      padding:28px 30px 24px; text-align:center;
+    }
+    .ob-logo { display:block; margin:0 auto; height:30px; width:auto; }
+    .ob-body { padding:30px 30px 28px; }
+
+    /* Eyebrow / lock chip */
+    .ob-eyebrow {
+      display:inline-flex; align-items:center; gap:6px;
+      margin:0 auto 14px; padding:5px 12px;
+      background:var(--green-soft); color:var(--green);
+      border-radius:999px; font-size:.7rem; font-weight:700;
+      letter-spacing:.08em; text-transform:uppercase;
+    }
+    .ob-eyebrow svg { width:12px; height:12px; }
+
+    .ob-h1 { margin:0 0 8px; font-size:1.55rem; font-weight:800; letter-spacing:-.02em;
+      text-align:center; color:var(--navy); line-height:1.15; }
+    .ob-sub { margin:0 0 24px; color:var(--muted); font-size:.95rem; line-height:1.55; text-align:center; }
+    .ob-sub strong { color:var(--ink); font-weight:600; }
+
+    /* Fields ------------------------------------------------------------ */
+    .ob-field { display:block; margin-bottom:16px; }
+    .ob-field span { display:block; font-size:.82rem; font-weight:600; margin-bottom:7px; color:var(--ink); }
+    .ob-input {
+      width:100%; padding:14px 15px; border:1.5px solid #dce3e9; border-radius:13px;
+      font-size:1rem; font-family:inherit; color:var(--ink); background:#fbfcfd;
+      transition:border-color .15s, box-shadow .15s, background .15s;
+    }
+    .ob-input::placeholder { color:#aab6c0; }
+    .ob-input:focus { outline:none; border-color:var(--green); background:#fff;
+      box-shadow:0 0 0 4px rgba(14,135,65,.13); }
+
+    /* Requirements checklist */
+    .ob-reqs { list-style:none; margin:4px 0 18px; padding:0;
+      display:grid; grid-template-columns:1fr 1fr; gap:7px 14px; }
+    .ob-reqs li { position:relative; padding-left:24px; color:var(--muted);
+      font-size:.8rem; line-height:1.3; transition:color .15s; }
+    .ob-reqs li::before {
+      content:""; position:absolute; left:0; top:1px; width:16px; height:16px;
+      border-radius:50%; border:1.5px solid #cdd8e0; background:#fff;
+      text-align:center; line-height:14px; font-size:10px; color:#fff;
+      transition:background .15s, border-color .15s;
+    }
+    .ob-reqs li.ok { color:var(--green); font-weight:600; }
+    .ob-reqs li.ok::before { content:"\2713"; background:var(--green); border-color:var(--green); }
+
+    /* Button ------------------------------------------------------------ */
+    .ob-btn {
+      width:100%; border:none; cursor:pointer; font-family:inherit;
+      background:var(--green); color:#fff; font-weight:700; font-size:1.02rem;
+      padding:15px; border-radius:14px; letter-spacing:.01em;
+      box-shadow:0 8px 20px rgba(14,135,65,.26);
+      transition:background .15s, transform .05s, box-shadow .15s;
+    }
     .ob-btn:hover:not(:disabled) { background:var(--green-dark); }
-    .ob-btn:disabled { opacity:.55; cursor:not-allowed; }
-    .ob-err { display:none; margin:0 0 14px; color:#b42318; font-size:.88rem; line-height:1.5;
-      background:#fde7e7; border-radius:10px; padding:10px 12px; }
+    .ob-btn:active:not(:disabled) { transform:translateY(1px); box-shadow:0 4px 12px rgba(14,135,65,.22); }
+    .ob-btn:disabled { opacity:.55; cursor:not-allowed; box-shadow:none; }
+
+    /* Error / states ---------------------------------------------------- */
+    .ob-err { display:none; margin:0 0 16px; color:#9a1c13; font-size:.88rem; line-height:1.5;
+      background:#fdeceb; border:1px solid #f7d4d1; border-radius:11px; padding:11px 13px; }
     .ob-err.show { display:block; }
     .ob-center { text-align:center; }
-    .ob-spinner { width:34px; height:34px; border:3px solid rgba(14,135,65,.2); border-top-color:var(--green);
-      border-radius:50%; animation:obspin .8s linear infinite; margin:30px auto; }
+    .ob-spinner { width:36px; height:36px; border:3px solid rgba(14,135,65,.2); border-top-color:var(--green);
+      border-radius:50%; animation:obspin .8s linear infinite; margin:20px auto; }
     @keyframes obspin { to { transform:rotate(360deg); } }
-    .ob-foot { margin-top:18px; text-align:center; font-size:.85rem; color:var(--muted); }
-    .ob-foot a { color:var(--green); font-weight:600; text-decoration:none; }
+
+    .ob-foot { margin-top:20px; text-align:center; font-size:.88rem; color:var(--muted); }
+    .ob-foot a { color:var(--green); font-weight:700; text-decoration:none; }
+    .ob-foot a:hover { text-decoration:underline; }
+
+    .ob-trust { margin-top:18px; padding-top:16px; border-top:1px solid var(--line);
+      display:flex; align-items:center; justify-content:center; gap:7px;
+      color:#9aa8b2; font-size:.76rem; font-weight:500; }
+    .ob-trust svg { width:13px; height:13px; }
+
     [hidden] { display:none !important; }
+
+    /* Mobile ------------------------------------------------------------ */
+    @media (max-width:480px) {
+      body { padding:0; background:#fff; }
+      .ob-card { max-width:none; min-height:100dvh; border-radius:0; box-shadow:none;
+        display:flex; flex-direction:column; }
+      .ob-head { padding:34px 26px 26px; }
+      .ob-body { padding:30px 24px 32px; flex:1; }
+      .ob-h1 { font-size:1.45rem; }
+      .ob-reqs { grid-template-columns:1fr; gap:8px; }
+    }
   </style>
 </head>
 <body>
   <main class="ob-card">
-    <img class="ob-logo" src="/images/logo.png?v=hd1" alt="Cash in Flash" width="180" height="26">
-
-    <!-- Loading -->
-    <div id="obLoading">
-      <div class="ob-spinner" aria-label="Loading"></div>
-      <p class="ob-sub">Checking your invite…</p>
+    <div class="ob-head">
+      <img class="ob-logo" src="https://cashinflash.com/images/white_logo_350.png" alt="Cash in Flash"
+           width="170" height="30"
+           onerror="this.onerror=null;this.src='/images/logo.png?v=hd1';this.style.height='26px'">
     </div>
 
-    <!-- Invalid / expired -->
-    <div id="obInvalid" hidden>
-      <h1 class="ob-h1">This link can't be used</h1>
-      <p class="ob-sub">Your setup link is invalid or has expired. Please use the most recent email we sent, or sign in if you've already set a password.</p>
-      <a class="ob-btn" href="/login.html" style="display:block;text-align:center;text-decoration:none;line-height:1.4">Go to sign in</a>
-      <p class="ob-foot">Need help? <a href="https://cashinflash.com/contact/">Contact support</a></p>
-    </div>
+    <div class="ob-body">
+      <!-- Loading -->
+      <div id="obLoading" class="ob-center">
+        <div class="ob-spinner" aria-label="Loading"></div>
+        <p class="ob-sub" style="margin:0;">Checking your invite…</p>
+      </div>
 
-    <!-- Set password -->
-    <form id="obForm" hidden autocomplete="on">
-      <h1 class="ob-h1" id="obGreeting">Set up your portal</h1>
-      <p class="ob-sub">Create a password for <strong id="obEmail">your account</strong> to finish setting up your Cash in Flash portal.</p>
-      <div class="ob-err" id="obError" role="alert"></div>
-      <label class="ob-field">
-        <span>Create password</span>
-        <input class="ob-input" type="password" id="obPw" autocomplete="new-password" required>
-      </label>
-      <ul class="ob-reqs" id="obReqs">
-        <li data-req="len">At least 10 characters</li>
-        <li data-req="upper">An uppercase letter</li>
-        <li data-req="lower">A lowercase letter</li>
-        <li data-req="digit">A number</li>
-        <li data-req="sym">A symbol (!?@#…)</li>
-      </ul>
-      <label class="ob-field">
-        <span>Confirm password</span>
-        <input class="ob-input" type="password" id="obPw2" autocomplete="new-password" required>
-      </label>
-      <button class="ob-btn" type="submit" id="obSubmit">Set password &amp; continue</button>
-      <p class="ob-foot">Already set up? <a href="/login.html">Sign in</a></p>
-    </form>
+      <!-- Invalid / expired -->
+      <div id="obInvalid" hidden>
+        <h1 class="ob-h1">This link can't be used</h1>
+        <p class="ob-sub">Your setup link is invalid or has expired. Please use the most recent
+          email we sent, or sign in if you've already set a password.</p>
+        <a class="ob-btn" href="/login.html"
+           style="display:block;text-align:center;text-decoration:none;line-height:1.4">Go to sign in</a>
+        <p class="ob-foot">Need help? <a href="https://cashinflash.com/contact/">Contact support</a></p>
+      </div>
+
+      <!-- Set password -->
+      <form id="obForm" hidden autocomplete="on">
+        <div class="ob-center">
+          <span class="ob-eyebrow">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                 stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Secure setup
+          </span>
+        </div>
+        <h1 class="ob-h1" id="obGreeting">Set up your account</h1>
+        <p class="ob-sub">Create a password for <strong id="obEmail">your account</strong>
+          to finish setting up your Cash in Flash account.</p>
+        <div class="ob-err" id="obError" role="alert"></div>
+        <label class="ob-field">
+          <span>Create password</span>
+          <input class="ob-input" type="password" id="obPw" autocomplete="new-password"
+                 placeholder="Choose a strong password" required>
+        </label>
+        <ul class="ob-reqs" id="obReqs">
+          <li data-req="len">At least 10 characters</li>
+          <li data-req="upper">An uppercase letter</li>
+          <li data-req="lower">A lowercase letter</li>
+          <li data-req="digit">A number</li>
+          <li data-req="sym">A symbol (!?@#…)</li>
+        </ul>
+        <label class="ob-field">
+          <span>Confirm password</span>
+          <input class="ob-input" type="password" id="obPw2" autocomplete="new-password"
+                 placeholder="Re-enter your password" required>
+        </label>
+        <button class="ob-btn" type="submit" id="obSubmit">Set password &amp; continue</button>
+        <p class="ob-foot">Already set up? <a href="/login.html">Sign in</a></p>
+        <div class="ob-trust">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Bank-level encryption protects your information
+        </div>
+      </form>
+    </div>
   </main>
 
   <script>

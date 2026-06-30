@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <style>/* app-feel: no sideways scroll */ html,body{overflow-x:clip;max-width:100%;}</style>
 <meta name="robots" content="noindex">
-<title>Create your portal account — Cash in Flash</title>
+<title>Create your online account · Cash in Flash</title>
 <link rel="icon" type="image/png" href="/images/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -124,7 +124,7 @@
         <div class="auth-left">
           <div class="auth-cardbig">
             <h1 class="auth-welcome" id="pageTitle">Create your account</h1>
-            <p class="auth-sub" id="welcomeLine">Welcome back — let's set up your portal account so you can manage your loan online.</p>
+            <p class="auth-sub" id="welcomeLine">Welcome back. Let's set up your online account so you can manage your loan anytime.</p>
 
             <!-- Step 1: email (locked) + password -->
             <form id="signupForm">
@@ -256,7 +256,7 @@ if (!_confirmModeAtStart) {
       'cif_search_banner',
       !ctx.vergentCustomerId
         ? 'Please look up your account first.'
-        : 'We don\'t have an email on file for your loan yet. Please call (888) 999-9859 and we\'ll help you finish setting up your portal.'
+        : 'We don\'t have an email on file for your loan yet. Please call (888) 999-9859 and we\'ll help you finish setting up your account.'
     );
     window.location.replace('/search.html');
   }
@@ -273,7 +273,7 @@ if (vergentEmail) {
 
 if (ctx.firstName) {
   document.getElementById('welcomeLine').textContent =
-    `Welcome back, ${ctx.firstName}. Let's set up your portal account.`;
+    `Welcome back, ${ctx.firstName}. Let's set up your online account.`;
 }
 
 // Recovery path: if we got here from login.html hitting UserNotConfirmedException,
@@ -329,7 +329,7 @@ function signupErrMsg(code) {
   var map = {
     DUPLICATE_EMAIL: 'You already have an account with Cash in Flash. Please sign in instead.',
     EMAIL_MISMATCH: "This email doesn't match the one on file for your loan. Please start over.",
-    MISSING_VERGENT_EMAIL: "We don't have an email on file for your loan yet. Please call (888) 999-9859 so we can help you finish setting up your portal.",
+    MISSING_VERGENT_EMAIL: "We don't have an email on file for your loan yet. Please call (888) 999-9859 so we can help you finish setting up your account.",
     VERGENT_UNAVAILABLE: "We couldn't reach our systems to finish setting up your account. Please try again in a few minutes.",
     invalid_password: 'Password must be 10+ characters with an upper, lower, number, and symbol.',
     invalid_code: 'The code you entered is incorrect.',
@@ -385,7 +385,7 @@ function humanizeError(err) {
   const lambdaCode = extractLambdaCode(err);
   const lambdaMap = {
     EMAIL_MISMATCH:       "This email doesn't match the one on file for your loan. Please start over.",
-    MISSING_VERGENT_EMAIL:"We don't have an email on file for your loan yet. Please call (888) 999-9859 so we can help you finish setting up your portal.",
+    MISSING_VERGENT_EMAIL:"We don't have an email on file for your loan yet. Please call (888) 999-9859 so we can help you finish setting up your account.",
     VERGENT_UNAVAILABLE:  "We couldn't reach our systems to finish setting up your account. Please try again in a few minutes.",
   };
   if (lambdaCode && lambdaMap[lambdaCode]) return lambdaMap[lambdaCode];
