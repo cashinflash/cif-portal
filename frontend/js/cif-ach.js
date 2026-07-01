@@ -108,25 +108,64 @@
     var s = _statusText(loan);
     return s.indexOf('deposited') !== -1 && s.indexOf('hold') === -1;
   }
-  // Returns { state: 'pending' | 'returned', amount, clearsBy } or null.
+  // Durable server record (loan.achPending) — persisted when the portal submits
+  // an ACH, so the pending block + the REAL clear date + the bank last-4 survive
+  // a different device or an operator "view as customer" (which have no
+  // sessionStorage). Vergent status still overrides it on resolve (below).
+  function serverRec(loan) {
+    var r = loan && loan.achPending;
+    if (!r) return null;
+    return {
+      amount: (r.amount != null ? Number(r.amount) : null),
+      clearsBy: r.clearsBy || null,
+      accountLast4: r.accountLast4 || null,
+      accountType: r.accountType || null,
+      submittedAtMs: (r.submittedAtMs != null ? Number(r.submittedAtMs) : null)
+    };
+  }
+  // A durable record is "fresh" enough to ASSERT pending during the pre-status
+  // gap (before Vergent shows the hold). Vergent flips within ~8h; give a
+  // generous 48h bridge, after which we defer to Vergent so a cancelled/settled
+  // ACH never sticks as pending on an otherwise-normal loan. (No timestamp →
+  // trust it.)
+  function freshRec(rec) {
+    if (!rec || rec.submittedAtMs == null) return true;
+    return (Date.now() - rec.submittedAtMs) < 48 * 3600 * 1000;
+  }
+  // "Checking •• 6789" / "Savings •• 1234" / "Bank account" from a record.
+  function acctLabel(det) {
+    if (!det) return null;
+    var t = String(det.accountType || '').toLowerCase();
+    var kind = t.indexOf('sav') !== -1 ? 'Savings'
+      : (t.indexOf('check') !== -1 ? 'Checking' : '');
+    if (det.accountLast4) return (kind || 'Bank') + ' •• ' + det.accountLast4;
+    return kind ? (kind + ' account') : 'Bank account';
+  }
+  // Returns { state:'pending'|'returned', amount, clearsBy, account } or null.
   // Vergent's status is AUTHORITATIVE: once it says Deposited (cleared) or
-  // Returned, that overrides our per-session "just submitted" marker so the
-  // portal never shows a stale "processing" after the payment resolves.
+  // Returned, that overrides BOTH the durable record and the per-session marker
+  // so the portal never shows a stale "processing" after the payment resolves.
+  // Details (amount / clearsBy / account) prefer the durable server record so
+  // they're identical on every device; they fall back to this session's marker.
   function info(loan) {
+    var rec = serverRec(loan);
+    var sp = readSession(loan);
+    var det = rec || sp || null;
     if (statusReturned(loan)) {
       try { sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }
-      return { state: 'returned', amount: null, clearsBy: null };
+      return { state: 'returned', amount: det ? det.amount : null, clearsBy: null, account: acctLabel(det) };
     }
     if (statusHold(loan)) {
-      var sp1 = readSession(loan);
-      return { state: 'pending', amount: sp1 ? sp1.amount : null, clearsBy: sp1 ? sp1.clearsBy : null };
+      return { state: 'pending', amount: det ? det.amount : null, clearsBy: det ? det.clearsBy : null, account: acctLabel(det) };
     }
     if (statusDeposited(loan)) {
       try { sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }  // cleared → done
       return null;
     }
-    var sp = readSession(loan);
-    if (sp) return { state: 'pending', amount: sp.amount, clearsBy: sp.clearsBy };
+    // Pre-status gap (Vergent shows no ACH signal yet): a FRESH durable record
+    // or this session's marker asserts pending.
+    if (rec && freshRec(rec)) return { state: 'pending', amount: rec.amount, clearsBy: rec.clearsBy, account: acctLabel(rec) };
+    if (sp) return { state: 'pending', amount: sp.amount, clearsBy: sp.clearsBy, account: acctLabel(sp) };
     return null;
   }
   function setPending(obj) { try { sessionStorage.setItem(KEY, JSON.stringify(obj)); } catch (e) { /* ignore */ } }

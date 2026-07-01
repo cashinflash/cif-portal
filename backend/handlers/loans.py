@@ -2160,6 +2160,105 @@ def _apply_plan_installment(loan: Optional[Dict[str, Any]]) -> None:
         loan["planInstallment"] = round(recalled, 2)
 
 
+# ─────────────────────────────────────────
+# Pending-ACH memory (DynamoDB)
+# ─────────────────────────────────────────
+# When the portal submits an ACH (bank) payment there's a ~8h gap before Vergent
+# flips the loan to "ACH Deposit Hold". During that gap the ONLY pending signal
+# is the submitting browser's sessionStorage — so a second device, or an operator
+# "view as customer", wouldn't see the block or the real clear date. We persist a
+# tiny record here at submit time (payments.py → remember_ach_pending) and attach
+# it as loan["achPending"] on every read, so the pending block + the real
+# estimated clear date + the "Bank account" repayment-method label work
+# everywhere. Best-effort: ANY failure just leaves the field unset and the UI
+# falls back to Vergent's status + the per-session marker — never raises. Vergent
+# stays authoritative: the frontend lets a Deposited/Returned status override this
+# record once the ACH resolves.
+_ACH_TABLE = os.environ.get("ACH_PENDING_TABLE", "cif-portal-ach-pending-dev")
+_ddb_ach = None
+
+
+def _ach_ddb():
+    global _ddb_ach
+    if _ddb_ach is None:
+        _ddb_ach = boto3.client(
+            "dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    return _ddb_ach
+
+
+def remember_ach_pending(loan_id: Any, *, amount: Optional[float],
+                         clears_by: str = "", effective_date: str = "",
+                         last4: str = "", account_type: str = "",
+                         submitted_at_ms: Optional[int] = None) -> None:
+    """Persist a portal-submitted ACH so its pending state / real clear date /
+    bank-account details survive cross-device + operator views. Best-effort."""
+    if not loan_id:
+        return
+    try:
+        now = int(time.time())
+        submitted = int(submitted_at_ms) if submitted_at_ms is not None else now * 1000
+        item = {
+            "loanId": {"S": str(loan_id)},
+            "submittedAtMs": {"N": str(submitted)},
+            # Keep the row ~10 days: long enough to cover the full ~5-business-day
+            # settle window (+ weekends/holidays) yet self-clearing so a stale
+            # record never lingers. Vergent status overrides it once it resolves.
+            "expiresAt": {"N": str(now + 10 * 24 * 3600)},
+        }
+        if amount is not None:
+            item["amount"] = {"N": str(round(float(amount), 2))}
+        if clears_by:
+            item["clearsBy"] = {"S": str(clears_by)}
+        if effective_date:
+            item["effectiveDate"] = {"S": str(effective_date)}
+        if last4:
+            item["accountLast4"] = {"S": str(last4)[-4:]}
+        if account_type:
+            item["accountType"] = {"S": str(account_type)}
+        _ach_ddb().put_item(TableName=_ACH_TABLE, Item=item)
+    except Exception as e:
+        log.info("ach-pending remember skipped loan=%s err=%s", loan_id, type(e).__name__)
+
+
+def _recall_ach_pending(loan_id: Any) -> Optional[Dict[str, Any]]:
+    if not loan_id:
+        return None
+    try:
+        r = _ach_ddb().get_item(TableName=_ACH_TABLE, Key={"loanId": {"S": str(loan_id)}})
+        item = r.get("Item")
+        if not item:
+            return None
+        out: Dict[str, Any] = {}
+        if "amount" in item:
+            out["amount"] = float(item["amount"]["N"])
+        if "clearsBy" in item:
+            out["clearsBy"] = item["clearsBy"]["S"]
+        if "effectiveDate" in item:
+            out["effectiveDate"] = item["effectiveDate"]["S"]
+        if "accountLast4" in item:
+            out["accountLast4"] = item["accountLast4"]["S"]
+        if "accountType" in item:
+            out["accountType"] = item["accountType"]["S"]
+        if "submittedAtMs" in item:
+            out["submittedAtMs"] = int(item["submittedAtMs"]["N"])
+        return out
+    except Exception as e:
+        log.info("ach-pending recall skipped loan=%s err=%s", loan_id, type(e).__name__)
+    return None
+
+
+def _apply_ach_pending(loan: Optional[Dict[str, Any]]) -> None:
+    """Attach loan['achPending'] from the durable store so the frontend can show
+    the pending block + real clear date + bank method even when this browser
+    never submitted. Best-effort; mutates in place. The frontend still lets
+    Vergent's Deposited/Returned status override it once the ACH resolves."""
+    if not loan:
+        return
+    rec = _recall_ach_pending(loan.get("id"))
+    if rec:
+        loan["achPending"] = rec
+
+
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
@@ -2187,6 +2286,9 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     # Remember/recall the plan installment so the next payment shows after the
     # current one is paid (Vergent hides it between due dates).
     _apply_plan_installment(active)
+    # Attach any portal-submitted pending-ACH details (real clear date, amount,
+    # bank last-4) so the block + clear date + bank method work cross-device.
+    _apply_ach_pending(active)
     return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
 
 

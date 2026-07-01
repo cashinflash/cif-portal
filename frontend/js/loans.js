@@ -268,8 +268,9 @@
       if (ach) {
         CifAch.applyPill(pill, ach);
         // Payment went out via ACH → show the bank account as the loan's
-        // repayment method, not the debit card on file.
-        CifAch.setRepayMethodBank();
+        // repayment method (precise "Checking •• 6789" when available), not the
+        // debit card on file.
+        CifAch.setRepayMethodBank(ach.account);
       }
     }
     // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching Home.

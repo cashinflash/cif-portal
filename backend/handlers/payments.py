@@ -69,6 +69,7 @@ from handlers.loans import (
     APIM_BASE,
     CORS_HEADERS,
     V1_BASE,
+    _apply_ach_pending,
     _apply_plan_installment,
     _claims,
     _customer_id,
@@ -81,6 +82,7 @@ from handlers.loans import (
     _secrets,
     _shape_v1_loan,
     _v1_get,
+    remember_ach_pending,
 )
 
 VERGENT_COMPANY_ID = int(os.environ.get("VERGENT_COMPANY_ID", "386"))
@@ -684,6 +686,9 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
     # Surface the remembered plan installment so the pay page shows the next
     # payment even after the current one is paid (Vergent hides it between dates).
     _apply_plan_installment(loan)
+    # Surface any portal-submitted pending-ACH details so the pay page's block +
+    # real clear date work cross-device (not just on the submitting browser).
+    _apply_ach_pending(loan)
     return _json_response(200, {"loan": loan})
 
 
@@ -2487,6 +2492,27 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
             error_detail=None if ok else detail,
         )
         if ok:
+            # ACH settles over ~5 banking days (weekends + Fed holidays excluded),
+            # counting the effective date as day 1. `today + 5 banking days`
+            # equals `next-banking-day (the effective date) + 4` — the same 5th
+            # business day. Authoritative date for the pending UI.
+            eff_date = _next_banking_day(_pacific_today()).isoformat()
+            clears_by = _add_banking_days(_pacific_today(), 5).isoformat()
+            # Persist so the pending block + real clear date + "Bank account"
+            # method survive cross-device / operator views during the gap before
+            # Vergent shows the hold. Strictly best-effort — never affects the
+            # payment result the customer just made.
+            try:
+                remember_ach_pending(
+                    loan_id_int,
+                    amount=round(amount, 2),
+                    clears_by=clears_by,
+                    effective_date=eff_date,
+                    last4=str(body.get("last4") or ""),
+                    account_type=str(body.get("accountType") or ""),
+                )
+            except Exception:
+                pass
             return _json_response(200, {
                 "success":       True,
                 "via":           "ach",
@@ -2496,9 +2522,8 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
                 "brand":         "Bank",
                 "resultText":    "Bank payment submitted",
                 "achPending":    True,
-                # ACH settles over ~5 banking days (weekends + Fed holidays
-                # excluded). Authoritative date for the pending UI.
-                "estimatedClearDate": _add_banking_days(_pacific_today(), 5).isoformat(),
+                "estimatedClearDate": clears_by,
+                "effectiveDate": eff_date,
                 "loanId":        loan_id_int,
                 "bankId":        bank_id,
                 "ledgerId":      ledger_id,

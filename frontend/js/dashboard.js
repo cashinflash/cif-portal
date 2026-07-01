@@ -848,8 +848,9 @@
         if (ach) {
           CifAch.applyPill(pill, ach);
           // Her repayment for this loan went out via ACH — show the bank as the
-          // method on the card, not whatever debit card is saved on file.
-          CifAch.setRepayMethodBank();
+          // method on the card (precise "Checking •• 6789" when we have it from
+          // the durable record), not whatever debit card is saved on file.
+          CifAch.setRepayMethodBank(ach.account);
           card.classList.remove('is-pastdue', 'is-pastdue-soft');
           if (note) note.classList.remove('is-pastdue-note');
           // Only block a SECOND payment while one is still PENDING. If it was
