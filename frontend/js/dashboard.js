@@ -847,6 +847,9 @@
         CifAch.renderStrip(ach);
         if (ach) {
           CifAch.applyPill(pill, ach);
+          // Her repayment for this loan went out via ACH — show the bank as the
+          // method on the card, not whatever debit card is saved on file.
+          CifAch.setRepayMethodBank();
           card.classList.remove('is-pastdue', 'is-pastdue-soft');
           if (note) note.classList.remove('is-pastdue-note');
           // Only block a SECOND payment while one is still PENDING. If it was
@@ -1063,7 +1066,12 @@
       if (cards.length) {
         var c = cards[0];
         var label = (c.brand || c.cardType || 'Card') + ' •• ' + (c.last4 || c.lastFour || '');
-        methodEls.forEach(function (el) { el.textContent = label; });
+        // Skip the loan-card "Repayment method" label when an ACH payment is
+        // active — CifAch.setRepayMethodBank() already set it to "Bank account"
+        // (the flag guards against this async fetch stamping the card over it).
+        if (!window.__cifAchMethodActive) {
+          methodEls.forEach(function (el) { el.textContent = label; });
+        }
         summaryEls.forEach(function (el) { el.textContent = label; });
       }
     }).catch(function () { /* leave the on-card defaults */ });

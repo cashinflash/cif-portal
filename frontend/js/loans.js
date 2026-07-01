@@ -265,7 +265,12 @@
     if (window.CifAch) {
       var ach = CifAch.info(loan);
       CifAch.renderStrip(ach);
-      if (ach) CifAch.applyPill(pill, ach);
+      if (ach) {
+        CifAch.applyPill(pill, ach);
+        // Payment went out via ACH → show the bank account as the loan's
+        // repayment method, not the debit card on file.
+        CifAch.setRepayMethodBank();
+      }
     }
     // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching Home.
     var isPastDue = statusPillClass(loan) === 'dash-pill--past-due';
@@ -559,6 +564,9 @@
     api(CARDS_ENDPOINT, token).then(function (data) {
       var cards = (data && (data.cards || data.methods)) || [];
       if (!cards.length) return;
+      // ACH active → CifAch already set the method to "Bank account"; don't
+      // stamp the saved debit card over it.
+      if (window.__cifAchMethodActive) return;
       var c = cards[0];
       var label = (c.brand || c.cardType || 'Card') + ' •• ' + (c.last4 || c.lastFour || '');
       qsa('[data-loan-repay-method]').forEach(function (el) { el.textContent = label; });

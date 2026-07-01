@@ -146,6 +146,23 @@
     }
   }
 
+  // Repayment-method label on the active-loan card. When a bank (ACH) payment
+  // is the active repayment, the loan's method IS the bank account — show that
+  // (with a bank glyph), never whatever debit card happens to be saved on file.
+  // Flips a flag so the async card loaders (loadCards / loadRepaymentMethod)
+  // skip re-stamping the card label over this, whichever order they resolve in.
+  var _BANK_ICO = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="8" y1="14" x2="8" y2="17"/><line x1="12" y1="14" x2="12" y2="17"/><line x1="16" y1="14" x2="16" y2="17"/></svg>';
+  function setRepayMethodBank(label) {
+    window.__cifAchMethodActive = true;
+    var els = document.querySelectorAll('[data-loan-repay-method]');
+    for (var i = 0; i < els.length; i++) {
+      els[i].textContent = label || 'Bank account';
+      var p = els[i].parentNode;
+      var svg = p && p.querySelector('svg');
+      if (svg) svg.outerHTML = _BANK_ICO;
+    }
+  }
+
   function _stripHtml(inf) {
     if (inf && inf.state === 'returned') {
       var ra = (inf.amount != null) ? (' of <strong>' + money(inf.amount) + '</strong>') : '';
@@ -163,6 +180,11 @@
   // Fill every [data-ach-strip-slot] anchor (or hide them when not pending).
   // Preserves each slot's existing classes (u-mobile / u-desktop).
   function renderStrip(inf) {
+    // Flag the page so CSS can reflow the desktop dashboard grid (drop the
+    // strip into its own row under the loan card) and tuck the loans-page
+    // strip up under the card — instead of letting the strip auto-place into
+    // an empty grid cell at the very bottom.
+    try { document.documentElement.classList.toggle('cif-ach-pending', !!inf); } catch (e) { /* ignore */ }
     var slots = document.querySelectorAll('[data-ach-strip-slot]');
     for (var i = 0; i < slots.length; i++) {
       var slot = slots[i];
@@ -180,21 +202,28 @@
     var wrap = document.createElement('div');
     wrap.className = 'profile-modal cif-ach-modal';
     wrap.hidden = true;
+    // Centered hero card matching the pay-page confirm modal (.pay-cc-modal),
+    // not a bottom-sheet — amber "in progress" theme with a clock. Styles live
+    // in dashboard.css (.cif-ach-modal*), loaded portal-wide.
     wrap.innerHTML =
       '<button type="button" class="profile-modal-backdrop" data-ach-close aria-label="Close"></button>' +
       '<div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="cifAchModalTitle">' +
-        '<div class="profile-modal-head"><h3 class="profile-modal-title" id="cifAchModalTitle">Payment in progress</h3></div>' +
-        '<div class="profile-modal-body">' +
-          '<div class="pay-ach-note"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>' +
-            '<div data-ach-modal-text></div></div>' +
-          '<div class="profile-modal-actions" style="display:flex;justify-content:flex-end;margin-top:12px">' +
-            '<button type="button" class="btn-apply" data-ach-close>Got it</button>' +
+        '<div class="cif-ach-modal-hero">' +
+          '<div class="cif-ach-modal-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg></div>' +
+          '<h3 class="cif-ach-modal-eyebrow" id="cifAchModalTitle">Payment in progress</h3>' +
+          '<div class="cif-ach-modal-amount" data-ach-modal-amount>&nbsp;</div>' +
+          '<div class="cif-ach-modal-sub" data-ach-modal-sub>from your bank account</div>' +
+        '</div>' +
+        '<div class="cif-ach-modal-body">' +
+          '<p class="cif-ach-modal-note" data-ach-modal-text></p>' +
+          '<div class="cif-ach-modal-actions">' +
+            '<button type="button" class="cif-ach-modal-btn" data-ach-close>Got it</button>' +
           '</div>' +
         '</div>' +
       '</div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', function (e) {
-      if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-ach-close')) hideModal();
+      if (e.target && e.target.closest && e.target.closest('[data-ach-close]')) hideModal();
     });
     _modal = wrap;
     return wrap;
@@ -202,13 +231,23 @@
   function showBlockedModal(inf) {
     inf = inf || {};
     var m = _modalEl();
+    var amtEl = m.querySelector('[data-ach-modal-amount]');
+    var subEl = m.querySelector('[data-ach-modal-sub]');
     var txt = m.querySelector('[data-ach-modal-text]');
-    var amt = (inf.amount != null) ? (money(inf.amount) + ' ') : '';
+    if (amtEl && subEl) {
+      if (inf.amount != null) {
+        amtEl.textContent = money(inf.amount);
+        amtEl.style.display = '';
+        subEl.textContent = 'from your bank account';
+      } else {
+        amtEl.style.display = 'none';
+        subEl.textContent = 'Your bank payment is processing';
+      }
+    }
     var by = inf.clearsBy ? (' It’s estimated to clear by <strong>' + fmtDate(inf.clearsBy) + '</strong>.') : '';
     if (txt) {
-      txt.innerHTML = 'Your bank payment ' + amt + 'is still processing.' + by +
-        ' Bank (ACH) payments take about <strong>5 business days</strong> to clear, ' +
-        'and your balance updates once it does.';
+      txt.innerHTML = 'Your bank payment is still processing, so you can’t start another payment just yet.' + by +
+        ' Bank (ACH) payments take about <strong>5 business days</strong> to clear, and your balance updates automatically once it does.';
     }
     m.hidden = false;
     requestAnimationFrame(function () { m.classList.add('is-open'); });
@@ -266,6 +305,7 @@
     money: money,
     applyPill: applyPill,
     renderStrip: renderStrip,
+    setRepayMethodBank: setRepayMethodBank,
     showBlockedModal: showBlockedModal,
     hideModal: hideModal
   };

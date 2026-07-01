@@ -2608,6 +2608,49 @@ body.cif-pay-no-active .pay-method.is-selected { border-color: #d1d5db; box-shad
    the card above instead of a full gap-plus-gap. */
 .pay-stack > .cif-ach-strip { margin-top: -6px; }
 
+/* ── "Bank payment in progress" modal ─────────────────────────────────────
+   Shown when the customer taps Make-a-Payment while an ACH payment is still
+   clearing (blocks a double-payment). A centered hero card matching the
+   pay-page confirm modal (.pay-cc-modal) — never a bottom-sheet afterthought.
+   Amber "processing" theme with a clock, so it reads as in-progress, not an
+   error. Built by cif-ach.js; loaded portal-wide via dashboard.css. */
+.cif-ach-modal { align-items: center !important; padding: 18px; }
+.cif-ach-modal .profile-modal-card {
+  width: min(390px, calc(100vw - 32px)) !important;
+  align-self: center !important;
+  border-radius: 22px !important;
+  max-height: calc(100vh - 40px) !important;
+  overflow: hidden;
+}
+.cif-ach-modal-hero {
+  background: linear-gradient(150deg, #f7b733 0%, #e8850d 62%, #cf6f00 100%);
+  color: #fff; text-align: center; padding: 26px 24px 22px; position: relative;
+}
+.cif-ach-modal-hero::after {
+  content: ""; position: absolute; right: -30px; top: -30px; width: 120px; height: 120px;
+  border-radius: 50%; background: rgba(255,255,255,.12);
+}
+.cif-ach-modal-ico {
+  position: relative; z-index: 1; width: 52px; height: 52px; margin: 0 auto 12px;
+  border-radius: 50%; background: rgba(255,255,255,.22);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.cif-ach-modal-eyebrow { position: relative; z-index: 1; margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: .01em; opacity: .96; }
+.cif-ach-modal-amount { position: relative; z-index: 1; font-size: 2.4rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 6px 0 2px; }
+.cif-ach-modal-sub { position: relative; z-index: 1; font-size: .9rem; opacity: .95; }
+.cif-ach-modal-body { padding: 22px; background: #fff; }
+.cif-ach-modal-note { margin: 0; font-size: .92rem; line-height: 1.55; color: #33414e; text-align: center; }
+.cif-ach-modal-note strong { font-weight: 800; color: #1a1a2e; }
+.cif-ach-modal-actions { margin-top: 18px; }
+/* !important so dashboard.css / portal.css global button rules don't flatten the gradient. */
+.cif-ach-modal-btn {
+  display: block; width: 100%; border: none !important; cursor: pointer;
+  background: linear-gradient(180deg, #E8850D, #cf6f00) !important; color: #fff !important;
+  border-radius: 13px; padding: 14px 18px; font-family: inherit; font-weight: 800; font-size: 1rem;
+  box-shadow: 0 6px 16px rgba(232,133,13,.24); transition: filter .15s, box-shadow .15s;
+}
+.cif-ach-modal-btn:hover { filter: brightness(1.04); box-shadow: 0 8px 20px rgba(232,133,13,.30); }
+
 /* ── E-sign: awaiting-signature treatment (shared, portal-wide) ─────────
    A loan created but not yet signed must never read as a healthy "Current"
    card. The pill, the "Review & sign" prompt strip, the in-portal signing
@@ -2654,6 +2697,14 @@ html.cif-pending-signature .loans-stack { gap: 12px !important; }
 html.cif-pending-signature .loans-stack > .loans-active { margin-bottom: 0 !important; }
 html.cif-pending-signature .loans-stack > .cif-esign-strip { margin-top: 0 !important; margin-bottom: 0 !important; }
 html.cif-pending-signature .loans-stack > .loans-past { margin-top: 16px !important; }
+/* Same deterministic spacing for the ACH-processing strip on the loans page:
+   tuck it 12px under the active-loan card (like home mobile) instead of a full
+   stack-gap + its own margin, then a clear break before Past loans. Applies on
+   mobile AND desktop (overrides the base + the >=900px 20px gap). */
+html.cif-ach-pending .loans-stack { gap: 12px !important; }
+html.cif-ach-pending .loans-stack > .loans-active { margin-bottom: 0 !important; }
+html.cif-ach-pending .loans-stack > .cif-ach-strip { margin-top: 0 !important; margin-bottom: 0 !important; }
+html.cif-ach-pending .loans-stack > .loans-past { margin-top: 16px !important; }
 /* Home mobile: the prompt sits in .home-mobile under a 10px grid row-gap — trim
    its own top margin so the card → prompt gap is 12px too (10 + 2), matching
    loans + desktop home so the spacing is identical on every device. */
@@ -4994,6 +5045,21 @@ a.app-cta-primary[href*="payments.html"]:hover {
       "act   act   act   act   act"
       "tiles tiles tiles tiles tiles";
   }
+
+  /* Bank (ACH) payment processing: give the strip its own row directly under
+     the loan card (mirrors the pending-signature reflow) so it sits where the
+     mobile strip does — instead of auto-placing into an empty cell at the very
+     bottom of the grid (the "tucked away at the bottom" bug). cif-ach.js sets
+     html.cif-ach-pending whenever the strip is showing. */
+  html.cif-ach-pending .home-grid {
+    grid-template-areas:
+      "loan  loan  loan  need  need"
+      "ach   ach   ach   .     .   "
+      "pay   pay   act   act   act"
+      "tiles tiles tiles tiles tiles";
+  }
+  /* 20px row gap − 8 = 12px, matching the loans-stack + payments rhythm. */
+  html.cif-ach-pending .cif-ach-strip.u-desktop { grid-area: ach; margin-top: -8px; align-self: start; }
 
   /* Sidebar help card. */
   .app-sidebar-help {
