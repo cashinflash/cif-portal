@@ -2705,6 +2705,15 @@ html.cif-ach-pending .loans-stack { gap: 12px !important; }
 html.cif-ach-pending .loans-stack > .loans-active { margin-bottom: 0 !important; }
 html.cif-ach-pending .loans-stack > .cif-ach-strip { margin-top: 0 !important; margin-bottom: 0 !important; }
 html.cif-ach-pending .loans-stack > .loans-past { margin-top: 16px !important; }
+/* Same exact 12px rhythm on EVERY page so the strip tucks under the loan card
+   identically portal-wide (matching the loans page the user signed off on).
+   Home mobile: the strip sits in .home-mobile under a 10px grid row-gap — trim
+   its own margin so the card → strip gap is 12px (10 + 2). Home desktop already
+   gets 12px from the grid reflow above. */
+html.cif-ach-pending .home-mobile > .cif-ach-strip { margin-top: 2px !important; }
+/* Payments: 12px under the summary card (overrides the base -6px pull). */
+html.cif-ach-pending .pay-stack { gap: 12px !important; }
+html.cif-ach-pending .pay-stack > .cif-ach-strip { margin-top: 0 !important; margin-bottom: 0 !important; }
 /* Home mobile: the prompt sits in .home-mobile under a 10px grid row-gap — trim
    its own top margin so the card → prompt gap is 12px too (10 + 2), matching
    loans + desktop home so the spacing is identical on every device. */

@@ -2259,11 +2259,80 @@ def _apply_ach_pending(loan: Optional[Dict[str, Any]]) -> None:
         loan["achPending"] = rec
 
 
+# ── TEMP diagnostic: find the working GetCustomerLoanACHSchedule shape ──────
+# Earlier calls (GET /V1/GetCustomerLoanACHSchedule and .../{id}) returned 415.
+# The working V1 GETs (GetCustomerBanks/Cards) use a ?custId= query param, so the
+# no-id form the operator flagged likely wants a query param, or the endpoint is
+# a POST. This tries every plausible shape at once and returns the status + shape
+# of each so a single CloudShell invoke tells us the winner (→ then wire the real
+# clear date + return reason from it). Gated on ?achsched=<loanId>; remove after.
+def _probe_ach_schedule(cid: Any, loan_id: Any) -> List[Dict[str, Any]]:
+    cid_s, lid_s = str(cid), str(loan_id)
+    try:
+        lid_i: Any = int(loan_id)
+    except (TypeError, ValueError):
+        lid_i = loan_id
+    try:
+        cid_i: Any = int(cid)
+    except (TypeError, ValueError):
+        cid_i = cid
+    attempts = [
+        ("GET",  "/V1/GetCustomerLoanACHSchedule", None),
+        ("GET",  f"/V1/GetCustomerLoanACHSchedule?custId={cid_s}", None),
+        ("GET",  f"/V1/GetCustomerLoanACHSchedule?loanId={lid_s}", None),
+        ("GET",  f"/V1/GetCustomerLoanACHSchedule?LoanId={lid_s}", None),
+        ("GET",  f"/V1/GetCustomerLoanACHSchedule/{lid_s}", None),
+        ("GET",  f"/V1/GetCustomerLoanACHSchedule/{cid_s}", None),
+        ("POST", "/V1/GetCustomerLoanACHSchedule", {"LoanId": lid_i}),
+        ("POST", "/V1/GetCustomerLoanACHSchedule", {"CustomerId": cid_i}),
+        ("POST", "/V1/GetCustomerLoanACHSchedule", {"HeaderId": lid_i}),
+        ("POST", f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {}),
+    ]
+    out: List[Dict[str, Any]] = []
+    for method, path, body in attempts:
+        row: Dict[str, Any] = {"method": method, "path": path}
+        try:
+            status, parsed, raw = _v1_request(method, path, body=body, return_raw=True)
+            row["status"] = status
+            if isinstance(parsed, list):
+                row["type"] = "list"
+                row["len"] = len(parsed)
+                if parsed and isinstance(parsed[0], dict):
+                    row["keys"] = list(parsed[0].keys())[:25]
+            elif isinstance(parsed, dict):
+                row["type"] = "dict"
+                row["keys"] = list(parsed.keys())[:25]
+            else:
+                row["type"] = type(parsed).__name__
+            row["raw_head"] = (raw or "")[:200]
+        except Exception as e:  # noqa: BLE001 — diagnostic, log everything
+            row["err"] = type(e).__name__
+        out.append(row)
+    return out
+
+
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     claims = _claims(event)
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
+
+    # TEMP: ?achsched=auto (or an explicit loanId) → run the schedule-endpoint
+    # probe and return. "auto" resolves the customer's active loan id so the
+    # operator only needs the customer id.
+    _qs = event.get("queryStringParameters") or {}
+    _probe_lid = _qs.get("achsched") if isinstance(_qs, dict) else None
+    if _probe_lid:
+        _lid: Any = _probe_lid
+        if str(_probe_lid).lower() in ("1", "auto", "yes", "true"):
+            _sh = _fetch_all_loans(cid) or []
+            _out = [l for l in _sh if l.get("isOutstanding")]
+            _lid = (_out[0].get("id") if _out else (_sh[0].get("id") if _sh else None))
+        return _json_response(200, {
+            "probeCustomerId": str(cid),
+            "probeLoanId": _lid,
+            "achSchedProbe": _probe_ach_schedule(cid, _lid),
+        })
 
     shaped = _fetch_all_loans(cid)
     if not shaped:
