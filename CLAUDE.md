@@ -179,6 +179,45 @@ planInstallment` as the installment. Infra: `provision-plan-installments.yml`
 `cif-portal-plan-installments-rw` on the loans + payments roles — separate
 policy name, never touches existing perms).
 
+### Bank (ACH) payment pending UX — shared module `cif-ach.js` (window.CifAch)
+When a customer pays via ACH the portal must (a) block a second payment while
+it's clearing, (b) show a real estimated clear date, and (c) show the bank
+account (not the debit card on file) as the loan's repayment method. All of it
+lives in `frontend/js/cif-ach.js` (loaded on dashboard/loans/payments/profile)
+so the treatment is identical portal-wide.
+
+- **Detection.** `_shape_v1_loan` maps Vergent's `StatusId` → `achStatusText`
+  (the loan-LIST endpoint returns Status/SubStatus TEXT blank for outstanding
+  loans, so StatusId is the only signal): 18/19/20/21 → hold → **pending**, 4 →
+  **returned**, 7 → **deposited** → cleared. `CifAch.info(loan)` returns
+  `{state, amount, clearsBy, account}` or null; Vergent's Deposited/Returned is
+  AUTHORITATIVE and overrides everything below once the ACH resolves.
+- **Durable record (cross-device).** There's a ~8h gap between portal-submit and
+  Vergent flipping to "ACH Deposit Hold". A per-session marker
+  (`sessionStorage cif_ach_pending`) covers only the submitting browser — so a
+  2nd device or the operator "view as customer" saw no block + only a generic
+  "about 5 business days". Fix: `remember_ach_pending` (loans.py) persists
+  `{amount, clearsBy (the real 5-banking-day date), effectiveDate, accountLast4,
+  accountType, submittedAtMs}` to DynamoDB on a successful ACH charge
+  (payments.py, best-effort — NEVER affects the payment); `_apply_ach_pending`
+  attaches `loan.achPending` in `get_active_loan` + `get_loan_summary`.
+  `info()` prefers this record so amount / real date / "Checking •• 6789"
+  method are identical everywhere. A record only ASSERTS pending in the gap for
+  48h (`freshRec`) — after that it defers to Vergent so a cancelled ACH can't
+  stick as pending. Infra: `provision-ach-pending.yml` →
+  `cif-portal-ach-pending-dev` (key loanId, TTL expiresAt) + ADDITIVE inline IAM
+  `cif-portal-ach-pending-rw` on the loans + payments roles.
+- **UI.** Amber "Processing" pill (`applyPill`), a strip under the loan card
+  (`renderStrip`; `html.cif-ach-pending` reflows the desktop home-grid so the
+  strip drops into its own row under the card, and tucks 12px on the loans
+  page), a **centered** "payment in progress" modal matching the pay-page
+  confirm modal (`showBlockedModal` + `.cif-ach-modal*` in dashboard.css), and
+  `setRepayMethodBank(label)` swaps the loan-card method to the bank account.
+- **OPEN (task #100):** the returned strip says a generic "often for insufficient
+  funds". The SPECIFIC reason needs Vergent's ACH-return data —
+  `GetCustomerLoanACHSchedule` returned 415 (try POST + `{LoanId/HeaderId}` body
+  or GET w/ forced Content-Type), and needs a real returned loan to test against.
+
 ### Dashboard auto-poll for a freshly-created loan (Req 2)
 After online signing, Vergent takes ~1 min to create the loan + e-sign doc +
 populate its queue; the portal only checked on page load. `startPendingPoll()`
