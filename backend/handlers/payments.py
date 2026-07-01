@@ -681,6 +681,15 @@ def get_loan_summary(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(200, {"loan": None})
 
     loan = _fetch_active_loan(cid)
+    # TEMP marker: proves the pay page hit the backend + dumps the loan's
+    # status fields (remove with the ACH probe in loans.py).
+    try:
+        log.info("[ACH-PROBE] hit=get_loan_summary cid=%s loan=%s status=%r subStatus=%r rawStatus=%r outstanding=%s",
+                 cid, (loan or {}).get("id"), (loan or {}).get("status"),
+                 (loan or {}).get("subStatus"), (loan or {}).get("rawStatus"),
+                 (loan or {}).get("isOutstanding"))
+    except Exception:
+        pass
     # Surface the remembered plan installment so the pay page shows the next
     # payment even after the current one is paid (Vergent hides it between dates).
     _apply_plan_installment(loan)

@@ -414,20 +414,19 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     status_id = hdr.get("StatusId")
 
     # ── TEMP ACH-status probe (remove once ACH-hold detection is wired) ──
-    # Logs the raw Vergent loan-status fields for outstanding loans so we can
-    # see exactly which field carries "ACH Deposit Hold" / "Returned - ..." /
-    # "Deposited" on the loan-LIST call the portal reads (which can differ from
-    # the Vergent UI's detail view). Status-ish fields only — no PII.
+    # Logs the raw Vergent loan-status fields for EVERY loan (no outstanding
+    # guard — an ACH-hold loan may not be flagged outstanding) so we can see
+    # exactly which field carries "ACH Deposit Hold" / "Returned - ..." /
+    # "Deposited" on the loan-LIST call the portal reads. Status fields only.
     try:
-        if is_outstanding:
-            _statusish = {k: v for k, v in hdr.items()
-                          if isinstance(v, str) and v.strip() and any(
-                              t in k.lower() or t in v.lower()
-                              for t in ("status", "ach", "hold", "deposit",
-                                        "return", "pending", "nsf"))}
-            log.info("[ACH-PROBE] loan=%s Status=%r SubStatus=%r StatusId=%s statusish=%s",
-                     hdr.get("hdr_id"), hdr.get("Status"), hdr.get("SubStatus"),
-                     status_id, _statusish)
+        _statusish = {k: v for k, v in hdr.items()
+                      if isinstance(v, str) and v.strip() and any(
+                          t in k.lower() or t in v.lower()
+                          for t in ("status", "ach", "hold", "deposit",
+                                    "return", "pending", "nsf"))}
+        log.info("[ACH-PROBE] loan=%s outstanding=%s Status=%r SubStatus=%r StatusId=%s statusish=%s",
+                 hdr.get("hdr_id"), is_outstanding, hdr.get("Status"),
+                 hdr.get("SubStatus"), status_id, _statusish)
     except Exception:
         pass
 
@@ -2156,6 +2155,15 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
 
     shaped = _fetch_all_loans(cid)
+    # TEMP marker: proves this endpoint was actually hit (not client-cached) +
+    # dumps each shaped loan's status fields. Remove with the probe above.
+    try:
+        log.info("[ACH-PROBE] hit=get_active_loan cid=%s count=%s summary=%s", cid,
+                 len(shaped or []),
+                 [(l.get("id"), l.get("status"), l.get("subStatus"), l.get("rawStatus"),
+                   l.get("isOutstanding")) for l in (shaped or [])])
+    except Exception:
+        pass
     if not shaped:
         return _json_response(200, {"loan": None, "loanCount": 0, "allLoans": []})
 
