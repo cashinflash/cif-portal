@@ -406,30 +406,37 @@ def _format_iso(dt: Optional[str]) -> Optional[str]:
     return dt
 
 
+# Vergent StatusId → ACH lifecycle text (values confirmed via the live
+# GetActiveLoanStatusList). The loan-LIST endpoint the portal reads returns the
+# text Status/SubStatus BLANK for outstanding loans, but StatusId is populated,
+# so we derive the ACH state from the id. The portal's CifAch detection reads
+# the resulting text to gate payment while an ACH is pending, show "returned",
+# or clear once deposited.
+_ACH_LIFECYCLE_BY_STATUS_ID = {
+    18: "Deposit Hold",           # non-ACH deposit hold (e.g. check) — still pending
+    19: "ACH Deposit Hold",       # ACH pending the ~5-business-day clear window
+    20: "Deposit Hold",           # retry variant
+    21: "ACH Deposit Hold",       # ACH Deposit Hold (retry)
+    4:  "Returned",               # ACH bounced (e.g. NSF) — balance not reduced
+    7:  "Deposited",              # ACH cleared
+}
+
+
+def _ach_status_from_id(sid: Any) -> Optional[str]:
+    """Map a Vergent StatusId to ACH lifecycle text, or None if it isn't an
+    ACH/deposit status. Coerces string ids so "19" and 19 both resolve."""
+    try:
+        return _ACH_LIFECYCLE_BY_STATUS_ID.get(int(sid))
+    except (TypeError, ValueError):
+        return None
+
+
 def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize one v1 loan record → the shape the dashboard renders."""
     hdr = record.get("LoanHeader") if isinstance(record.get("LoanHeader"), dict) else record
     detail = record.get("LoanDetail") if isinstance(record.get("LoanDetail"), dict) else {}
     is_outstanding = bool(hdr.get("IsStatusOutstanding"))
     status_id = hdr.get("StatusId")
-
-    # ── TEMP ACH-status probe (remove once ACH-hold detection is wired) ──
-    # Logs the raw Vergent loan-status fields for EVERY loan (no outstanding
-    # guard — an ACH-hold loan may not be flagged outstanding) so we can see
-    # exactly which field carries "ACH Deposit Hold" / "Returned - ..." /
-    # "Deposited" on the loan-LIST call the portal reads. Status fields only.
-    try:
-        _statusish = {k: v for k, v in hdr.items()
-                      if isinstance(v, str) and v.strip() and any(
-                          t in k.lower() or t in v.lower()
-                          for t in ("status", "ach", "hold", "deposit",
-                                    "return", "pending", "nsf"))}
-        log.info("[ACH-PROBE] loan=%s outstanding=%s Status=%r SubStatus=%r StatusId=%s statusish=%s",
-                 hdr.get("hdr_id"), is_outstanding, hdr.get("Status"),
-                 hdr.get("SubStatus"), status_id, _statusish)
-    except Exception:
-        pass
-
     loan_amount = _to_number(hdr.get("LoanAmount"))
     payoff = _to_number(hdr.get("PayoffAmount"))
     amount_due = _to_number(hdr.get("AmountDue"))
@@ -516,6 +523,11 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         "statusId": status_id,
         "subStatus": hdr.get("SubStatus"),
         "rawStatus": hdr.get("Status"),
+        # ACH lifecycle derived from StatusId (text Status/SubStatus come back
+        # blank on the loan-list endpoint for outstanding loans). CifAch reads
+        # this to gate payment while an ACH is on hold, show the returned
+        # state, or clear once deposited.
+        "achStatusText": _ach_status_from_id(status_id),
         "isOutstanding": is_outstanding,
         "principal": loan_amount,
         "balance": payoff if payoff is not None else amount_due,
@@ -2155,15 +2167,6 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
 
     shaped = _fetch_all_loans(cid)
-    # TEMP marker: proves this endpoint was actually hit (not client-cached) +
-    # dumps each shaped loan's status fields. Remove with the probe above.
-    try:
-        log.info("[ACH-PROBE] hit=get_active_loan cid=%s count=%s summary=%s", cid,
-                 len(shaped or []),
-                 [(l.get("id"), l.get("status"), l.get("subStatus"), l.get("rawStatus"),
-                   l.get("isOutstanding")) for l in (shaped or [])])
-    except Exception:
-        pass
     if not shaped:
         return _json_response(200, {"loan": None, "loanCount": 0, "allLoans": []})
 
@@ -2184,22 +2187,6 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     # Remember/recall the plan installment so the next payment shows after the
     # current one is paid (Vergent hides it between due dates).
     _apply_plan_installment(active)
-    # ── TEMP ACH-schedule probe — ONLY for the synthetic "ach-probe" invoke
-    # (never runs for real customers). Dumps the raw GetCustomerLoanACHSchedule
-    # + GetActiveLoanStatusList straight into the response so we can design the
-    # ACH-status mapping without depending on CloudWatch. Remove after wiring. ──
-    try:
-        if (claims.get("sub") or "") == "ach-probe":
-            _pl = active or (shaped[0] if shaped else None)
-            if _pl and _pl.get("id"):
-                _lid = _pl.get("id")
-                _sh, _sched = _v1_get("/V1/GetCustomerLoanACHSchedule/%s" % _lid)
-                _sh2, _slist = _v1_get("/V1/GetActiveLoanStatusList")
-                _pl["_achProbe"] = {"loanId": _lid, "schedHttp": _sh, "sched": _sched,
-                                    "statusListHttp": _sh2, "statusList": _slist}
-    except Exception as _e:
-        if active is not None:
-            active["_achProbe"] = {"error": repr(_e)}
     return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
 
 

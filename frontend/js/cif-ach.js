@@ -66,7 +66,12 @@
   //   • cleared          → "Deposited"/current, balance dropped → none
   // This is what makes the portal auto-update on clear/return/cancel.
   function _statusText(loan) {
-    return loan ? ((loan.subStatus || '') + ' ' + (loan.rawStatus || '') + ' ' + (loan.status || '')).toLowerCase() : '';
+    // achStatusText is derived server-side from Vergent's StatusId (the loan-
+    // list endpoint returns the text Status/SubStatus blank for outstanding
+    // loans, so this is what actually carries "ACH Deposit Hold" / "Returned" /
+    // "Deposited" through to the portal). subStatus/rawStatus kept for any
+    // record that does surface the text directly.
+    return loan ? ((loan.achStatusText || '') + ' ' + (loan.subStatus || '') + ' ' + (loan.rawStatus || '') + ' ' + (loan.status || '')).toLowerCase() : '';
   }
   function statusHold(loan) {
     var s = _statusText(loan);
