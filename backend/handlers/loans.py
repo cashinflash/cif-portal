@@ -2184,6 +2184,22 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     # Remember/recall the plan installment so the next payment shows after the
     # current one is paid (Vergent hides it between due dates).
     _apply_plan_installment(active)
+    # ── TEMP ACH-schedule probe — ONLY for the synthetic "ach-probe" invoke
+    # (never runs for real customers). Dumps the raw GetCustomerLoanACHSchedule
+    # + GetActiveLoanStatusList straight into the response so we can design the
+    # ACH-status mapping without depending on CloudWatch. Remove after wiring. ──
+    try:
+        if (claims.get("sub") or "") == "ach-probe":
+            _pl = active or (shaped[0] if shaped else None)
+            if _pl and _pl.get("id"):
+                _lid = _pl.get("id")
+                _sh, _sched = _v1_get("/V1/GetCustomerLoanACHSchedule/%s" % _lid)
+                _sh2, _slist = _v1_get("/V1/GetActiveLoanStatusList")
+                _pl["_achProbe"] = {"loanId": _lid, "schedHttp": _sh, "sched": _sched,
+                                    "statusListHttp": _sh2, "statusList": _slist}
+    except Exception as _e:
+        if active is not None:
+            active["_achProbe"] = {"error": repr(_e)}
     return _json_response(200, {"loan": active, "loanCount": len(shaped), "allLoans": shaped})
 
 
