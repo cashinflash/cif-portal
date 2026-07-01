@@ -412,6 +412,25 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
     detail = record.get("LoanDetail") if isinstance(record.get("LoanDetail"), dict) else {}
     is_outstanding = bool(hdr.get("IsStatusOutstanding"))
     status_id = hdr.get("StatusId")
+
+    # ── TEMP ACH-status probe (remove once ACH-hold detection is wired) ──
+    # Logs the raw Vergent loan-status fields for outstanding loans so we can
+    # see exactly which field carries "ACH Deposit Hold" / "Returned - ..." /
+    # "Deposited" on the loan-LIST call the portal reads (which can differ from
+    # the Vergent UI's detail view). Status-ish fields only — no PII.
+    try:
+        if is_outstanding:
+            _statusish = {k: v for k, v in hdr.items()
+                          if isinstance(v, str) and v.strip() and any(
+                              t in k.lower() or t in v.lower()
+                              for t in ("status", "ach", "hold", "deposit",
+                                        "return", "pending", "nsf"))}
+            log.info("[ACH-PROBE] loan=%s Status=%r SubStatus=%r StatusId=%s statusish=%s",
+                     hdr.get("hdr_id"), hdr.get("Status"), hdr.get("SubStatus"),
+                     status_id, _statusish)
+    except Exception:
+        pass
+
     loan_amount = _to_number(hdr.get("LoanAmount"))
     payoff = _to_number(hdr.get("PayoffAmount"))
     amount_due = _to_number(hdr.get("AmountDue"))

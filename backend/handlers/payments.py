@@ -1,3 +1,5 @@
+# co-deploy: touched so the payments Lambda rebuilds alongside the loans.py
+# ACH-status probe (payments imports _shape_v1_loan from loans.py).
 """
 Customer Portal — Payments handler.
 
