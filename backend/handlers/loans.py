@@ -2268,43 +2268,45 @@ def _apply_ach_pending(loan: Optional[Dict[str, Any]]) -> None:
 # clear date + return reason from it). Gated on ?achsched=<loanId>; remove after.
 def _probe_ach_schedule(cid: Any, loan_id: Any) -> List[Dict[str, Any]]:
     cid_s, lid_s = str(cid), str(loan_id)
-    try:
-        lid_i: Any = int(loan_id)
-    except (TypeError, ValueError):
-        lid_i = loan_id
-    try:
-        cid_i: Any = int(cid)
-    except (TypeError, ValueError):
-        cid_i = cid
+    token = _get_v1_token()
+    base_hdr = {"Token": token} if token else {}
+    # Round 1 showed the ONLY route that isn't 404 is GET /{id}, and it 415s with
+    # "The request contains an entity body but no Content-Type header" — a classic
+    # ASP.NET Web API quirk where the action binds a body param and rejects the
+    # missing Content-Type. So force Content-Type: application/json on the /{id}
+    # GET (Web API then binds an absent/empty body to null), trying both the loan
+    # id and the customer id, with a header only and with an empty {} body.
+    #   body={}   → _http json-encodes it and sets Content-Type: application/json
+    #   body=None → no body; the extra Content-Type header still goes out
     attempts = [
-        ("GET",  "/V1/GetCustomerLoanACHSchedule", None),
-        ("GET",  f"/V1/GetCustomerLoanACHSchedule?custId={cid_s}", None),
-        ("GET",  f"/V1/GetCustomerLoanACHSchedule?loanId={lid_s}", None),
-        ("GET",  f"/V1/GetCustomerLoanACHSchedule?LoanId={lid_s}", None),
-        ("GET",  f"/V1/GetCustomerLoanACHSchedule/{lid_s}", None),
-        ("GET",  f"/V1/GetCustomerLoanACHSchedule/{cid_s}", None),
-        ("POST", "/V1/GetCustomerLoanACHSchedule", {"LoanId": lid_i}),
-        ("POST", "/V1/GetCustomerLoanACHSchedule", {"CustomerId": cid_i}),
-        ("POST", "/V1/GetCustomerLoanACHSchedule", {"HeaderId": lid_i}),
-        ("POST", f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {}),
+        ("get_loan_ct",    f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {"Content-Type": "application/json"}, None),
+        ("get_loan_body",  f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {}, {}),
+        ("get_cust_ct",    f"/V1/GetCustomerLoanACHSchedule/{cid_s}", {"Content-Type": "application/json"}, None),
+        ("get_cust_body",  f"/V1/GetCustomerLoanACHSchedule/{cid_s}", {}, {}),
+        ("get_loan_plain", f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {}, None),  # control (expect 415)
     ]
     out: List[Dict[str, Any]] = []
-    for method, path, body in attempts:
-        row: Dict[str, Any] = {"method": method, "path": path}
+    for label, path, extra, body in attempts:
+        row: Dict[str, Any] = {"label": label, "path": path,
+                               "ct": extra.get("Content-Type", "(none)"),
+                               "body": ("{}" if body == {} else "(none)")}
         try:
-            status, parsed, raw = _v1_request(method, path, body=body, return_raw=True)
+            hdr = dict(base_hdr)
+            hdr.update(extra)
+            status, parsed, raw = _http(f"{V1_BASE}{path}", "GET", body=body, headers=hdr)
             row["status"] = status
             if isinstance(parsed, list):
                 row["type"] = "list"
                 row["len"] = len(parsed)
                 if parsed and isinstance(parsed[0], dict):
-                    row["keys"] = list(parsed[0].keys())[:25]
+                    row["keys"] = list(parsed[0].keys())[:30]
+                    row["first"] = {k: parsed[0][k] for k in list(parsed[0].keys())[:30]}
             elif isinstance(parsed, dict):
                 row["type"] = "dict"
-                row["keys"] = list(parsed.keys())[:25]
+                row["keys"] = list(parsed.keys())[:30]
             else:
                 row["type"] = type(parsed).__name__
-            row["raw_head"] = (raw or "")[:200]
+            row["raw_head"] = (raw or "")[:400]
         except Exception as e:  # noqa: BLE001 — diagnostic, log everything
             row["err"] = type(e).__name__
         out.append(row)
