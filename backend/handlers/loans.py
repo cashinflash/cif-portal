@@ -2266,51 +2266,48 @@ def _apply_ach_pending(loan: Optional[Dict[str, Any]]) -> None:
 # a POST. This tries every plausible shape at once and returns the status + shape
 # of each so a single CloudShell invoke tells us the winner (→ then wire the real
 # clear date + return reason from it). Gated on ?achsched=<loanId>; remove after.
-def _probe_ach_schedule(cid: Any, loan_id: Any) -> List[Dict[str, Any]]:
-    cid_s, lid_s = str(cid), str(loan_id)
-    token = _get_v1_token()
-    base_hdr = {"Token": token} if token else {}
-    # Round 1 showed the ONLY route that isn't 404 is GET /{id}, and it 415s with
-    # "The request contains an entity body but no Content-Type header" — a classic
-    # ASP.NET Web API quirk where the action binds a body param and rejects the
-    # missing Content-Type. So force Content-Type: application/json on the /{id}
-    # GET (Web API then binds an absent/empty body to null), trying both the loan
-    # id and the customer id, with a header only and with an empty {} body.
-    #   body={}   → _http json-encodes it and sets Content-Type: application/json
-    #   body=None → no body; the extra Content-Type header still goes out
-    attempts = [
-        ("get_loan_ct",    f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {"Content-Type": "application/json"}, None),
-        ("get_loan_body",  f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {}, {}),
-        ("get_cust_ct",    f"/V1/GetCustomerLoanACHSchedule/{cid_s}", {"Content-Type": "application/json"}, None),
-        ("get_cust_body",  f"/V1/GetCustomerLoanACHSchedule/{cid_s}", {}, {}),
-        ("get_loan_plain", f"/V1/GetCustomerLoanACHSchedule/{lid_s}", {}, None),  # control (expect 415)
-    ]
-    out: List[Dict[str, Any]] = []
-    for label, path, extra, body in attempts:
-        row: Dict[str, Any] = {"label": label, "path": path,
-                               "ct": extra.get("Content-Type", "(none)"),
-                               "body": ("{}" if body == {} else "(none)")}
-        try:
-            hdr = dict(base_hdr)
-            hdr.update(extra)
-            status, parsed, raw = _http(f"{V1_BASE}{path}", "GET", body=body, headers=hdr)
-            row["status"] = status
-            if isinstance(parsed, list):
-                row["type"] = "list"
-                row["len"] = len(parsed)
-                if parsed and isinstance(parsed[0], dict):
-                    row["keys"] = list(parsed[0].keys())[:30]
-                    row["first"] = {k: parsed[0][k] for k in list(parsed[0].keys())[:30]}
-            elif isinstance(parsed, dict):
-                row["type"] = "dict"
-                row["keys"] = list(parsed.keys())[:30]
-            else:
-                row["type"] = type(parsed).__name__
-            row["raw_head"] = (raw or "")[:400]
-        except Exception as e:  # noqa: BLE001 — diagnostic, log everything
-            row["err"] = type(e).__name__
-        out.append(row)
-    return out
+def _probe_raw_loan(cid: Any, loan_id: Any) -> Dict[str, Any]:
+    """SAFE read-only probe: re-fetch the customer's loans (the exact call the
+    portal already makes) and dump each raw record's status + field names + the
+    values of any ACH/date/hold/status/return-looking fields. No writes, no risky
+    endpoints — just surfacing whether Vergent already carries an ACH effective /
+    hold date on the loan we can use for the real clear date + return reason."""
+    def _interesting(src: Dict[str, Any], tag: str) -> Dict[str, Any]:
+        hits: Dict[str, Any] = {}
+        for k, v in (src or {}).items():
+            lk = str(k).lower()
+            if any(t in lk for t in ("ach", "hold", "eff", "deposit", "date",
+                                     "status", "return", "nsf", "reason", "pend")):
+                # skip obviously huge / nested blobs; keep scalar-ish values
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    hits[tag + ":" + k] = v
+        return hits
+
+    candidates = (
+        f"/V1/{cid}/loans/all",
+        f"/V1/{cid}/loans?includePrevious=true&numresults=200",
+        f"/V1/{cid}/loans",
+    )
+    for path in candidates:
+        status, body = _v1_get(path)
+        if status == 200 and isinstance(body, list):
+            loans = []
+            for item in body:
+                if not isinstance(item, dict):
+                    continue
+                hdr = item.get("LoanHeader") if isinstance(item.get("LoanHeader"), dict) else item
+                det = item.get("LoanDetail") if isinstance(item.get("LoanDetail"), dict) else {}
+                interesting = _interesting(hdr, "h")
+                interesting.update(_interesting(det, "d"))
+                loans.append({
+                    "statusId": hdr.get("StatusId"),
+                    "isOutstanding": hdr.get("IsStatusOutstanding"),
+                    "headerKeys": sorted(str(k) for k in hdr.keys()),
+                    "detailKeys": sorted(str(k) for k in det.keys()) if det else [],
+                    "interesting": interesting,
+                })
+            return {"path": path, "loanCount": len(loans), "loans": loans}
+    return {"error": "no-loans-fetched"}
 
 
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -2333,7 +2330,7 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
         return _json_response(200, {
             "probeCustomerId": str(cid),
             "probeLoanId": _lid,
-            "achSchedProbe": _probe_ach_schedule(cid, _lid),
+            "rawLoanProbe": _probe_raw_loan(cid, _lid),
         })
 
     shaped = _fetch_all_loans(cid)
