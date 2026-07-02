@@ -298,8 +298,13 @@
     // Flag the page so CSS can reflow the desktop dashboard grid (drop the
     // strip into its own row under the loan card) and tuck the loans-page
     // strip up under the card — instead of letting the strip auto-place into
-    // an empty grid cell at the very bottom.
-    try { document.documentElement.classList.toggle('cif-ach-pending', !!inf); } catch (e) { /* ignore */ }
+    // an empty grid cell at the very bottom. The returned state gets its own
+    // flag: the red card is content-sized, so desktop home reflows to a
+    // full-width stack to keep the strip a clean 12px under the card.
+    try {
+      document.documentElement.classList.toggle('cif-ach-pending', !!inf);
+      document.documentElement.classList.toggle('cif-ach-returned', !!(inf && inf.state === 'returned'));
+    } catch (e) { /* ignore */ }
     var slots = document.querySelectorAll('[data-ach-strip-slot]');
     for (var i = 0; i < slots.length; i++) {
       var slot = slots[i];

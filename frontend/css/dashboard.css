@@ -5078,6 +5078,22 @@ a.app-cta-primary[href*="payments.html"]:hover {
   /* 20px row gap − 8 = 12px, matching the loans-stack + payments rhythm. */
   html.cif-ach-pending .cif-ach-strip.u-desktop { grid-area: ach; margin-top: -8px; align-self: start; }
 
+  /* RETURNED bank payment: the red card is content-sized (is-pastdue drops the
+     row-fill), so with the need card beside it the strip's row started a full
+     row-height below the card — a dead gap. Reflow to a clean full-width stack
+     (card, strip 12px under, then pay + activity), matching the loans +
+     payments rhythm exactly. The "Need extra cash?" card hides in this state:
+     a customer whose payment just bounced should focus on repaying, not on a
+     new loan. */
+  html.cif-ach-returned .home-needloan { display: none; }
+  html.cif-ach-returned .home-grid {
+    grid-template-areas:
+      "loan  loan  loan  loan  loan"
+      "ach   ach   ach   ach   ach"
+      "pay   pay   act   act   act"
+      "tiles tiles tiles tiles tiles";
+  }
+
   /* Sidebar help card. */
   .app-sidebar-help {
     display: block; margin: 22px 12px 0; padding: 16px;
