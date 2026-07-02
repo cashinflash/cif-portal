@@ -3861,11 +3861,15 @@ def _search_portal_customers(q: str) -> Tuple[List[Dict[str, Any]], Optional[str
     from handlers import auth_mfa
     # Empty q → list-all mode. Used by the Customers tab to show
     # every portal-registered user when no search is in progress.
+    # Paginates the WHOLE pool (Cognito pages max out at 60 users) — the
+    # old `< 100` stop silently hid signups once the pool passed 100.
+    # The 2000 ceiling is a runaway guard only (~34 Cognito calls); log
+    # loudly if we ever hit it so the page never lies silently again.
     if not q:
         rows: List[Dict[str, Any]] = []
         token: Optional[str] = None
         try:
-            while len(rows) < 100:
+            while len(rows) < 2000:
                 kwargs: Dict[str, Any] = {
                     "UserPoolId": auth_mfa.USER_POOL_ID,
                     "Limit": 60,
@@ -3882,11 +3886,12 @@ def _search_portal_customers(q: str) -> Tuple[List[Dict[str, Any]], Optional[str
                         "Status": u.get("UserStatus"),
                         "UserCreateDate": u.get("UserCreateDate"),
                     }))
-                    if len(rows) >= 100:
-                        break
                 token = resp.get("PaginationToken")
                 if not token:
                     break
+            if token:
+                log.warning("portal customer list-all TRUNCATED at %d rows — "
+                            "raise the ceiling or add paging", len(rows))
         except Exception as exc:
             log.warning("portal customer list-all list_users failed: %s", exc)
             return rows, f"{type(exc).__name__}: {str(exc)[:200]}"
