@@ -120,8 +120,23 @@
       clearsBy: r.clearsBy || null,
       accountLast4: r.accountLast4 || null,
       accountType: r.accountType || null,
+      returnReason: r.returnReason || null,
       submittedAtMs: (r.submittedAtMs != null ? Number(r.submittedAtMs) : null)
     };
+  }
+  // Turn Vergent's ACH-return SubStatus (a NACHA code or short text) into a
+  // customer-friendly phrase. Unknown values pass through as-is.
+  function _prettyReason(r) {
+    var s = String(r || '').trim();
+    if (!s) return '';
+    var low = s.toLowerCase();
+    if (low.indexOf('nsf') !== -1 || low === 'r01' || low === 'r09' || low.indexOf('insuffic') !== -1 || low.indexOf('fund') !== -1) return 'insufficient funds';
+    if (low === 'r02' || low.indexOf('closed') !== -1) return 'the bank account was closed';
+    if (low === 'r03' || low === 'r04' || low.indexOf('no account') !== -1 || low.indexOf('locate') !== -1 || low.indexOf('invalid account') !== -1) return 'the account could not be found';
+    if (low === 'r08' || low.indexOf('stop') !== -1) return 'a stop payment';
+    if (low === 'r10' || low === 'r29' || low.indexOf('unauthor') !== -1) return 'the payment was not authorized';
+    if (low === 'r16' || low.indexOf('frozen') !== -1) return 'the account was frozen';
+    return s;  // already human-readable
   }
   // A durable record is "fresh" enough to ASSERT pending during the pre-status
   // gap (before Vergent shows the hold). Vergent flips within ~8h; give a
@@ -153,7 +168,7 @@
     var det = rec || sp || null;
     if (statusReturned(loan)) {
       try { sessionStorage.removeItem(KEY); } catch (e) { /* ignore */ }
-      return { state: 'returned', amount: det ? det.amount : null, clearsBy: null, account: acctLabel(det) };
+      return { state: 'returned', amount: det ? det.amount : null, clearsBy: null, account: acctLabel(det), reason: det ? det.returnReason : null };
     }
     if (statusHold(loan)) {
       return { state: 'pending', amount: det ? det.amount : null, clearsBy: det ? det.clearsBy : null, account: acctLabel(det) };
@@ -205,8 +220,12 @@
   function _stripHtml(inf) {
     if (inf && inf.state === 'returned') {
       var ra = (inf.amount != null) ? (' of <strong>' + money(inf.amount) + '</strong>') : '';
+      // Show Vergent's actual reason when we have it (e.g. "insufficient funds",
+      // "the bank account was closed"); otherwise the neutral fallback.
+      var pretty = inf.reason ? _prettyReason(inf.reason) : '';
+      var rr = pretty ? (' (' + pretty + ')') : ' (often for insufficient funds)';
       return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' +
-        '<span>Your recent bank payment' + ra + ' was <strong>returned</strong> (often for insufficient funds), so your balance wasn’t reduced. Please make a payment to keep your loan current.</span>';
+        '<span>Your recent bank payment' + ra + ' was <strong>returned</strong>' + rr + ', so your balance wasn’t reduced. Please make a payment to keep your loan current.</span>';
     }
     var amt = (inf && inf.amount != null) ? (' of <strong>' + money(inf.amount) + '</strong>') : '';
     var by = (inf && inf.clearsBy)

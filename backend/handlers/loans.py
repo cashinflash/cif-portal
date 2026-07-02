@@ -528,6 +528,14 @@ def _shape_v1_loan(record: Dict[str, Any]) -> Dict[str, Any]:
         # this to gate payment while an ACH is on hold, show the returned
         # state, or clear once deposited.
         "achStatusText": _ach_status_from_id(status_id),
+        # ACH clear-date + return-reason source — SAFE, already on the record we
+        # fetch (the readable Status/SubStatus + LastPmtDate live on LoanDetail,
+        # which is why the header's text came back blank). LastPmtDate is the ACH
+        # pay date → clearsBy = +5 banking days; a bounced ACH surfaces its reason
+        # in the detail SubStatus (e.g. "NSF"/"Insufficient Funds").
+        "lastPmtDate": detail.get("LastPmtDate"),
+        "achSubStatus": detail.get("SubStatus"),
+        "achDetailStatus": detail.get("Status"),
         "isOutstanding": is_outstanding,
         "principal": loan_amount,
         "balance": payoff if payoff is not None else amount_due,
@@ -2247,67 +2255,77 @@ def _recall_ach_pending(loan_id: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+# Banking-day math for the ACH clear-date fallback. Keep in sync with
+# handlers/payments.py:_US_BANK_HOLIDAYS and frontend/js/cif-ach.js:HOLIDAYS.
+_US_BANK_HOLIDAYS = {
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-05-25", "2026-06-19",
+    "2026-07-03", "2026-09-07", "2026-10-12", "2026-11-11", "2026-11-26",
+    "2026-12-25", "2027-01-01", "2027-01-18", "2027-02-15", "2027-05-31",
+    "2027-06-18", "2027-07-05", "2027-09-06", "2027-10-11", "2027-11-11",
+    "2027-11-25", "2027-12-24",
+}
+
+
+def _is_banking_day(d) -> bool:
+    return d.weekday() < 5 and d.isoformat() not in _US_BANK_HOLIDAYS
+
+
+def _add_banking_days(d, n: int):
+    cur = d
+    added = 0
+    while added < n:
+        cur = cur + timedelta(days=1)
+        if _is_banking_day(cur):
+            added += 1
+    return cur
+
+
+def _parse_loan_date(s: Any):
+    """Parse Vergent's date shapes → a date. Handles '07/01/2026',
+    '2026-07-01', and '2026-07-01T00:00:00'. Returns None on anything else."""
+    if not s:
+        return None
+    txt = str(s).strip()
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(txt[:19] if "T" in txt else txt, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _apply_ach_pending(loan: Optional[Dict[str, Any]]) -> None:
-    """Attach loan['achPending'] from the durable store so the frontend can show
-    the pending block + real clear date + bank method even when this browser
-    never submitted. Best-effort; mutates in place. The frontend still lets
-    Vergent's Deposited/Returned status override it once the ACH resolves."""
+    """Attach loan['achPending'] so the frontend can show the pending block +
+    real clear date + bank method + (on a bounce) the return reason — even when
+    this browser never submitted. Sources, in order: the durable store (portal-
+    submitted payments), then a SAFE fallback derived from the loan record we
+    already fetch (LastPmtDate + 5 banking days) for ACH holds we didn't record
+    (paid before the store shipped, or scheduled by staff in Vergent). Best-
+    effort; mutates in place. Vergent's Deposited/Returned status still overrides
+    it once the ACH resolves."""
     if not loan:
         return
     rec = _recall_ach_pending(loan.get("id"))
-    if rec:
-        loan["achPending"] = rec
-
-
-# ── TEMP diagnostic: find the working GetCustomerLoanACHSchedule shape ──────
-# Earlier calls (GET /V1/GetCustomerLoanACHSchedule and .../{id}) returned 415.
-# The working V1 GETs (GetCustomerBanks/Cards) use a ?custId= query param, so the
-# no-id form the operator flagged likely wants a query param, or the endpoint is
-# a POST. This tries every plausible shape at once and returns the status + shape
-# of each so a single CloudShell invoke tells us the winner (→ then wire the real
-# clear date + return reason from it). Gated on ?achsched=<loanId>; remove after.
-def _probe_raw_loan(cid: Any, loan_id: Any) -> Dict[str, Any]:
-    """SAFE read-only probe: re-fetch the customer's loans (the exact call the
-    portal already makes) and dump each raw record's status + field names + the
-    values of any ACH/date/hold/status/return-looking fields. No writes, no risky
-    endpoints — just surfacing whether Vergent already carries an ACH effective /
-    hold date on the loan we can use for the real clear date + return reason."""
-    def _interesting(src: Dict[str, Any], tag: str) -> Dict[str, Any]:
-        hits: Dict[str, Any] = {}
-        for k, v in (src or {}).items():
-            lk = str(k).lower()
-            if any(t in lk for t in ("ach", "hold", "eff", "deposit", "date",
-                                     "status", "return", "nsf", "reason", "pend")):
-                # skip obviously huge / nested blobs; keep scalar-ish values
-                if isinstance(v, (str, int, float, bool)) or v is None:
-                    hits[tag + ":" + k] = v
-        return hits
-
-    candidates = (
-        f"/V1/{cid}/loans/all",
-        f"/V1/{cid}/loans?includePrevious=true&numresults=200",
-        f"/V1/{cid}/loans",
-    )
-    for path in candidates:
-        status, body = _v1_get(path)
-        if status == 200 and isinstance(body, list):
-            loans = []
-            for item in body:
-                if not isinstance(item, dict):
-                    continue
-                hdr = item.get("LoanHeader") if isinstance(item.get("LoanHeader"), dict) else item
-                det = item.get("LoanDetail") if isinstance(item.get("LoanDetail"), dict) else {}
-                interesting = _interesting(hdr, "h")
-                interesting.update(_interesting(det, "d"))
-                loans.append({
-                    "statusId": hdr.get("StatusId"),
-                    "isOutstanding": hdr.get("IsStatusOutstanding"),
-                    "headerKeys": sorted(str(k) for k in hdr.keys()),
-                    "detailKeys": sorted(str(k) for k in det.keys()) if det else [],
-                    "interesting": interesting,
-                })
-            return {"path": path, "loanCount": len(loans), "loans": loans}
-    return {"error": "no-loans-fetched"}
+    merged: Dict[str, Any] = dict(rec) if rec else {}
+    ach_txt = str(loan.get("achStatusText") or "").lower()
+    in_hold = "hold" in ach_txt
+    is_returned = "return" in ach_txt or "nsf" in ach_txt
+    # Fallback clear date (no Vergent writes): on an ACH hold with no stored
+    # clearsBy, derive it from the last payment date (the ACH pay date) + 5
+    # banking days — the same rule the durable record uses.
+    if in_hold and not merged.get("clearsBy"):
+        eff = _parse_loan_date(loan.get("lastPmtDate"))
+        if eff:
+            merged.setdefault("effectiveDate", eff.isoformat())
+            merged["clearsBy"] = _add_banking_days(eff, 5).isoformat()
+    # Return reason: Vergent surfaces a bounced ACH's reason in the loan-detail
+    # SubStatus. Attach only a real one (skip the idle "None").
+    if is_returned:
+        sub = str(loan.get("achSubStatus") or "").strip()
+        if sub and sub.lower() not in ("none", "null", ""):
+            merged["returnReason"] = sub
+    if merged:
+        loan["achPending"] = merged
 
 
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -2315,23 +2333,6 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
-
-    # TEMP: ?achsched=auto (or an explicit loanId) → run the schedule-endpoint
-    # probe and return. "auto" resolves the customer's active loan id so the
-    # operator only needs the customer id.
-    _qs = event.get("queryStringParameters") or {}
-    _probe_lid = _qs.get("achsched") if isinstance(_qs, dict) else None
-    if _probe_lid:
-        _lid: Any = _probe_lid
-        if str(_probe_lid).lower() in ("1", "auto", "yes", "true"):
-            _sh = _fetch_all_loans(cid) or []
-            _out = [l for l in _sh if l.get("isOutstanding")]
-            _lid = (_out[0].get("id") if _out else (_sh[0].get("id") if _sh else None))
-        return _json_response(200, {
-            "probeCustomerId": str(cid),
-            "probeLoanId": _lid,
-            "rawLoanProbe": _probe_raw_loan(cid, _lid),
-        })
 
     shaped = _fetch_all_loans(cid)
     if not shaped:
