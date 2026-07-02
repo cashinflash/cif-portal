@@ -49,7 +49,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/css/portal.css?v=20260623t">
-  <link rel="stylesheet" href="/css/dashboard.css?v=20260702a">
+  <link rel="stylesheet" href="/css/dashboard.css?v=20260702b">
   <style>
     /* Card payment confirmation modal — centered (not a bottom-sheet) + lively. */
     .pay-cc-modal { align-items: center !important; padding: 18px; }
@@ -254,7 +254,7 @@
             <span class="loan-card-doc" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#0E8741" stroke-width="2" stroke-linejoin="round"/><path d="M14 2v6h6" stroke="#0E8741" stroke-width="2" stroke-linejoin="round"/><line x1="8" y1="13" x2="13" y2="13" stroke="#0E8741" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="16.5" x2="11" y2="16.5" stroke="#0E8741" stroke-width="2" stroke-linecap="round"/><circle cx="17.6" cy="17.6" r="5" fill="#0E8741" stroke="#fff" stroke-width="1.4"/><path d="M15.4 17.7l1.5 1.5 2.5-2.7" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             <div class="loan-card-titles">
               <span class="loan-card-eyebrow" id="paySummaryHeading">Active loan</span>
-              <span class="loan-card-id">Loan #<span data-pay-loan-id>&mdash;</span></span>
+              <span class="loan-card-id">#<span data-pay-loan-id>&mdash;</span></span>
             </div>
             <span class="loan-card-pill" data-pay-loan-status>In good standing</span>
           </div>
@@ -318,6 +318,9 @@
            <strong>5 business days</strong> to clear. Your payment is estimated to clear
            <span class="pay-ach-blocked-date" data-ach-blocked-date>in about 5 business days</span>
            and your balance will update automatically if your payment clears.</p>
+        <p>Please make sure the funds stay available in your account. If your bank
+           returns the payment, a <strong>$15 returned payment fee</strong> may be
+           added to your balance.</p>
         <div class="pay-actions pay-actions--center">
           <a href="/dashboard.html" class="btn-login">Back to dashboard</a>
         </div>
@@ -426,6 +429,13 @@
                     <div class="pay-breakdown-row">
                       <dt>Loan fee</dt>
                       <dd data-pay-fee>&mdash;</dd>
+                    </div>
+                    <!-- Shown only when a returned bank payment added Vergent's
+                         $15 returned-payment fee to the balance (renderBreakdown
+                         splits it out of the fee line so the total is clear). -->
+                    <div class="pay-breakdown-row" id="payNsfRow" hidden>
+                      <dt>Returned payment fee</dt>
+                      <dd data-pay-nsf>&mdash;</dd>
                     </div>
                     <div class="pay-breakdown-rule"></div>
                   </div>
@@ -749,9 +759,9 @@
   <script src="/js/portal-page.js"></script>
   <script src="/js/sidebar.js"></script>
   <script src="/js/cif-loancache.js?v=20260628b"></script>
-  <script src="/js/cif-ach.js?v=20260702c"></script>
+  <script src="/js/cif-ach.js?v=20260702d"></script>
   <script src="/js/cif-esign.js?v=20260628b"></script>
   <script src="/js/cif-presence.js?v=20260630a"></script>
-  <script src="/js/payments.js?v=20260702b"></script>
+  <script src="/js/payments.js?v=20260702c"></script>
 </body>
 </html>

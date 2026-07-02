@@ -289,7 +289,8 @@
       : 'This usually takes about 5 business days. ';
     return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>' +
       '<span>Bank payment' + amt + ' is processing. ' + by +
-      'Your balance updates once it clears.</span>';
+      'Your balance updates once it clears. Please keep the funds available in your account. ' +
+      'If your bank returns the payment, a <strong>$15 returned payment fee</strong> may be added to your balance.</span>';
   }
   // Fill every [data-ach-strip-slot] anchor (or hide them when not pending).
   // Preserves each slot's existing classes (u-mobile / u-desktop).

@@ -276,12 +276,17 @@
         CifAch.applyClearDateFigure(ach);
       }
     }
-    // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching Home.
+    // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching
+    // Home. ACH overrides (identical portal-wide): a PENDING bank payment keeps
+    // the card calm (green + amber Processing pill — paying must never look
+    // like it created a problem); a RETURNED one forces the deep-red card.
+    var achPend = !!(ach && ach.state === 'pending');
+    var achRet = !!(ach && ach.state === 'returned');
     var isPastDue = statusPillClass(loan) === 'dash-pill--past-due';
     var dpd = isPastDue ? daysPastDue(loan) : 0;
     var soft = isPastDue && dpd >= 1 && dpd <= 4;
-    card.classList.toggle('is-pastdue-soft', soft);
-    card.classList.toggle('is-pastdue', isPastDue && !soft);
+    card.classList.toggle('is-pastdue-soft', soft && !achPend && !achRet);
+    card.classList.toggle('is-pastdue', (isPastDue && !soft && !achPend) || achRet);
     // Awaiting e-signature → show the "Awaiting signature" pill + the Review &
     // sign prompt instead of a healthy active card (shared module, portal-wide).
     var _pendingSig = false;

@@ -854,8 +854,18 @@
           // While pending, the Due Date figure becomes "Payment Clears" + the
           // estimated clear date (reverts automatically on return/clear).
           CifAch.applyClearDateFigure(ach);
-          card.classList.remove('is-pastdue', 'is-pastdue-soft');
-          if (note) note.classList.remove('is-pastdue-note');
+          if (ach.state === 'pending') {
+            // Processing is calm: green card, amber pill (the customer just
+            // paid — never make paying look like it created a problem).
+            card.classList.remove('is-pastdue', 'is-pastdue-soft');
+            if (note) note.classList.remove('is-pastdue-note');
+          } else if (ach.state === 'returned') {
+            // Returned is trouble: deep-red card, matching the loans +
+            // payments cards so the state reads the same portal-wide.
+            card.classList.remove('is-pastdue-soft');
+            card.classList.add('is-pastdue');
+            if (note) note.classList.add('is-pastdue-note');
+          }
           // Only block a SECOND payment while one is still PENDING. If it was
           // returned, let them pay again (the CTAs work normally).
           if (ach.state === 'pending') {

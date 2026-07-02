@@ -65,9 +65,9 @@ from typing import Any, Dict, List, Optional, Tuple
 # payments.py changes — so a change to loans.py (e.g. the `hasPaymentPlan` field
 # below) reaches the payments page only if payments.py is also touched to force a
 # co-deploy. Keep that in mind when editing shared loans.py helpers.
-# Co-deploy touch 2026-07-02: loans.py _apply_ach_pending now derives the ACH
-# clear date from the loan record (LastPmtDate + 5 banking days) + attaches the
-# return reason — this line forces the payments Lambda to pick that up too.
+# Co-deploy touch 2026-07-02b: loans.py broadened the ACH return-reason
+# extraction (detail/header SubStatus + "Returned - X" suffixes) — this line
+# forces the payments Lambda to pick that up too.
 from handlers.loans import (
     APIM_BASE,
     CORS_HEADERS,

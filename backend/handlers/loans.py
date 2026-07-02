@@ -2335,14 +2335,73 @@ def _apply_ach_pending(loan: Optional[Dict[str, Any]]) -> None:
         if eff:
             merged["effectiveDate"] = eff.isoformat()
             merged["clearsBy"] = _ach_clear_date(eff).isoformat()
-    # Return reason: Vergent surfaces a bounced ACH's reason in the loan-detail
-    # SubStatus. Attach only a real one (skip the idle "None").
+    # Return reason: Vergent shows "Returned → Insufficient Funds" in admin.
+    # Look everywhere the reason text could surface on the loan record: the
+    # detail SubStatus, the header SubStatus, and any status text that carries
+    # the reason as a suffix ("Returned - Insufficient Funds" etc.). Attach
+    # only a real value (skip the idle "None"/"Returned" placeholders).
     if is_returned:
-        sub = str(loan.get("achSubStatus") or "").strip()
-        if sub and sub.lower() not in ("none", "null", ""):
-            merged["returnReason"] = sub
+        reason = ""
+        for cand in (loan.get("achSubStatus"), loan.get("subStatus")):
+            s = str(cand or "").strip()
+            if s and s.lower() not in ("none", "null") and "return" not in s.lower():
+                reason = s
+                break
+        if not reason:
+            for cand in (loan.get("achDetailStatus"), loan.get("rawStatus"), loan.get("status")):
+                s = str(cand or "").strip()
+                m = re.match(r"(?is)\s*returned?\s*(?:→|->|:|-|/)\s*(.+)", s)
+                if m and m.group(1).strip():
+                    reason = m.group(1).strip()
+                    break
+        if reason:
+            merged["returnReason"] = reason
     if merged:
         loan["achPending"] = merged
+
+
+# ── TEMP diagnostic (?achsched=auto): dump the raw loan record's status-ish
+# fields. Re-added to locate WHERE Vergent puts the ACH return reason
+# ("Insufficient Funds") on a RETURNED loan — the hold-state probe showed
+# detail.SubStatus as "None", so the returned state needs one look. Read-only
+# (the same loans fetch the portal already makes); remove after the reason
+# field is confirmed.
+def _probe_raw_loan(cid: Any) -> Dict[str, Any]:
+    def _interesting(src: Dict[str, Any], tag: str) -> Dict[str, Any]:
+        hits: Dict[str, Any] = {}
+        for k, v in (src or {}).items():
+            lk = str(k).lower()
+            if any(t in lk for t in ("ach", "hold", "eff", "deposit", "date",
+                                     "status", "return", "nsf", "reason",
+                                     "pend", "sub", "fee")):
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    hits[tag + ":" + k] = v
+        return hits
+
+    candidates = (
+        f"/V1/{cid}/loans?includePrevious=true&numresults=200",
+        f"/V1/{cid}/loans/all",
+        f"/V1/{cid}/loans",
+    )
+    for path in candidates:
+        status, body = _v1_get(path)
+        if status == 200 and isinstance(body, list):
+            loans = []
+            for item in body:
+                if not isinstance(item, dict):
+                    continue
+                hdr = item.get("LoanHeader") if isinstance(item.get("LoanHeader"), dict) else item
+                det = item.get("LoanDetail") if isinstance(item.get("LoanDetail"), dict) else {}
+                interesting = _interesting(hdr, "h")
+                interesting.update(_interesting(det, "d"))
+                loans.append({
+                    "statusId": hdr.get("StatusId"),
+                    "subStatusId": hdr.get("SubStatusId"),
+                    "isOutstanding": hdr.get("IsStatusOutstanding"),
+                    "interesting": interesting,
+                })
+            return {"path": path, "loanCount": len(loans), "loans": loans}
+    return {"error": "no-loans-fetched"}
 
 
 def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -2350,6 +2409,14 @@ def get_active_loan(event: Dict[str, Any]) -> Dict[str, Any]:
     cid = _customer_id(claims)
     if not cid:
         return _json_response(200, {"loan": None, "reason": "no-customer-id"})
+
+    # TEMP: ?achsched=auto → dump raw status fields (see _probe_raw_loan).
+    _qs = event.get("queryStringParameters") or {}
+    if isinstance(_qs, dict) and _qs.get("achsched"):
+        return _json_response(200, {
+            "probeCustomerId": str(cid),
+            "rawLoanProbe": _probe_raw_loan(cid),
+        })
 
     shaped = _fetch_all_loans(cid)
     if not shaped:

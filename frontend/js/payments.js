@@ -230,8 +230,12 @@
       }
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
       // matching Home — independent of the pill so it works even if absent.
-      card.classList.toggle('is-pastdue-soft', _soft);
-      card.classList.toggle('is-pastdue', _past && !_soft);
+      // ACH overrides (identical portal-wide): PENDING keeps the card calm,
+      // RETURNED forces the deep-red card.
+      var _achPend = !!(_ach && _ach.state === 'pending');
+      var _achRet = !!(_ach && _ach.state === 'returned');
+      card.classList.toggle('is-pastdue-soft', _soft && !_achPend && !_achRet);
+      card.classList.toggle('is-pastdue', (_past && !_soft && !_achPend) || _achRet);
       if (body) body.hidden = false;
       // Lock the amount (no partial/custom entry) + render the breakdown to
       // match. setLockedAmount() writes the hidden #payAmount; renderBreakdown()
@@ -672,11 +676,25 @@
     // remaining payoff — so hide the split and show just the balance.
     if (planG) planG.hidden = true;
     if (fullG) fullG.hidden = false;
+    // Returned bank payment: Vergent automatically adds a $15 returned-payment
+    // fee to the balance, which the fee figure silently absorbs (it derives
+    // from balance minus principal). Split it onto its own "Returned payment
+    // fee" line so the extra $15 is crystal clear to the customer.
+    var NSF_FEE = 15;
+    var achInf = window.CifAch ? CifAch.info(loan) : null;
+    var nsf = (achInf && achInf.state === 'returned'
+      && fee != null && fee - NSF_FEE > 0.005) ? NSF_FEE : 0;
+    if (nsf) fee = Math.round((fee - NSF_FEE) * 100) / 100;
+    var nsfRow = qs('#payNsfRow');
+    if (nsfRow) {
+      nsfRow.hidden = !nsf;
+      if (nsf) setText(qs('[data-pay-nsf]'), money(nsf));
+    }
     if (principal != null) setText(qs('[data-pay-principal]'), money(principal));
     if (fee != null) setText(qs('[data-pay-fee]'), money(fee));
     if (qs('[data-pay-total]') && payoff != null) qs('[data-pay-total]').textContent = money(payoff);
     var splitMatches = (principal != null && fee != null && payoff != null
-      && Math.abs((principal + fee) - payoff) < 0.02);
+      && Math.abs((principal + fee + nsf) - payoff) < 0.02);
     if (splitG) splitG.hidden = !splitMatches;
     if (title) title.textContent = 'Payment breakdown';
     if (splitMatches) {

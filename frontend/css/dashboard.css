@@ -5160,6 +5160,9 @@ a.app-cta-primary[href*="payments.html"]:hover {
 /* Payment breakdown list. */
 .pay-breakdown { margin: 0; }
 .pay-breakdown-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 9px 0; }
+/* display:flex overrides the bare [hidden] attribute (the returned-payment-fee
+   row toggles via hidden) — restore real hiding. */
+.pay-breakdown-row[hidden] { display: none !important; }
 .pay-breakdown-row dt { margin: 0; color: #475569; font-size: .95rem; }
 .pay-breakdown-row dd { margin: 0; color: #1a1a2e; font-weight: 700; font-size: .98rem; font-variant-numeric: tabular-nums; }
 .pay-breakdown-rule { height: 1px; background: #eef1f4; margin: 6px 0; }
