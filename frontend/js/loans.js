@@ -271,6 +271,9 @@
         // repayment method (precise "Checking •• 6789" when available), not the
         // debit card on file.
         CifAch.setRepayMethodBank(ach.account);
+        // While pending, the Due Date figure becomes "Payment Clears" + the
+        // estimated clear date (reverts automatically on return/clear).
+        CifAch.applyClearDateFigure(ach);
       }
     }
     // Recolor the card by past-due severity (amber 1–4 days, red 5+), matching Home.

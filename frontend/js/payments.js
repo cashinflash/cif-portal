@@ -223,6 +223,9 @@
           // 6789" when known), matching the home + loans cards — not the
           // debit card on file.
           CifAch.setRepayMethodBank(_ach.account);
+          // While pending, the Due Date figure becomes "Payment Clears" + the
+          // estimated clear date (reverts automatically on return/clear).
+          CifAch.applyClearDateFigure(_ach);
         }
       }
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
@@ -1412,9 +1415,12 @@
     if (ach) {
       if (formCard) formCard.hidden = true;
       if (blocked) {
+        // Full-month date ("July 7, 2026"), bolded — the word "by" stays
+        // regular weight (only the <strong> is bold via dashboard.css).
         var dEl = blocked.querySelector('[data-ach-blocked-date]');
-        if (dEl) dEl.textContent = ach.clearsBy
-          ? ('by ' + CifAch.fmtDate(ach.clearsBy)) : 'in about 5 business days';
+        if (dEl) dEl.innerHTML = ach.clearsBy
+          ? ('by <strong>' + CifAch.fmtDateLong(ach.clearsBy) + '</strong>')
+          : 'in about <strong>5 business days</strong>';
         blocked.hidden = false;
       }
       return true;

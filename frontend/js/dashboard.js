@@ -851,6 +851,9 @@
           // method on the card (precise "Checking •• 6789" when we have it from
           // the durable record), not whatever debit card is saved on file.
           CifAch.setRepayMethodBank(ach.account);
+          // While pending, the Due Date figure becomes "Payment Clears" + the
+          // estimated clear date (reverts automatically on return/clear).
+          CifAch.applyClearDateFigure(ach);
           card.classList.remove('is-pastdue', 'is-pastdue-soft');
           if (note) note.classList.remove('is-pastdue-note');
           // Only block a SECOND payment while one is still PENDING. If it was

@@ -79,6 +79,16 @@
     if (isNaN(d.getTime())) return '';
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
+  // Full-month variant ("July 7, 2026") — used where the date sits inside a
+  // full sentence (the payments-page processing panel).
+  function fmtDateLong(iso) {
+    if (!iso) return '';
+    var s = String(iso);
+    if (s.length === 10) s += 'T00:00:00';
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  }
 
   // Vergent is the source of truth. _shape_v1_loan forces status="Current"
   // for any outstanding loan but passes the REAL text through subStatus /
@@ -241,6 +251,28 @@
     }
   }
 
+  // While an ACH is PENDING, the loan card's "Due Date" figure becomes
+  // "Payment Clears" + the estimated clear date (the due date is moot while the
+  // payment is in flight), and the "Due in X days" countdown pill hides. When
+  // the ACH returns or clears we simply don't swap, so the due date the page
+  // just rendered stays — automatic revert, no restore logic needed. Runs AFTER
+  // each page's own render (all three call it from their ACH block, which sits
+  // after the due-date/countdown rendering in the same pass).
+  function applyClearDateFigure(inf) {
+    if (!inf || inf.state !== 'pending' || !inf.clearsBy) return;
+    var els = document.querySelectorAll('[data-loan-next-due], [data-pay-caption]');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      var fig = el.closest ? el.closest('.loan-card-fig') : null;
+      if (!fig) continue;
+      var lab = fig.querySelector('.loan-card-flabel');
+      if (lab) lab.textContent = 'Payment Clears';
+      el.textContent = fmtDate(inf.clearsBy);
+      var cd = fig.querySelector('[data-loan-countdown]');
+      if (cd) { cd.hidden = true; }
+    }
+  }
+
   function _stripHtml(inf) {
     if (inf && inf.state === 'returned') {
       var ra = (inf.amount != null) ? (' of <strong>' + money(inf.amount) + '</strong>') : '';
@@ -385,6 +417,8 @@
     addBusinessDays: addBusinessDays,
     clearDate: clearDate,
     fmtDate: fmtDate,
+    fmtDateLong: fmtDateLong,
+    applyClearDateFigure: applyClearDateFigure,
     money: money,
     applyPill: applyPill,
     renderStrip: renderStrip,

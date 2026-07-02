@@ -2868,7 +2868,10 @@ html.cif-pending-signature #paySummary:not([aria-busy="true"]) {
 .pay-ach-blocked .pay-receipt-icon { background: #fff5e6; color: #b76e00; }
 .pay-ach-blocked h2 { margin: 0 0 6px; color: var(--cif-navy); font-size: 1.05rem; font-weight: 600; }
 .pay-ach-blocked p { margin: 0 auto 6px; color: var(--cif-muted); font-size: .92rem; max-width: 440px; line-height: 1.55; }
-.pay-ach-blocked .pay-ach-blocked-date { color: var(--cif-navy); font-weight: 700; }
+/* Only the date itself is bold/navy — the word "by" stays regular weight,
+   matching the rest of the sentence (payments.js injects by <strong>date</strong>). */
+.pay-ach-blocked .pay-ach-blocked-date { color: inherit; font-weight: inherit; }
+.pay-ach-blocked .pay-ach-blocked-date strong { color: var(--cif-navy); font-weight: 700; }
 .pay-ach-blocked .pay-actions { margin-top: 18px; }
 
 /* Pending (ACH) receipt: amber icon + explanatory note */
