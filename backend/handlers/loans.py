@@ -2257,12 +2257,16 @@ def _recall_ach_pending(loan_id: Any) -> Optional[Dict[str, Any]]:
 
 # Banking-day math for the ACH clear-date fallback. Keep in sync with
 # handlers/payments.py:_US_BANK_HOLIDAYS and frontend/js/cif-ach.js:HOLIDAYS.
+# Fed rule: a holiday falling on SATURDAY is NOT observed the preceding Friday
+# (FedACH runs normally — e.g. Fri 2026-07-03 is a normal banking day since
+# Jul 4 2026 is a Saturday); one on SUNDAY is observed the following Monday
+# (e.g. 2027-07-05).
 _US_BANK_HOLIDAYS = {
     "2026-01-01", "2026-01-19", "2026-02-16", "2026-05-25", "2026-06-19",
-    "2026-07-03", "2026-09-07", "2026-10-12", "2026-11-11", "2026-11-26",
+    "2026-09-07", "2026-10-12", "2026-11-11", "2026-11-26",
     "2026-12-25", "2027-01-01", "2027-01-18", "2027-02-15", "2027-05-31",
-    "2027-06-18", "2027-07-05", "2027-09-06", "2027-10-11", "2027-11-11",
-    "2027-11-25", "2027-12-24",
+    "2027-07-05", "2027-09-06", "2027-10-11", "2027-11-11",
+    "2027-11-25",
 }
 
 
@@ -2278,6 +2282,18 @@ def _add_banking_days(d, n: int):
         if _is_banking_day(cur):
             added += 1
     return cur
+
+
+def _ach_clear_date(effective):
+    """Estimated ACH clear date: the 5th banking day, counting the SEND
+    (effective) date itself as day 1. E.g. sent Wed 2026-07-01 → day 1 Jul 1,
+    day 2 Jul 2, day 3 Fri Jul 3 (normal Fed banking day), day 4 Mon Jul 6,
+    day 5 = clears Tue Jul 7. If the send date isn't a banking day (weekend
+    submit), day 1 is the next banking day."""
+    day1 = effective
+    while not _is_banking_day(day1):
+        day1 = day1 + timedelta(days=1)
+    return _add_banking_days(day1, 4)
 
 
 def _parse_loan_date(s: Any):
@@ -2310,14 +2326,15 @@ def _apply_ach_pending(loan: Optional[Dict[str, Any]]) -> None:
     ach_txt = str(loan.get("achStatusText") or "").lower()
     in_hold = "hold" in ach_txt
     is_returned = "return" in ach_txt or "nsf" in ach_txt
-    # Fallback clear date (no Vergent writes): on an ACH hold with no stored
-    # clearsBy, derive it from the last payment date (the ACH pay date) + 5
-    # banking days — the same rule the durable record uses.
-    if in_hold and not merged.get("clearsBy"):
+    # Clear date (no Vergent writes): on an ACH hold, derive it from the last
+    # payment date (the ACH pay/send date) — 5th banking day counting that date
+    # as day 1. Vergent's own date is authoritative, so it OVERRIDES any stored
+    # value (also self-heals records persisted before this counting rule).
+    if in_hold:
         eff = _parse_loan_date(loan.get("lastPmtDate"))
         if eff:
-            merged.setdefault("effectiveDate", eff.isoformat())
-            merged["clearsBy"] = _add_banking_days(eff, 5).isoformat()
+            merged["effectiveDate"] = eff.isoformat()
+            merged["clearsBy"] = _ach_clear_date(eff).isoformat()
     # Return reason: Vergent surfaces a bounced ACH's reason in the loan-detail
     # SubStatus. Attach only a real one (skip the idle "None").
     if is_returned:

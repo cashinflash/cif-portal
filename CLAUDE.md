@@ -215,14 +215,26 @@ so the treatment is identical portal-wide.
   `setRepayMethodBank(label)` swaps the loan-card method to the bank account.
 - **Real clear date + return reason (SAFE, from the loan record).** No risky
   endpoint needed — the loan-DETAIL already carries `LastPmtDate` (the ACH pay
-  date → clearsBy = +5 banking days), `Status` ("ACH Deposit Hold"), and
-  `SubStatus` (the bounce reason). `_shape_v1_loan` exposes `lastPmtDate` /
-  `achSubStatus` / `achDetailStatus`; `_apply_ach_pending` derives clearsBy for
-  ANY ACH hold with no durable record (paid pre-store, or staff-scheduled in
-  Vergent) and attaches `returnReason` on a bounce. cif-ach.js `_prettyReason`
-  renders it. Only unconfirmed bit: that Vergent fills `SubStatus` with the
-  reason on a real return (it was "None" on the live hold) — safe fallback to
-  the generic text if not.
+  date), `Status` ("ACH Deposit Hold"), and `SubStatus` (the bounce reason).
+  `_shape_v1_loan` exposes `lastPmtDate` / `achSubStatus` / `achDetailStatus`;
+  `_apply_ach_pending` derives clearsBy for ANY ACH hold (overriding stored
+  values — Vergent's date is authoritative + self-heals old-rule records) and
+  attaches `returnReason` on a bounce. cif-ach.js `_prettyReason` renders it.
+  Only unconfirmed bit: that Vergent fills `SubStatus` with the reason on a
+  real return (it was "None" on the live hold) — safe fallback to the generic
+  text if not.
+- **Clear-date rule (user-specified):** the 5th BANKING day counting the SEND
+  date itself as day 1 (sent Wed Jul 1 2026 → clears Tue Jul 7). Implemented as
+  `_ach_clear_date` (loans.py), the charge response (payments.py), and
+  `CifAch.clearDate()` — all three must stay in sync. Fed holiday rule: a
+  holiday on SATURDAY is NOT observed the preceding Friday (Fri 2026-07-03 IS a
+  banking day); SUNDAY holidays observe Monday (2027-07-05). The holiday lists
+  live in loans.py + payments.py + cif-ach.js (keep in sync). Copy convention:
+  NO dashes in the customer-facing processing messages (periods instead).
+  `setRepayMethodBank` targets BOTH `[data-loan-repay-method]` (home/loans) and
+  `[data-pay-repay-method]` (payments summary card); payments.js
+  `updateRepayLabel` + dashboard.js `loadCards` + loans.js `loadRepaymentMethod`
+  all skip when `window.__cifAchMethodActive` is set.
   ⚠️ **`GetCustomerLoanACHSchedule` is a WRITE** — signature
   `GetCustomerLoanACHSchedule(Int32 id, LoanAch value)` (binds a LoanAch body,
   204 on empty, 500 NullRef on no body). Do NOT call it from the portal; it can

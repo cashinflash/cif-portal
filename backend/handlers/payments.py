@@ -827,14 +827,17 @@ def _charge_card_auto_v1(*, loan_id: int, card_id: int, amount: float,
 
 # US Federal Reserve / bank holidays (ACH doesn't settle on these or on
 # weekends). Extend this list each year. Used for the ACH effective date and
-# the customer-facing "clears in 5 business days" estimate.
+# the customer-facing "clears in 5 business days" estimate. Keep in sync with
+# handlers/loans.py + frontend/js/cif-ach.js. Fed rule: a holiday falling on
+# SATURDAY is NOT observed the preceding Friday (FedACH runs normally — e.g.
+# Fri 2026-07-03 is a normal banking day since Jul 4 2026 is a Saturday); one
+# on SUNDAY is observed the following Monday (e.g. 2027-07-05).
 _US_BANK_HOLIDAYS = {
     "2026-01-01", "2026-01-19", "2026-02-16", "2026-05-25", "2026-06-19",
-    "2026-07-03", "2026-09-07", "2026-10-12", "2026-11-11", "2026-11-26",
+    "2026-09-07", "2026-10-12", "2026-11-11", "2026-11-26",
     "2026-12-25",
-    "2027-01-01", "2027-01-18", "2027-02-15", "2027-05-31", "2027-06-18",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-05-31",
     "2027-07-05", "2027-09-06", "2027-10-11", "2027-11-11", "2027-11-25",
-    "2027-12-24",
 }
 
 
@@ -2495,12 +2498,15 @@ def post_charge(event: Dict[str, Any]) -> Dict[str, Any]:
             error_detail=None if ok else detail,
         )
         if ok:
-            # ACH settles over ~5 banking days (weekends + Fed holidays excluded),
-            # counting the effective date as day 1. `today + 5 banking days`
-            # equals `next-banking-day (the effective date) + 4` — the same 5th
-            # business day. Authoritative date for the pending UI.
-            eff_date = _next_banking_day(_pacific_today()).isoformat()
-            clears_by = _add_banking_days(_pacific_today(), 5).isoformat()
+            # Estimated clear = the 5th banking day counting the SEND date
+            # (today — Vergent stamps LastPmtDate with the submit day) as
+            # day 1. Weekend/holiday submits roll day 1 to the next banking
+            # day. Matches loans.py:_ach_clear_date so every surface agrees.
+            _day1 = _pacific_today()
+            if not _is_banking_day(_day1):
+                _day1 = _next_banking_day(_day1)
+            eff_date = _day1.isoformat()
+            clears_by = _add_banking_days(_day1, 4).isoformat()
             # Persist so the pending block + real clear date + "Bank account"
             # method survive cross-device / operator views during the gap before
             # Vergent shows the hold. Strictly best-effort — never affects the

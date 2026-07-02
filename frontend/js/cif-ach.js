@@ -18,13 +18,16 @@
   var KEY = 'cif_ach_pending';
 
   // US Federal Reserve / bank holidays — ACH doesn't settle on these or
-  // weekends. Keep in sync with _US_BANK_HOLIDAYS in handlers/payments.py.
+  // weekends. Keep in sync with _US_BANK_HOLIDAYS in handlers/payments.py +
+  // handlers/loans.py. Fed rule: a holiday falling on SATURDAY is NOT observed
+  // the preceding Friday (FedACH runs normally — e.g. Fri 2026-07-03); one on
+  // SUNDAY is observed the following Monday (e.g. 2027-07-05).
   var HOLIDAYS = [
     '2026-01-01', '2026-01-19', '2026-02-16', '2026-05-25', '2026-06-19',
-    '2026-07-03', '2026-09-07', '2026-10-12', '2026-11-11', '2026-11-26',
+    '2026-09-07', '2026-10-12', '2026-11-11', '2026-11-26',
     '2026-12-25', '2027-01-01', '2027-01-18', '2027-02-15', '2027-05-31',
-    '2027-06-18', '2027-07-05', '2027-09-06', '2027-10-11', '2027-11-11',
-    '2027-11-25', '2027-12-24'
+    '2027-07-05', '2027-09-06', '2027-10-11', '2027-11-11',
+    '2027-11-25'
   ];
   function pad(n) { return String(n).padStart(2, '0'); }
   function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -38,6 +41,25 @@
       if (dow === 0 || dow === 6) continue;
       if (HOLIDAYS.indexOf(ymd(d)) !== -1) continue;
       a++;
+    }
+    return ymd(d);
+  }
+  function _isBankingDay(d) {
+    var dow = d.getDay();
+    return dow !== 0 && dow !== 6 && HOLIDAYS.indexOf(ymd(d)) === -1;
+  }
+  // Estimated ACH clear date: the 5th business day, counting the SEND
+  // (effective) date itself as day 1. E.g. sent Wed Jul 1 2026 → day 1 Jul 1,
+  // day 2 Jul 2, day 3 Fri Jul 3 (a normal Fed banking day — Jul 4 falls on
+  // Saturday), day 4 Mon Jul 6, day 5 = clears Tue Jul 7. Matches the backend
+  // (_apply_ach_pending in loans.py / the ACH charge response in payments.py).
+  function clearDate(fromIso) {
+    var d = fromIso ? new Date(fromIso + 'T00:00:00') : new Date();
+    while (!_isBankingDay(d)) d.setDate(d.getDate() + 1);  // day 1
+    var a = 0;
+    while (a < 4) {                                        // + 4 more = day 5
+      d.setDate(d.getDate() + 1);
+      if (_isBankingDay(d)) a++;
     }
     return ymd(d);
   }
@@ -208,7 +230,9 @@
   var _BANK_ICO = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="8" y1="14" x2="8" y2="17"/><line x1="12" y1="14" x2="12" y2="17"/><line x1="16" y1="14" x2="16" y2="17"/></svg>';
   function setRepayMethodBank(label) {
     window.__cifAchMethodActive = true;
-    var els = document.querySelectorAll('[data-loan-repay-method]');
+    // data-loan-repay-method: home + loans cards; data-pay-repay-method: the
+    // payments-page summary card (same figure, different attribute).
+    var els = document.querySelectorAll('[data-loan-repay-method], [data-pay-repay-method]');
     for (var i = 0; i < els.length; i++) {
       els[i].textContent = label || 'Bank account';
       var p = els[i].parentNode;
@@ -229,11 +253,11 @@
     }
     var amt = (inf && inf.amount != null) ? (' of <strong>' + money(inf.amount) + '</strong>') : '';
     var by = (inf && inf.clearsBy)
-      ? (' — estimated to clear by <strong>' + fmtDate(inf.clearsBy) + '</strong>')
-      : ' (usually about 5 business days)';
+      ? ('Estimated to clear by <strong>' + fmtDate(inf.clearsBy) + '</strong>. ')
+      : 'This usually takes about 5 business days. ';
     return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 7 12 12 15 14"/></svg>' +
-      '<span>Bank payment' + amt + ' is processing' + by +
-      '. Your balance updates once it clears.</span>';
+      '<span>Bank payment' + amt + ' is processing. ' + by +
+      'Your balance updates once it clears.</span>';
   }
   // Fill every [data-ach-strip-slot] anchor (or hide them when not pending).
   // Preserves each slot's existing classes (u-mobile / u-desktop).
@@ -359,6 +383,7 @@
     info: info,
     setPending: setPending,
     addBusinessDays: addBusinessDays,
+    clearDate: clearDate,
     fmtDate: fmtDate,
     money: money,
     applyPill: applyPill,

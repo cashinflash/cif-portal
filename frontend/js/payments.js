@@ -216,7 +216,14 @@
       if (window.CifAch) {
         var _ach = CifAch.info(loan);
         CifAch.renderStrip(_ach);
-        if (_ach) CifAch.applyPill(qs('[data-pay-loan-status]', card), _ach);
+        if (_ach) {
+          CifAch.applyPill(qs('[data-pay-loan-status]', card), _ach);
+          // Repayment for this loan went out via ACH → the summary card's
+          // "Repayment Method" shows the bank account (precise "Checking ••
+          // 6789" when known), matching the home + loans cards — not the
+          // debit card on file.
+          CifAch.setRepayMethodBank(_ach.account);
+        }
       }
       // Recolor the summary card by past-due severity (amber 1–4 days, red 5+),
       // matching Home — independent of the pill so it works even if absent.
@@ -292,6 +299,10 @@
   // selected card (fallback: first method), formatted like the Home page.
   // Leaves the "Card on file" fallback when there are no saved methods.
   function updateRepayLabel() {
+    // An ACH payment is in flight — CifAch.setRepayMethodBank already stamped
+    // the bank account on the summary card; don't overwrite it with the
+    // selected/saved card.
+    if (window.__cifAchMethodActive) return;
     var els = document.querySelectorAll('[data-pay-repay-method]');
     if (!els.length) return;
     // Bank (ACH) selected — show the bank account on the summary.
@@ -1000,7 +1011,8 @@
   var _pendingAchForm = null;
   function openAchConfirm(form) {
     _pendingAchForm = form;
-    var clears = addBusinessDays(5);
+    // 5th business day counting today (the send date) as day 1.
+    var clears = (window.CifAch && CifAch.clearDate) ? CifAch.clearDate() : addBusinessDays(4);
     setText(qs('#payAchAmount'), money(form.amount));
     var bankLabel = (form.accountType || 'bank account')
       + (form.last4 ? ' •• ' + form.last4 : '');
@@ -1109,7 +1121,8 @@
             transactionId: res.transactionId || res.ledgerId || '',
             when:          Date.now(),
             pending:       isBank,
-            clearsBy:      isBank ? (res.estimatedClearDate || addBusinessDays(5)) : null,
+            clearsBy:      isBank ? (res.estimatedClearDate
+                             || ((window.CifAch && CifAch.clearDate) ? CifAch.clearDate() : addBusinessDays(4))) : null,
           };
           if (isBank) {
             // ACH is pending (~5 business days) — do NOT write the instant
