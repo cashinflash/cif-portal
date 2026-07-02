@@ -213,10 +213,20 @@ so the treatment is identical portal-wide.
   page), a **centered** "payment in progress" modal matching the pay-page
   confirm modal (`showBlockedModal` + `.cif-ach-modal*` in dashboard.css), and
   `setRepayMethodBank(label)` swaps the loan-card method to the bank account.
-- **OPEN (task #100):** the returned strip says a generic "often for insufficient
-  funds". The SPECIFIC reason needs Vergent's ACH-return data —
-  `GetCustomerLoanACHSchedule` returned 415 (try POST + `{LoanId/HeaderId}` body
-  or GET w/ forced Content-Type), and needs a real returned loan to test against.
+- **Real clear date + return reason (SAFE, from the loan record).** No risky
+  endpoint needed — the loan-DETAIL already carries `LastPmtDate` (the ACH pay
+  date → clearsBy = +5 banking days), `Status` ("ACH Deposit Hold"), and
+  `SubStatus` (the bounce reason). `_shape_v1_loan` exposes `lastPmtDate` /
+  `achSubStatus` / `achDetailStatus`; `_apply_ach_pending` derives clearsBy for
+  ANY ACH hold with no durable record (paid pre-store, or staff-scheduled in
+  Vergent) and attaches `returnReason` on a bounce. cif-ach.js `_prettyReason`
+  renders it. Only unconfirmed bit: that Vergent fills `SubStatus` with the
+  reason on a real return (it was "None" on the live hold) — safe fallback to
+  the generic text if not.
+  ⚠️ **`GetCustomerLoanACHSchedule` is a WRITE** — signature
+  `GetCustomerLoanACHSchedule(Int32 id, LoanAch value)` (binds a LoanAch body,
+  204 on empty, 500 NullRef on no body). Do NOT call it from the portal; it can
+  create/modify a real ACH. Use the loan-record reads above instead.
 
 ### Dashboard auto-poll for a freshly-created loan (Req 2)
 After online signing, Vergent takes ~1 min to create the loan + e-sign doc +
